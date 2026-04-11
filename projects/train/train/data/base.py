@@ -125,6 +125,9 @@ class BaseAframeDataset(pl.LightningDataModule):
         snr_sampler:
             A callable that samples SNRs for the injected signals.
             If `None`, SNRs will be left unchanged.
+        val_batch_size:
+            Batch size for validation.
+            If `None`, will use the same batch size as training.
         valid_stride:
             Stride in seconds for the validation timeslides.
             If `None`, will use `kernel_length + fduration`.
@@ -177,6 +180,7 @@ class BaseAframeDataset(pl.LightningDataModule):
             Union[TransformedDist, Callable[[int], Tensor]]
         ] = None,
         # validation args
+        val_batch_size: Optional[int] = None,
         valid_stride: Optional[float] = None,
         num_valid_views: int = 4,
         min_valid_duration: float = 15000,
@@ -369,14 +373,17 @@ class BaseAframeDataset(pl.LightningDataModule):
     @property
     def val_batch_size(self):
         """Use larger batch sizes when we don't need gradients."""
-        return int(1 * self.hparams.batch_size)
+        val_bs = getattr(self.hparams, "val_batch_size", None)
+        return int(val_bs or self.hparams.batch_size)
 
     @property
     def num_workers(self):
         local_world_size = len(self.trainer.device_ids)
-        return min(
+        num_workers = min(
             self.max_num_workers, int(os.cpu_count() / local_world_size)
         )
+        self._logger.info(f"Using {num_workers} workers for data loading")
+        return num_workers
 
     # ================================================== #
     # Utilities for initial data loading and preparation #

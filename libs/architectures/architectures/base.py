@@ -17,3 +17,27 @@ class Architecture(torch.nn.Module):
 
     # def __init__(self, num_ifos: int) -> None:
     #     pass
+
+
+try:
+    import jax  # noqa: F401
+    import equinox as eqx
+
+    class JaxArchitecture(eqx.Module):
+        """
+        Base class for all Jax-based architectures.
+        """
+
+except ImportError:
+
+    class JaxArchitecture:
+        """
+        Stub raised when JAX/equinox are not installed.
+        Install the optional dependency with: uv sync --extra jax
+        """
+
+        def __init__(self, *args, **kwargs):
+            raise ImportError(
+                "JAX and equinox are required to use JaxArchitecture. "
+                "Install them with: uv sync --extra jax"
+            )

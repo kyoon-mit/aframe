@@ -1,6 +1,6 @@
 from typing import Literal, Optional
 
-from architectures import Architecture
+from architectures import Architecture, JaxArchitecture
 from architectures.networks import S4Model, WaveNet, Xylophone
 from jaxtyping import Float
 from ml4gw.nn.resnet.resnet_1d import NormLayer, ResNet1D
@@ -280,3 +280,61 @@ class SupervisedTimeSpectrogramResNet(SupervisedArchitecture):
         time_domain_output = self.time_domain_resnet(X)
         spec_domain_output = self.spectrogram_resnet(X_spec)
         return time_domain_output, spec_domain_output
+
+
+class SupervisedTimeDomainLinOSS(JaxArchitecture):
+    from architectures.networks.linoss import LinOSS
+
+    linoss: LinOSS
+
+    def __init__(
+        self,
+        num_ifos: int,
+        sample_rate: float,
+        kernel_length: float,
+        time_in_features: int,
+        time_hidden_dim: int,
+        time_num_blocks: int,
+        time_dropout_rate: float,
+        time_state_dim: int,
+        time_r_min: float,
+        time_theta_max: float,
+        time_num_res_blocks: int,
+        time_conv_kernel_size: int,
+        resnet_layers: tuple[int, ...],
+        resnet_latent_dim: int,
+        resnet_kernel_size: int,
+        resnet_norm_groups: int,
+        mlp_width: int,
+        mlp_depth: int,
+        *,
+        seed: int = 0,
+    ) -> None:
+
+        import jax.random as jr
+        from architectures.networks.linoss import LinOSS
+
+        self.linoss = LinOSS(
+            time_in_features=time_in_features,
+            time_hidden_dim=time_hidden_dim,
+            time_num_blocks=time_num_blocks,
+            time_dropout_rate=time_dropout_rate,
+            time_state_dim=time_state_dim,
+            time_r_min=time_r_min,
+            time_theta_max=time_theta_max,
+            time_num_res_blocks=time_num_res_blocks,
+            time_conv_kernel_size=time_conv_kernel_size,
+            resnet_layers=resnet_layers,
+            resnet_latent_dim=resnet_latent_dim,
+            resnet_kernel_size=resnet_kernel_size,
+            resnet_norm_groups=resnet_norm_groups,
+            mlp_width=mlp_width,
+            mlp_depth=mlp_depth,
+            key=jr.PRNGKey(seed),
+        )
+
+    def __call__(self, X, state, key=None):
+        return self.linoss(X, state, key=key)
+
+    def forward(self, X, state, key=None):
+        return self.linoss(X, state, key=key)

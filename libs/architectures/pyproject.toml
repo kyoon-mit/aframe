@@ -12,6 +12,12 @@ dependencies = [
     "numpy~=1.26",
 ]
 
+[project.optional-dependencies]
+jax = [
+    "equinox>=0.13.0",
+    "jax[cuda12]>=0.6.2",
+]
+
 [dependency-groups]
 dev = ["pytest>=8.2.1,<9"]
 

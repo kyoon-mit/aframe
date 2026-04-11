@@ -1,4 +1,4 @@
-from .base import Architecture
+from .base import Architecture, JaxArchitecture
 from .supervised import (
     SupervisedArchitecture,
     SupervisedFrequencyDomainResNet,
@@ -6,4 +6,5 @@ from .supervised import (
     SupervisedSpectrogramDomainResNet,
     SupervisedTimeDomainResNet,
     SupervisedTimeSpectrogramResNet,
+    SupervisedTimeDomainLinOSS,
 )

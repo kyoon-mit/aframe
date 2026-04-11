@@ -13,8 +13,8 @@ license = "MIT"
 dependencies = [
     "torchmetrics>=0.11,<0.12",
     "torch==2.5.0",
-    "lightning==2.2.1",
-    "jsonargparse[signatures]~=4.29",
+    "lightning~=2.6.1",
+    "jsonargparse[signatures]~=4.48",
     "wandb>=0.15",
     "bokeh~=3.0",
     "ray[default, tune]>=2.8.0,<3",
@@ -35,6 +35,13 @@ dependencies = [
 
 [project.scripts]
 train = "train.cli:main"
+
+[project.optional-dependencies]
+jax = [
+    "equinox>=0.13.0",
+    "jax[cuda12]>=0.5.3",
+    "optax>=0.2.8",
+]
 
 [dependency-groups]
 dev = [
