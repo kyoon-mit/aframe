@@ -266,12 +266,12 @@ def get_logdNs(
 
 
 def main(
-    mass_combos: List[float],
+    mass_combos: List[Tuple[float, float]],
     injection_file: Path,
     detection_criterion: str,
     detection_thresholds: List[float],
     output_dir: Path,
-    pipelines: List[str] = None,
+    pipelines: List[str] | None = None,
     sig_lognorm: float = 0.1,
     smax_ns: float = 0.4,
     smax_bh: float = 0.998,
