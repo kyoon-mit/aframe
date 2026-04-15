@@ -2561,7 +2561,7 @@ wheels = [
 
 [[package]]
 name = "ml4gw"
-version = "0.7.11"
+version = "0.7.13"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "jaxtyping" },
@@ -2570,9 +2570,9 @@ dependencies = [
     { name = "torch" },
     { name = "torchaudio" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/6f/0a/722f553635ffc91b32623e69a4c93591c11ce2c24a10e4bda35ab0d8e6ae/ml4gw-0.7.11.tar.gz", hash = "sha256:8df9ebecd97ed6a6e8ba07fab40882f5966e646897f5187a9ccf7913faf6464e", size = 119593, upload-time = "2026-01-29T20:34:30.794Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/ba/af/bab88ca4f54386735a64502a990f1bc4edb6a0353aa2b910efd9aa244919/ml4gw-0.7.13.tar.gz", hash = "sha256:4e6264fcdb9cbf5ed6a83910a231a946770687bbc6c576f8e6dc811af7102f24", size = 121893, upload-time = "2026-04-07T00:22:25.566Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/89/7d/f8c3e695d52cd9e70fd3f7bb51efd29848a3eb481dc1b94228f481dd05f8/ml4gw-0.7.11-py3-none-any.whl", hash = "sha256:0a6645f27444d266fb94afe988450bc2d00e24bd70328b0a5903194e1900acdb", size = 129588, upload-time = "2026-01-29T20:34:29.357Z" },
+    { url = "https://files.pythonhosted.org/packages/a8/7e/1499d3835e9fb9adeeb8b5b5107dcdee79c37d6a61cd9db912fe59100efa/ml4gw-0.7.13-py3-none-any.whl", hash = "sha256:53132028674bb079759f97b664ba8d1ab1e53ecb21a50660b9015ae7c518bde0", size = 132944, upload-time = "2026-04-07T00:22:24.325Z" },
 ]
 
 [[package]]
@@ -4673,8 +4673,8 @@ requires-dist = [
     { name = "ledger", editable = "../../libs/ledger" },
     { name = "lightning", specifier = "~=2.6.1" },
     { name = "lightray", specifier = ">=0.2.3" },
-    { name = "ml4gw", specifier = ">=0.7.7" },
     { name = "optax", marker = "extra == 'jax'", specifier = ">=0.2.8" },
+    { name = "ml4gw", specifier = ">=0.7.13" },
     { name = "priors", editable = "../../libs/priors" },
     { name = "ray", extras = ["default", "tune"], specifier = ">=2.8.0,<3" },
     { name = "s3fs", specifier = ">=2024,<2025" },
