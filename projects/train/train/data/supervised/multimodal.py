@@ -4,8 +4,10 @@ from train.data.supervised.supervised import SupervisedAframeDataset
 
 
 class MultiModalSupervisedAframeDataset(SupervisedAframeDataset):
-    def build_val_batches(self, background, signals):
-        X_bg, X_inj, psds = super().build_val_batches(background, signals)
+    def build_val_batches(self, background, signals, params=None):
+        X_bg, X_inj, psds, params = super().build_val_batches(
+            background, signals, params
+        )
         X_bg = self.whitener(X_bg, psds)
         X_bg_fft = self.compute_frequency_domain_data(X_bg, psds)
         # whiten each view of injections
@@ -23,7 +25,7 @@ class MultiModalSupervisedAframeDataset(SupervisedAframeDataset):
         asds *= 1e23
         asds = asds.float()
 
-        return (X_bg, X_bg_fft), (X_fg, X_fg_fft)
+        return (X_bg, X_bg_fft), (X_fg, X_fg_fft), params
 
     def compute_frequency_domain_data(self, X, psds):
         asds = psds**0.5

@@ -4,17 +4,22 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 import jax.random as jr
+import numpy as np
 import optax
 import torch
-import numpy as np
 
+from train.metric import LightningStepOutput
 from train.metrics import TimeSlideAUROC
 from train.model.base import AframeBase
 from architectures.base import Architecture, JaxArchitecture
 
 from train.utils.jax.param_count import print_param_tree
 from train.utils.jax.load_model import load_model
-from train.utils.jax.training import jax_apply_training_step, jax_inference
+from train.utils.jax.training import (
+    jax_apply_training_step,
+    jax_apply_snr_weighted_training_step,
+    jax_inference,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -155,7 +160,7 @@ class JaxSupervisedAframe(AframeBase):
         return torch.from_numpy(np.array(logits, copy=True))
 
     def validation_step(self, batch, _):
-        shift, X_bg, X_inj = batch
+        shift, X_bg, X_inj, params_tensor = batch
 
         y_bg = self.forward(X_bg)
 
@@ -173,3 +178,111 @@ class JaxSupervisedAframe(AframeBase):
             on_epoch=True,
             sync_dist=True,
         )
+
+        y_bg_np = np.array(y_bg.cpu()).flatten()
+        y_fg_np = np.array(y_fg.cpu()).flatten()
+
+        # Convert stacked params tensor back to a named dict
+        param_names = self.trainer.datamodule.val_param_names
+        params_dict = {
+            name: params_tensor[:, i].cpu().numpy()
+            for i, name in enumerate(param_names)
+        }
+
+        return LightningStepOutput(
+            targets=np.concatenate(
+                [np.zeros(len(y_bg_np)), np.ones(len(y_fg_np))]
+            ),
+            outputs=np.concatenate([y_bg_np, y_fg_np]),
+            bg_outputs=y_bg_np,
+            params=params_dict,
+        )
+
+
+class JaxSNRWeightedSupervisedAframe(JaxSupervisedAframe):
+    """Jax supervised model with SNR-weighted training loss.
+
+    The per-sample training loss is weighted as follows:
+
+    - **Signal** (y == 1): ``weight = snr ^ snr_weight_power``
+    - **Background** (y == 0): ``weight = fp_weight``
+
+    Weights are normalised by their batch mean so the loss magnitude
+    stays comparable to unweighted BCE regardless of hyperparameter
+    choices.
+
+    Setting ``fp_weight > 1`` makes the model penalise false positives
+    more heavily relative to the average-SNR signal.  Setting
+    ``snr_weight_power > 0`` additionally up-weights high-SNR signals so
+    the model is encouraged to detect events that clearly exceed the noise
+    floor.
+
+    Requires ``SNRWeightedTimeDomainDataset`` (or any dataset whose
+    training batches are 3-tuples ``(X, y, snr_weights)``).
+    """
+
+    def __init__(
+        self,
+        fp_weight: float = 5.0,
+        snr_weight_power: float = 0.5,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        self.fp_weight = fp_weight
+        self.snr_weight_power = snr_weight_power
+
+    def training_step(self, batch):
+        X_time, y, snr_weights = batch
+        X_time = jnp.asarray(X_time.cpu().numpy())
+        y = jnp.asarray(y.cpu().numpy())
+        snr_weights = jnp.asarray(snr_weights.cpu().numpy())
+
+        self.rng_key, k = jr.split(self.rng_key)
+        batch_size = X_time.shape[0]
+        keys = jr.split(k, batch_size)
+
+        (
+            self.jax_model,
+            self.jax_model_state,
+            self.opt_state,
+            metrics,
+        ) = jax_apply_snr_weighted_training_step(
+            self.jax_model,
+            self.jax_model_filter_spec,
+            self.jax_model_state,
+            X_time,
+            y,
+            snr_weights,
+            self.fp_weight,
+            self.snr_weight_power,
+            self.opt_state,
+            self.optimizer.update,
+            keys,
+        )
+
+        loss = metrics["loss"].item()
+        self.log(
+            "train/loss",
+            loss,
+            on_step=True,
+            on_epoch=True,
+            prog_bar=True,
+            sync_dist=True,
+        )
+        self.log(
+            "train/lr",
+            float(self.opt_state[1].hyperparams["learning_rate"]),
+            on_step=True,
+            on_epoch=True,
+            prog_bar=True,
+            sync_dist=True,
+        )
+
+        optimizers = self.optimizers()
+        if isinstance(optimizers, (list, tuple)):
+            for opt in optimizers:
+                opt.step()
+        else:
+            optimizers.step()
+
+        return torch.tensor(0.0)

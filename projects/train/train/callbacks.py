@@ -169,11 +169,11 @@ class ModelCheckpoint(PLModelCheckpoint):
             [X], waveforms = next(iter(trainer.train_dataloader))
             X = X.to(device)
             waveforms = waveforms.to(device)
-            X, y = trainer.datamodule.inject(X, waveforms)
+            X, y, *_ = trainer.datamodule.inject(X, waveforms)
         else:
             [X] = next(iter(trainer.train_dataloader))
             X = X.to(device)
-            X, y = trainer.datamodule.inject(X)
+            X, y, *_ = trainer.datamodule.inject(X)
         if isinstance(X, tuple):
             X = tuple(i.cpu() for i in X)
         else:
@@ -231,23 +231,23 @@ class SaveAugmentedBatch(Callback):
                 [X], waveforms = next(iter(trainer.train_dataloader))
                 X = X.to(device)
                 waveforms = waveforms.to(device)
-                X, y = trainer.datamodule.inject(X, waveforms)
+                X, y, *_ = trainer.datamodule.inject(X, waveforms)
             else:
                 [X] = next(iter(trainer.train_dataloader))
                 X = X.to(device)
-                X, y = trainer.datamodule.inject(X)
+                X, y, *_ = trainer.datamodule.inject(X)
             # If X is not a tuple, make it one for consistency
             # of format for saving to file below
             if not isinstance(X, tuple):
                 X = (X,)
 
             # build val batch by hand
-            [background, _, _], [signals] = next(
+            [background, _, _], [signals, _params] = next(
                 iter(trainer.datamodule.val_dataloader())
             )
             background = background.to(device)
             signals = signals.to(device)
-            X_bg, X_inj = trainer.datamodule.build_val_batches(
+            X_bg, X_inj, _params = trainer.datamodule.build_val_batches(
                 background, signals
             )
             # Make background and injected validation data into

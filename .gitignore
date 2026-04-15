@@ -6,3 +6,6 @@
 **/id_rsa
 **/*.hdf5
 **/*.ipynb
+
+CLAUDE.md
+aframe_results
