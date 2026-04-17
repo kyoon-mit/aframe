@@ -281,9 +281,7 @@ class SupervisedTimeSpectrogramResNet(SupervisedArchitecture):
 
 
 class SupervisedTimeDomainLinOSS(JaxArchitecture):
-    from architectures.networks.linoss import LinOSS
-
-    linoss: LinOSS
+    linoss: "LinOSS"
 
     def __init__(
         self,
