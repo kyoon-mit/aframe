@@ -1,14 +1,18 @@
 """Regression data module using aframe's on-the-fly injection pipeline.
 
 Architecture:
-    Training:   background HDF5 → PSD estimation → waveform projection/injection
-                → whitening → (X_whitened, params, empty_z)
+    Training (disk):      background HDF5 + waveform HDF5 → PSD estimation
+                          → waveform projection/injection → whitening
+                          → (X_whitened, params, empty_z)
+    Training (generator): background HDF5 → PSD estimation → prior sample
+                          → waveform generation → projection/injection
+                          → whitening → (X_whitened, params, empty_z)
     Validation: same pipeline over held-out background + validation waveforms,
-                paired with their chirp_mass / mass_ratio labels.
+                paired with their chirp_mass labels.
 
 Batch format throughout: (X, y_params, z_empty)
     X          : (B, n_ifos, L) whitened strain, channels-first
-    y_params   : (B, n_target_params) e.g. chirp_mass, mass_ratio
+    y_params   : (B, n_target_params) e.g. chirp_mass
     z_empty    : (B, 0)  placeholder (no observed variables used)
 """
 
@@ -24,7 +28,6 @@ import torch
 from ml4gw.utils.slicing import sample_kernels
 
 from train.data.base import BaseAframeDataset, ZippedDataset
-from train.data.waveforms import WaveformLoader
 
 
 def _compute_target_params(
@@ -32,13 +35,6 @@ def _compute_target_params(
     m2: np.ndarray,
     target_parameters: tuple[str, ...],
 ) -> np.ndarray:
-    """Compute requested parameters from component masses.
-
-    Supported names: 'chirp_mass', 'mass_ratio', 'mass_1', 'mass_2'.
-
-    Returns:
-        Float32 array of shape (N, len(target_parameters)).
-    """
     available = {
         "chirp_mass": ((m1 * m2) ** 3 / (m1 + m2)) ** (1 / 5),
         "mass_ratio": m2 / m1,
@@ -56,28 +52,37 @@ def _compute_target_params(
     return np.stack(cols, axis=-1).astype(np.float32)
 
 
+def _compute_target_params_tensor(
+    parameters: dict,
+    target_parameters: tuple[str, ...],
+) -> torch.Tensor:
+    """Same as _compute_target_params but from a prior sample dict of tensors."""
+    available = {k: v for k, v in parameters.items()}
+    if "chirp_mass" not in available and "mass_1" in available and "mass_2" in available:
+        m1, m2 = available["mass_1"], available["mass_2"]
+        available["chirp_mass"] = ((m1 * m2) ** 3 / (m1 + m2)) ** 0.2
+        available["mass_ratio"] = m2 / m1
+    elif "mass_1" not in available and "chirp_mass" in available and "mass_ratio" in available:
+        mc, q = available["chirp_mass"], available["mass_ratio"]
+        available["mass_1"] = mc * (1 + q) ** 0.2 / q ** 0.6
+        available["mass_2"] = mc * q ** 0.4 * (1 + q) ** 0.2
+    cols = []
+    for name in target_parameters:
+        if name not in available:
+            raise ValueError(
+                f"Unknown target parameter {name!r}. "
+                f"Choose from {list(available)}"
+            )
+        cols.append(available[name])
+    return torch.stack(cols, dim=-1).float()
+
+
 class _WaveformParamLoader(torch.utils.data.IterableDataset):
     """Load waveform polarisations and intrinsic parameters from HDF5 files.
 
-    Mirrors ``Hdf5WaveformLoader`` but simultaneously reads ``mass_1`` and
-    ``mass_2`` from the ``parameters/`` group and converts them to the
-    requested ``target_parameters`` (e.g. chirp_mass, mass_ratio).
-
-    Each iteration yields a tuple ``(polarizations, params)`` where:
+    Each iteration yields ``(polarizations, params)`` where:
         polarizations : (batch_size, 2, L)  — [cross, plus]
         params        : (batch_size, n_params)
-
-    Args:
-        fnames:
-            Paths to HDF5 files written by ``WaveformPolarizationSet.write()``.
-        target_parameters:
-            Names of parameters to return (see ``_compute_target_params``).
-        batch_size:
-            Number of waveforms per yielded batch.
-        batches_per_epoch:
-            Total number of batches per call to ``__iter__``.
-        chunk_size:
-            Number of waveforms to read from disk at once.
     """
 
     def __init__(
@@ -142,14 +147,8 @@ class _WaveformParamLoader(torch.utils.data.IterableDataset):
 
     def _load_chunk(self, fname: Path, start: int, size: int):
         end = min(start + size, self.sizes[fname])
-        pol = {
-            ch: self._pol_dsets[fname][ch][start:end]
-            for ch in ("cross", "plus")
-        }
-        pm = {
-            k: self._param_dsets[fname][k][start:end]
-            for k in ("mass_1", "mass_2")
-        }
+        pol = {ch: self._pol_dsets[fname][ch][start:end] for ch in ("cross", "plus")}
+        pm = {k: self._param_dsets[fname][k][start:end] for k in ("mass_1", "mass_2")}
         return pol, pm
 
     def sample_batch(self):
@@ -161,9 +160,7 @@ class _WaveformParamLoader(torch.utils.data.IterableDataset):
 
         for i in range(self.chunks_per_batch):
             fname = np.random.choice(self.fnames, p=self.probs)
-            chunk_size = min(
-                self.chunk_size, self.batch_size - i * self.chunk_size
-            )
+            chunk_size = min(self.chunk_size, self.batch_size - i * self.chunk_size)
             max_start = self.sizes[fname] - chunk_size
             start = np.random.randint(0, max_start + 1)
 
@@ -185,21 +182,7 @@ class _WaveformParamLoader(torch.utils.data.IterableDataset):
 
 
 class _ChunkedWaveformParamDataset(torch.utils.data.IterableDataset):
-    """Sample batches of (polarizations, params) tuples from a chunk iterator.
-
-    Mirrors ``ChunkedWaveformDataset`` but handles the two-tensor output of
-    ``_WaveformParamLoader``.
-
-    Args:
-        chunk_it:
-            Iterator (typically a DataLoader wrapping ``_WaveformParamLoader``)
-            that yields ``([pol_chunk], [param_chunk])`` with shapes
-            ``(chunk_size, 2, L)`` and ``(chunk_size, n_params)``.
-        batch_size:
-            Number of waveforms per yielded batch.
-        batches_per_chunk:
-            Number of batches to sample from each loaded chunk.
-    """
+    """Sample batches of (polarizations, params) tuples from a chunk iterator."""
 
     def __init__(
         self,
@@ -216,7 +199,6 @@ class _ChunkedWaveformParamDataset(torch.utils.data.IterableDataset):
 
     def __iter__(self):
         it = iter(self.chunk_it)
-        # DataLoader adds a leading batch-dim of 1; unpack it.
         [pol_chunk], [param_chunk] = next(it)
         num_waveforms = pol_chunk.shape[0]
 
@@ -235,69 +217,81 @@ class _ChunkedWaveformParamDataset(torch.utils.data.IterableDataset):
 class RegressionTimeDomainDataset(BaseAframeDataset):
     """``BaseAframeDataset`` subclass for GW parameter regression.
 
-    Uses aframe's background loading, PSD estimation, on-the-fly waveform
-    projection and whitening pipeline.  Each training batch is produced by
-    injecting a fresh set of waveforms (drawn from ``waveform_sampler``) into
-    background strain and whitening in the same way as the supervised pipeline.
+    Supports two training waveform modes:
+      - **Disk** (``WaveformLoader``): reads pre-generated cross/plus HDF5
+        files together with ``mass_1``/``mass_2`` parameter labels.
+      - **On-the-fly** (``WaveformGenerator`` / ``CBCGenerator``): samples
+        intrinsic parameters from ``training_prior`` each batch, generates
+        polarisations on the GPU, and extracts labels from the prior sample.
+
+    Both modes share the same whitening / projection pipeline from
+    ``BaseAframeDataset``.
 
     Training batches: ``(X_whitened, y_params, empty_z)``
-        X_whitened : (B, n_ifos, L)
-        y_params   : (B, n_target_params)
-        empty_z    : (B, 0)
-
-    The ``waveform_sampler`` **must** be a ``WaveformLoader`` (disk-based),
-    because we need the paired parameter labels from the HDF5 file.
-
-    Args:
-        target_parameters:
-            Tuple of parameter names to predict, e.g. ``('chirp_mass',
-            'mass_ratio')``.  Supported names: ``chirp_mass``, ``mass_ratio``,
-            ``mass_1``, ``mass_2``.
-        *args / **kwargs:
-            All remaining arguments are forwarded to ``BaseAframeDataset``.
     """
 
     def __init__(
         self,
         *args,
-        target_parameters: tuple[str, ...] = ("chirp_mass", "mass_ratio"),
+        target_parameters: tuple[str, ...] = ("chirp_mass",),
+        n_val_waveforms: int = 4096,
+        waveforms_dir: str | None = None,
+        num_files_per_batch: int | None = None,
         **kwargs,
     ) -> None:
-        super().__init__(*args, **kwargs)
-        if not isinstance(self.waveform_sampler, WaveformLoader):
-            raise ValueError(
-                "RegressionTimeDomainDataset requires a WaveformLoader "
-                "waveform_sampler (disk-based waveforms with parameters)."
-            )
+        # base class requires waveforms_dir/num_files_per_batch; use harmless
+        # placeholders when using a generator (no disk waveforms needed)
+        super().__init__(
+            *args,
+            waveforms_dir=waveforms_dir if waveforms_dir is not None else ".",
+            num_files_per_batch=num_files_per_batch if num_files_per_batch is not None else 1,
+            **kwargs,
+        )
         self.target_parameters = target_parameters
-        # Always load from disk so on_before_batch_transfer runs.
-        self.waveforms_from_disk = True
+        self.n_val_waveforms = n_val_waveforms
 
     # ------------------------------------------------------------------ #
-    # Setup: load validation params alongside waveforms                   #
+    # Setup                                                                #
     # ------------------------------------------------------------------ #
 
     def setup(self, stage: str) -> None:
-        super().setup(stage)
-
-        # Load val_waveforms was done by parent; load matching params here.
         world_size, rank = self.get_world_size_and_rank()
-        start, stop = self.waveform_sampler.get_slice_bounds(
-            self.waveform_sampler.num_val_waveforms, world_size, rank
+        self._logger = self.get_logger(world_size, rank)
+        self.train_fnames, self.valid_fnames = self.train_val_split()
+
+        with h5py.File(self.train_fnames[0], "r") as f:
+            self._raw_sample_rate = int(round(1 / f[self.hparams.ifos[0]].attrs["dx"]))
+
+        target_rate = int(self.hparams.sample_rate)
+        if self._raw_sample_rate != target_rate:
+            import torchaudio
+            self.resampler = torchaudio.transforms.Resample(
+                self._raw_sample_rate, target_rate
+            )
+        else:
+            self.resampler = None
+
+        self.build_transforms()
+        self.transforms_to_device()
+
+        # Sample fixed validation prior parameters with a fixed seed so
+        # validation waveforms are consistent across epochs.
+        rng_state = torch.get_rng_state()
+        torch.manual_seed(42 + rank)
+        n = self.n_val_waveforms // world_size
+        self._val_prior_params = self.waveform_sampler.training_prior(n, device="cpu")
+        self.val_params = _compute_target_params_tensor(
+            self._val_prior_params, self.target_parameters
         )
-        with h5py.File(self.waveform_sampler.val_waveform_file, "r") as f:
-            m1 = f["parameters/mass_1"][start:stop]
-            m2 = f["parameters/mass_2"][start:stop]
-        params = _compute_target_params(m1, m2, self.target_parameters)
-        self.val_params = torch.tensor(params, dtype=torch.float32)
+        torch.set_rng_state(rng_state)
 
     # ------------------------------------------------------------------ #
     # Batch transfer hooks                                                 #
     # ------------------------------------------------------------------ #
 
     def on_before_batch_transfer(self, batch, _):
-        """Slice polarizations to kernel length before device transfer."""
-        if self.trainer.training:
+        if self.trainer.training and self.waveforms_from_disk:
+            # Unpack (pol, params) tuple before device transfer; slice pol.
             X, (polarizations, params) = batch
             polarizations = self.slice_waveforms(polarizations)
             batch = X, (polarizations, params)
@@ -305,38 +299,48 @@ class RegressionTimeDomainDataset(BaseAframeDataset):
 
     def on_after_batch_transfer(self, batch, _):
         if self.trainer.training:
-            [X], (waveforms, params) = batch
-            batch = self.inject(X, waveforms, params)
+            if self.waveforms_from_disk:
+                [X], (waveforms, params) = batch
+                batch = self.inject(X, waveforms, params)
+            else:
+                [X] = batch
+                batch = self._inject_from_generator(X)
         elif self.trainer.validating or self.trainer.sanity_checking:
-            [background, _, timeslide_idx], [signals, params] = batch
-            batch = self._val_inject(background, signals, params, timeslide_idx)
+            [X] = batch
+            batch = self._inject_fixed_val(X)
         return batch
 
     # ------------------------------------------------------------------ #
     # Injection                                                            #
     # ------------------------------------------------------------------ #
 
+    def _project_inject_whiten(self, X, waveforms, psds, params):
+        """Shared projection + injection + whitening; returns regression batch."""
+        B = X.shape[0]
+        dec, psi, phi = self.sample_extrinsic(X)
+        snrs = (
+            self.snr_sampler.sample((B,)).to(X.device)
+            if self.snr_sampler is not None
+            else None
+        )
+        responses = self.projector(
+            dec, psi, phi, snrs, psds,
+            cross=waveforms[:, 0], plus=waveforms[:, 1],
+        )
+        kernels = sample_kernels(responses, kernel_size=X.size(-1), coincident=True)
+        X = self.whitener(X + kernels, psds)
+        empty_z = torch.empty(B, 0, device=X.device)
+        return X, params, empty_z
+
+    def _resample(self, X: torch.Tensor) -> torch.Tensor:
+        if self.resampler is not None:
+            X = self.resampler(X)
+        return X
+
     @torch.no_grad()
-    def inject(
-        self,
-        X: torch.Tensor,
-        waveforms: torch.Tensor,
-        params: torch.Tensor,
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Inject waveforms into background, whiten, and attach params.
-
-        All batch elements receive an injection (waveform_prob effectively 1).
-
-        Args:
-            X         : (B, n_ifos, L+psd_len) raw background strain
-            waveforms : (M, 2, L_wf) cross/plus polarizations from loader
-            params    : (M, n_params) target parameters matching waveforms
-
-        Returns:
-            X_whitened : (B, n_ifos, L)
-            y_params   : (B, n_params) — subsampled to match batch size
-            empty_z    : (B, 0)
-        """
+    def inject(self, X, waveforms, params):
+        """Disk path: waveforms and params already loaded; inject all samples."""
+        X = self._resample(X)
         X, psds = self.psd_estimator(X)
         X = self.inverter(X)
         X = self.reverser(X)
@@ -345,44 +349,43 @@ class RegressionTimeDomainDataset(BaseAframeDataset):
         idx = torch.randperm(waveforms.shape[0])[:B]
         waveforms = waveforms[idx].to(X.device).float()
         params = params[idx].to(X.device).float()
-
-        dec, psi, phi = self.sample_extrinsic(X)
-        snrs = (
-            self.snr_sampler.sample((B,)).to(X.device)
-            if self.snr_sampler is not None
-            else None
-        )
-        responses = self.projector(
-            dec, psi, phi, snrs, psds, cross=waveforms[:, 0], plus=waveforms[:, 1]
-        )
-        kernels = sample_kernels(
-            responses, kernel_size=X.size(-1), coincident=True
-        )
-        X = X + kernels
-        X = self.whitener(X, psds)
-
-        empty_z = torch.empty(B, 0, device=X.device)
-        return X, params, empty_z
+        return self._project_inject_whiten(X, waveforms, psds, params)
 
     @torch.no_grad()
-    def _val_inject(
-        self,
-        background: torch.Tensor,
-        signals: torch.Tensor,
-        params: torch.Tensor,
-        timeslide_idx: int,
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Build a whitened validation batch paired with parameters.
+    def _inject_from_generator(self, X):
+        """On-the-fly path: sample prior, generate waveforms, extract params."""
+        X = self._resample(X)
+        X, psds = self.psd_estimator(X)
+        X = self.inverter(X)
+        X = self.reverser(X)
 
-        Injects each validation signal into a background kernel (first view
-        of ``build_val_batches``), whitens, and returns in regression format.
-        """
-        X_bg, X_fg, psds = super().build_val_batches(background, signals)
-        # X_fg: (num_valid_views, N, n_ifos, L)
-        # Use the first view; whiten it with the estimated PSDs.
-        X_inj = self.whitener(X_fg[0], psds)  # (N, n_ifos, L)
-        empty_z = torch.empty(len(X_inj), 0, device=X_inj.device)
-        return X_inj, params, empty_z
+        B = X.shape[0]
+        prior_params = self.waveform_sampler.training_prior(B, device=X.device)
+        hc, hp = self.waveform_sampler(**prior_params)
+        waveforms = torch.stack([hc, hp], dim=1).float()  # (B, 2, L_wf)
+
+        # Slice to kernel length (generator produces full-duration waveforms)
+        waveforms = self.slice_waveforms(waveforms)
+        params = _compute_target_params_tensor(prior_params, self.target_parameters)
+        return self._project_inject_whiten(X, waveforms, psds, params)
+
+    @torch.no_grad()
+    def _inject_fixed_val(self, X):
+        """Validation: inject fixed waveforms (reproducible across epochs)."""
+        X = self._resample(X)
+        X, psds = self.psd_estimator(X)
+        # No random augmentation (inverter/reverser) during validation
+
+        B = X.shape[0]
+        idx = torch.randperm(len(self.val_params))[:B]
+        prior_params = {
+            k: v[idx].to(X.device) for k, v in self._val_prior_params.items()
+        }
+        hc, hp = self.waveform_sampler(**prior_params)
+        waveforms = torch.stack([hc, hp], dim=1).float()
+        waveforms = self.slice_waveforms(waveforms)
+        params = self.val_params[idx].to(X.device)
+        return self._project_inject_whiten(X, waveforms, psds, params)
 
     # ------------------------------------------------------------------ #
     # Dataloaders                                                          #
@@ -391,10 +394,12 @@ class RegressionTimeDomainDataset(BaseAframeDataset):
     def train_dataloader(self) -> ZippedDataset:
         from ml4gw.dataloading import Hdf5TimeSeriesDataset
 
+        # kernel_size uses raw (pre-resample) rate; resampling happens per batch
+        raw_kernel = int(self._raw_sample_rate * self.sample_length)
         bg_dataset = Hdf5TimeSeriesDataset(
             self.train_fnames,
             channels=self.hparams.ifos,
-            kernel_size=int(self.hparams.sample_rate * self.sample_length),
+            kernel_size=raw_kernel,
             batch_size=self.hparams.batch_size,
             batches_per_epoch=self.batches_per_epoch,
             coincident=False,
@@ -409,6 +414,10 @@ class RegressionTimeDomainDataset(BaseAframeDataset):
             pin_memory=pin_memory,
         )
 
+        if not self.waveforms_from_disk:
+            # Generator path: background only; waveforms produced in inject().
+            return bg_loader
+
         waveform_loader = _WaveformParamLoader(
             fnames=self.waveform_sampler.training_waveform_files,
             target_parameters=self.target_parameters,
@@ -418,15 +427,7 @@ class RegressionTimeDomainDataset(BaseAframeDataset):
 
         world_size, _ = self.get_world_size_and_rank()
         batches_per_epoch = self.hparams.batches_per_epoch // world_size
-        batches_per_chunk = (
-            int(batches_per_epoch // self.hparams.chunks_per_epoch) + 1
-        )
-        self._logger.info(
-            f"Regression training on pool of {waveform_loader.total} "
-            f"waveforms. Sampling {batches_per_chunk} batches per chunk "
-            f"from {self.hparams.chunks_per_epoch} chunks of size "
-            f"{self.hparams.chunk_size} each epoch."
-        )
+        batches_per_chunk = int(batches_per_epoch // self.hparams.chunks_per_epoch) + 1
 
         wf_dl = torch.utils.data.DataLoader(
             waveform_loader,
@@ -442,27 +443,23 @@ class RegressionTimeDomainDataset(BaseAframeDataset):
         return ZippedDataset(bg_loader, wf_dataset)
 
     def val_dataloader(self):
-        """Validation dataloader returning regression-format batches."""
-        background_dataset = pl.utilities.combined_loader.CombinedLoader(
-            self.timeslides, mode="sequential"
-        )
-        iter(background_dataset)  # gives it a __len__ property
+        from ml4gw.dataloading import Hdf5TimeSeriesDataset
 
-        num_waveforms = len(self.val_waveforms)
-        signal_batch_size = (num_waveforms - 1) // self.valid_loader_length + 1
-        # Include params alongside waveforms so on_after_batch_transfer can
-        # pair them.
-        signal_dataset = torch.utils.data.TensorDataset(
-            self.val_waveforms, self.val_params
+        val_batches = max(1, self.batches_per_epoch // 10)
+        val_dataset = Hdf5TimeSeriesDataset(
+            self.valid_fnames,
+            channels=self.hparams.ifos,
+            kernel_size=int(self._raw_sample_rate * self.sample_length),
+            batch_size=self.hparams.batch_size,
+            batches_per_epoch=val_batches,
+            coincident=False,
+            num_files_per_batch=max(1, len(self.valid_fnames) // 4),
         )
-        signal_loader = torch.utils.data.DataLoader(
-            signal_dataset,
-            batch_size=signal_batch_size,
-            shuffle=False,
-            pin_memory=False,
+        pin_memory = isinstance(
+            self.trainer.accelerator, pl.accelerators.CUDAAccelerator
         )
-        return ZippedDataset(
-            background_dataset,
-            signal_loader,
-            minimum=min(self.valid_loader_length, len(signal_loader)),
+        return torch.utils.data.DataLoader(
+            val_dataset,
+            num_workers=self.num_workers,
+            pin_memory=pin_memory,
         )

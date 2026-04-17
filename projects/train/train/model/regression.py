@@ -3,8 +3,6 @@ import torch.nn as nn
 import lightning.pytorch as pl
 from numpy.typing import ArrayLike
 
-from architectures.networks.s4d import S4Model
-from architectures.networks.linoss import LinOSSModel
 
 
 def _log_gaussian_nll(
@@ -23,13 +21,20 @@ def _log_gaussian_nll(
 class _RegressionBase(pl.LightningModule):
     """Shared GaussianNLL loss, logging, and step logic for regression tasks."""
 
-    def __init__(self, d_output: int, learning_rate: float, weight_decay: float) -> None:
+    def __init__(
+        self,
+        d_output: int,
+        learning_rate: float,
+        weight_decay: float,
+        warmup_steps: int = 1000,
+    ) -> None:
         super().__init__()
         if d_output % 2 != 0:
             raise ValueError(f'd_output={d_output} must be even (n_vars means + n_vars variances).')
         self.n_vars = d_output // 2
         self.learning_rate = learning_rate
         self.weight_decay = weight_decay
+        self.warmup_steps = warmup_steps
         self.criterion = nn.GaussianNLLLoss(reduction='mean')
         self.var_activation = nn.Softplus()
 
@@ -70,9 +75,20 @@ class _RegressionBase(pl.LightningModule):
         }
 
     def configure_optimizers(self):
-        return torch.optim.AdamW(
+        optimizer = torch.optim.AdamW(
             self.parameters(), lr=self.learning_rate, weight_decay=self.weight_decay
         )
+        total_steps = self.trainer.estimated_stepping_batches
+        warmup = torch.optim.lr_scheduler.LinearLR(
+            optimizer, start_factor=1e-2, end_factor=1.0, total_iters=self.warmup_steps
+        )
+        cosine = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer, T_max=max(1, total_steps - self.warmup_steps)
+        )
+        scheduler = torch.optim.lr_scheduler.SequentialLR(
+            optimizer, schedulers=[warmup, cosine], milestones=[self.warmup_steps]
+        )
+        return {'optimizer': optimizer, 'lr_scheduler': {'scheduler': scheduler, 'interval': 'step'}}
 
 
 class LitS4DGaussianNLL(_RegressionBase):
@@ -99,8 +115,9 @@ class LitS4DGaussianNLL(_RegressionBase):
         lr: float | None = None,
         learning_rate: float = 1e-3,
         weight_decay: float = 0.0,
+        warmup_steps: int = 1000,
     ) -> None:
-        super().__init__(d_output=d_output, learning_rate=learning_rate, weight_decay=weight_decay)
+        super().__init__(d_output=d_output, learning_rate=learning_rate, weight_decay=weight_decay, warmup_steps=warmup_steps)
         self.save_hyperparameters()
         self.model = None
         self.configure_model()
@@ -108,13 +125,13 @@ class LitS4DGaussianNLL(_RegressionBase):
     def configure_model(self) -> None:
         if self.model is not None:
             return
-        # S4Model takes (B, d_input, L) channels-first — no transpose needed
+        from architectures.networks.s4d import S4Model
         hp = self.hparams
-        self.model = torch.compile(S4Model(
+        self.model = S4Model(
             d_input=hp.d_input, d_output=hp.d_output, d_model=hp.d_model,
             d_state=hp.d_state, n_layers=hp.n_layers, dropout=hp.dropout,
             dt_min=hp.dt_min, dt_max=hp.dt_max, lr=hp.lr,
-        ))
+        )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.model(x)
@@ -133,8 +150,15 @@ class LitS4DGaussianNLL(_RegressionBase):
         for hp in unique_hps:
             params = [p for p in all_params if getattr(p, '_optim', None) == hp]
             optimizer.add_param_group({'params': params, **hp})
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-            optimizer, self.trainer.estimated_stepping_batches
+        total_steps = self.trainer.estimated_stepping_batches
+        warmup = torch.optim.lr_scheduler.LinearLR(
+            optimizer, start_factor=1e-2, end_factor=1.0, total_iters=self.warmup_steps
+        )
+        cosine = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer, T_max=max(1, total_steps - self.warmup_steps)
+        )
+        scheduler = torch.optim.lr_scheduler.SequentialLR(
+            optimizer, schedulers=[warmup, cosine], milestones=[self.warmup_steps]
         )
         return {'optimizer': optimizer, 'lr_scheduler': {'scheduler': scheduler, 'interval': 'step'}}
 
@@ -161,8 +185,9 @@ class LitLinOSSGaussianNLL(_RegressionBase):
         discretization: str = 'IM',
         learning_rate: float = 1e-3,
         weight_decay: float = 0.0,
+        warmup_steps: int = 1000,
     ) -> None:
-        super().__init__(d_output=d_output, learning_rate=learning_rate, weight_decay=weight_decay)
+        super().__init__(d_output=d_output, learning_rate=learning_rate, weight_decay=weight_decay, warmup_steps=warmup_steps)
         self.save_hyperparameters()
         self.model = None
         self.configure_model()
@@ -170,12 +195,13 @@ class LitLinOSSGaussianNLL(_RegressionBase):
     def configure_model(self) -> None:
         if self.model is not None:
             return
+        from architectures.networks.linoss import LinOSSModel
         hp = self.hparams
-        self.model = torch.compile(LinOSSModel(
+        self.model = LinOSSModel(
             d_input=hp.d_input, d_output=hp.d_output, d_model=hp.d_model,
             ssm_size=hp.ssm_size, n_layers=hp.n_layers, dropout=hp.dropout,
             discretization=hp.discretization,
-        ))
+        )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.model(x)
