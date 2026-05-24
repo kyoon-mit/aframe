@@ -235,24 +235,98 @@ class RegressionTimeDomainDataset(BaseAframeDataset):
         *args,
         target_parameters: tuple[str, ...] = ("chirp_mass",),
         n_val_waveforms: int = 4096,
-        waveforms_dir: str | None = None,
-        num_files_per_batch: int | None = None,
+        waveforms_dir: str = ".",
+        num_files_per_batch: int = 1,
+        prefetch_factor: int = 4,
+        persistent_workers: bool = True,
         **kwargs,
     ) -> None:
-        # base class requires waveforms_dir/num_files_per_batch; use harmless
-        # placeholders when using a generator (no disk waveforms needed)
+        # base class requires waveforms_dir/num_files_per_batch; defaults are
+        # harmless placeholders when using on-the-fly waveform generation.
+        # Defaults must be non-None so Lightning's save_hyperparameters() never
+        # captures None, which would crash base.py's get_data_dir call.
         super().__init__(
             *args,
-            waveforms_dir=waveforms_dir if waveforms_dir is not None else ".",
-            num_files_per_batch=num_files_per_batch if num_files_per_batch is not None else 1,
+            waveforms_dir=waveforms_dir,
+            num_files_per_batch=num_files_per_batch,
             **kwargs,
         )
         self.target_parameters = target_parameters
         self.n_val_waveforms = n_val_waveforms
+        self.prefetch_factor = prefetch_factor
+        self.persistent_workers = persistent_workers
 
     # ------------------------------------------------------------------ #
     # Setup                                                                #
     # ------------------------------------------------------------------ #
+
+    def train_val_split(self):
+        """Like BaseAframeDataset.train_val_split but also accepts flat dirs
+        and skips files shorter than sample_length."""
+        import glob as _glob
+        from pathlib import Path as _Path
+
+        # Try the standard aframe layout first ({background_dir}/background/*.hdf5)
+        fnames = _glob.glob(f"{self.background_dir}/background/*.hdf5")
+        if not fnames:
+            # Fall back to flat directory (files directly in background_dir)
+            fnames = _glob.glob(f"{self.background_dir}/*.hdf5")
+        fnames = sorted([_Path(f) for f in fnames])
+        durations = [int(f.stem.split("-")[-1]) for f in fnames]
+
+        # Drop files too short to fit even one kernel
+        min_dur = self.sample_length  # seconds
+        kept = [(f, d) for f, d in zip(fnames, durations) if d >= min_dur]
+        n_dropped = len(fnames) - len(kept)
+        if n_dropped:
+            self._logger.warning(
+                f"Dropped {n_dropped} files shorter than sample_length={min_dur:.1f}s"
+            )
+        fnames, durations = zip(*kept) if kept else ([], [])
+        fnames, durations = list(fnames), list(durations)
+
+        valid_fnames, valid_duration = [], 0
+        while valid_duration < self.hparams.min_valid_duration:
+            fname, duration = fnames.pop(-1), durations.pop(-1)
+            valid_duration += duration
+            valid_fnames.append(str(fname))
+        train_fnames = [str(f) for f in fnames]
+        train_duration = sum(durations)
+        self._logger.info(
+            f"Using {len(train_fnames)} files ({train_duration / 86400:.2f} days) for training"
+        )
+        self._logger.info(
+            f"Using {len(valid_fnames)} files ({valid_duration / 86400:.2f} days) for validation"
+        )
+        return train_fnames, valid_fnames
+
+    def slice_waveforms(self, waveforms: torch.Tensor) -> torch.Tensor:
+        # If the waveform sampler has a window_offset attribute (e.g. CBCGenerator),
+        # shift signal_idx backwards by that many seconds so the model window ends
+        # window_offset seconds before physical coalescence.
+        # This avoids touching base.py.
+        window_offset = getattr(self.waveform_sampler, "window_offset", 0.0)
+        if window_offset == 0.0:
+            return super().slice_waveforms(waveforms)
+        sr = self.hparams.sample_rate
+        signal_idx = waveforms.shape[-1] - int(
+            (self.waveform_sampler.right_pad + window_offset) * sr
+        )
+        kernel_size = int(self.hparams.kernel_length * sr) + self.filter_size
+        if kernel_size < self.left_pad_size + self.right_pad_size:
+            raise ValueError(
+                f"Kernel size ({kernel_size}) cannot be less than total "
+                f"padding ({self.left_pad_size} + {self.right_pad_size})"
+            )
+        start_idx = signal_idx - (kernel_size - self.right_pad_size)
+        stop_idx = signal_idx + (kernel_size - self.left_pad_size)
+        left_pad = -1 * min(start_idx, 0)
+        right_pad = max(stop_idx - waveforms.shape[-1], 0)
+        if left_pad > 0:
+            start_idx += left_pad
+            stop_idx += left_pad
+        waveforms = torch.nn.functional.pad(waveforms, [left_pad, right_pad])
+        return waveforms[..., start_idx:stop_idx]
 
     def setup(self, stage: str) -> None:
         world_size, rank = self.get_world_size_and_rank()
@@ -412,6 +486,8 @@ class RegressionTimeDomainDataset(BaseAframeDataset):
             bg_dataset,
             num_workers=self.num_workers,
             pin_memory=pin_memory,
+            prefetch_factor=self.prefetch_factor if self.num_workers > 0 else None,
+            persistent_workers=self.persistent_workers if self.num_workers > 0 else False,
         )
 
         if not self.waveforms_from_disk:
@@ -462,4 +538,6 @@ class RegressionTimeDomainDataset(BaseAframeDataset):
             val_dataset,
             num_workers=self.num_workers,
             pin_memory=pin_memory,
+            prefetch_factor=self.prefetch_factor if self.num_workers > 0 else None,
+            persistent_workers=self.persistent_workers if self.num_workers > 0 else False,
         )
