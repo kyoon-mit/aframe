@@ -1,11 +1,14 @@
 import equinox as eqx
+import jax
 import jax.numpy as jnp
 import optax
 
 from jaxtyping import Array, PRNGKeyArray
 
 
-@eqx.filter_vmap(in_axes=(None, 0, None, 0), out_axes=(0, None))
+@eqx.filter_vmap(
+    in_axes=(None, 0, None, 0), out_axes=(0, None), axis_name="batch"
+)
 def jax_fwd_batch(
     model: eqx.Module,
     X_time: Array,
@@ -129,6 +132,216 @@ def jax_apply_snr_weighted_training_step(
         key,
     )
 
+    updates, new_opt_state = opt_update(grads, opt_state, diff_model)
+    new_model = eqx.combine(
+        eqx.apply_updates(diff_model, updates), static_model
+    )
+    return new_model, new_state, new_opt_state, {"loss": loss}
+
+
+def jax_focal_loss_fn(
+    diff_model: eqx.Module,
+    static_model: eqx.Module,
+    state: eqx.nn.State,
+    X_time: Array,
+    y: Array,
+    gamma: float,
+    key: PRNGKeyArray,
+) -> tuple[Array, tuple[eqx.nn.State, Array]]:
+    """Focal loss: down-weights easy examples via (1 - p_t)^gamma factor."""
+    model = eqx.combine(diff_model, static_model)
+    logits, new_state = jax_fwd_batch(model, X_time, state, key)
+    y_flat = y.reshape(-1, 1)
+    p = jax.nn.sigmoid(logits)
+    p_t = y_flat * p + (1.0 - y_flat) * (1.0 - p)
+    bce = optax.sigmoid_binary_cross_entropy(
+        logits, y_flat.astype(logits.dtype)
+    )
+    loss = jnp.mean((1.0 - p_t) ** gamma * bce)
+    return loss, (new_state, loss)
+
+
+@eqx.filter_jit
+def jax_apply_focal_training_step(
+    model: eqx.Module,
+    model_filter_spec,
+    state: eqx.nn.State,
+    X_time: Array,
+    y: Array,
+    gamma: float,
+    opt_state,
+    opt_update,
+    key: PRNGKeyArray,
+) -> tuple[eqx.Module, eqx.nn.State, object, dict]:
+    diff_model, static_model = eqx.partition(model, model_filter_spec)
+    (loss, (new_state, _)), grads = eqx.filter_value_and_grad(
+        jax_focal_loss_fn, has_aux=True
+    )(diff_model, static_model, state, X_time, y, gamma, key)
+    updates, new_opt_state = opt_update(grads, opt_state, diff_model)
+    new_model = eqx.combine(
+        eqx.apply_updates(diff_model, updates), static_model
+    )
+    return new_model, new_state, new_opt_state, {"loss": loss}
+
+
+def jax_hnm_loss_fn(
+    diff_model: eqx.Module,
+    static_model: eqx.Module,
+    state: eqx.nn.State,
+    X_time: Array,
+    y: Array,
+    n_hard_negs: int,
+    key: PRNGKeyArray,
+) -> tuple[Array, tuple[eqx.nn.State, Array]]:
+    """BCE over all positives + top-n_hard_negs hardest negatives per batch."""
+    model = eqx.combine(diff_model, static_model)
+    logits, new_state = jax_fwd_batch(model, X_time, state, key)
+    y_flat = y.reshape(-1)
+    logits_flat = logits.reshape(-1)
+    per_sample = optax.sigmoid_binary_cross_entropy(
+        logits_flat, y_flat.astype(logits_flat.dtype)
+    )
+    pos_mask = y_flat > 0.5
+    neg_mask = ~pos_mask
+    # Rank negatives by score descending; positives get -inf and rank last.
+    masked_neg_logits = jnp.where(neg_mask, logits_flat, -jnp.inf)
+    ranks = jnp.argsort(jnp.argsort(-masked_neg_logits))
+    hard_neg_mask = neg_mask & (ranks < n_hard_negs)
+    active = pos_mask | hard_neg_mask
+    loss = jnp.sum(per_sample * active) / jnp.maximum(1.0, jnp.sum(active))
+    return loss, (new_state, loss)
+
+
+@eqx.filter_jit
+def jax_apply_hnm_training_step(
+    model: eqx.Module,
+    model_filter_spec,
+    state: eqx.nn.State,
+    X_time: Array,
+    y: Array,
+    n_hard_negs: int,
+    opt_state,
+    opt_update,
+    key: PRNGKeyArray,
+) -> tuple[eqx.Module, eqx.nn.State, object, dict]:
+    diff_model, static_model = eqx.partition(model, model_filter_spec)
+    (loss, (new_state, _)), grads = eqx.filter_value_and_grad(
+        jax_hnm_loss_fn, has_aux=True
+    )(diff_model, static_model, state, X_time, y, n_hard_negs, key)
+    updates, new_opt_state = opt_update(grads, opt_state, diff_model)
+    new_model = eqx.combine(
+        eqx.apply_updates(diff_model, updates), static_model
+    )
+    return new_model, new_state, new_opt_state, {"loss": loss}
+
+
+def jax_pauc_loss_fn(
+    diff_model: eqx.Module,
+    static_model: eqx.Module,
+    state: eqx.nn.State,
+    X_time: Array,
+    y: Array,
+    n_hard_negs: int,
+    margin: float,
+    key: PRNGKeyArray,
+) -> tuple[Array, tuple[eqx.nn.State, Array]]:
+    """Squared-hinge pairwise loss over (positive, top-n hard-negative) pairs.
+
+    Directly optimises a surrogate for partial AUC at low FPR. For each
+    positive sample, the loss penalises any hard negative that scores within
+    ``margin`` of it.
+    """
+    model = eqx.combine(diff_model, static_model)
+    logits, new_state = jax_fwd_batch(model, X_time, state, key)
+    y_flat = y.reshape(-1)
+    logits_flat = logits.reshape(-1)
+    pos_indicator = y_flat > 0.5
+    neg_indicator = ~pos_indicator
+    masked_neg_logits = jnp.where(neg_indicator, logits_flat, -jnp.inf)
+    ranks = jnp.argsort(jnp.argsort(-masked_neg_logits))
+    hard_neg = neg_indicator & (ranks < n_hard_negs)
+    # Pairwise (pos_i, hard_neg_j) score differences — shape (N, N)
+    score_diff = logits_flat[:, None] - logits_flat[None, :]
+    valid_pairs = pos_indicator[:, None] & hard_neg[None, :]
+    pair_loss = jnp.maximum(0.0, margin - score_diff) ** 2
+    loss = jnp.sum(pair_loss * valid_pairs) / jnp.maximum(
+        1.0, jnp.sum(valid_pairs)
+    )
+    return loss, (new_state, loss)
+
+
+@eqx.filter_jit
+def jax_apply_pauc_training_step(
+    model: eqx.Module,
+    model_filter_spec,
+    state: eqx.nn.State,
+    X_time: Array,
+    y: Array,
+    n_hard_negs: int,
+    margin: float,
+    opt_state,
+    opt_update,
+    key: PRNGKeyArray,
+) -> tuple[eqx.Module, eqx.nn.State, object, dict]:
+    diff_model, static_model = eqx.partition(model, model_filter_spec)
+    (loss, (new_state, _)), grads = eqx.filter_value_and_grad(
+        jax_pauc_loss_fn, has_aux=True
+    )(diff_model, static_model, state, X_time, y, n_hard_negs, margin, key)
+    updates, new_opt_state = opt_update(grads, opt_state, diff_model)
+    new_model = eqx.combine(
+        eqx.apply_updates(diff_model, updates), static_model
+    )
+    return new_model, new_state, new_opt_state, {"loss": loss}
+
+
+def jax_focal_hnm_loss_fn(
+    diff_model: eqx.Module,
+    static_model: eqx.Module,
+    state: eqx.nn.State,
+    X_time: Array,
+    y: Array,
+    gamma: float,
+    n_hard_negs: int,
+    key: PRNGKeyArray,
+) -> tuple[Array, tuple[eqx.nn.State, Array]]:
+    """Focal loss on all positives + top-n_hard_negs hard negatives."""
+    model = eqx.combine(diff_model, static_model)
+    logits, new_state = jax_fwd_batch(model, X_time, state, key)
+    y_flat = y.reshape(-1)
+    logits_flat = logits.reshape(-1)
+    p = jax.nn.sigmoid(logits_flat)
+    p_t = y_flat * p + (1.0 - y_flat) * (1.0 - p)
+    focal_weight = (1.0 - p_t) ** gamma
+    per_sample = focal_weight * optax.sigmoid_binary_cross_entropy(
+        logits_flat, y_flat.astype(logits_flat.dtype)
+    )
+    pos_mask = y_flat > 0.5
+    neg_mask = ~pos_mask
+    masked_neg_logits = jnp.where(neg_mask, logits_flat, -jnp.inf)
+    ranks = jnp.argsort(jnp.argsort(-masked_neg_logits))
+    hard_neg_mask = neg_mask & (ranks < n_hard_negs)
+    active = pos_mask | hard_neg_mask
+    loss = jnp.sum(per_sample * active) / jnp.maximum(1.0, jnp.sum(active))
+    return loss, (new_state, loss)
+
+
+@eqx.filter_jit
+def jax_apply_focal_hnm_training_step(
+    model: eqx.Module,
+    model_filter_spec,
+    state: eqx.nn.State,
+    X_time: Array,
+    y: Array,
+    gamma: float,
+    n_hard_negs: int,
+    opt_state,
+    opt_update,
+    key: PRNGKeyArray,
+) -> tuple[eqx.Module, eqx.nn.State, object, dict]:
+    diff_model, static_model = eqx.partition(model, model_filter_spec)
+    (loss, (new_state, _)), grads = eqx.filter_value_and_grad(
+        jax_focal_hnm_loss_fn, has_aux=True
+    )(diff_model, static_model, state, X_time, y, gamma, n_hard_negs, key)
     updates, new_opt_state = opt_update(grads, opt_state, diff_model)
     new_model = eqx.combine(
         eqx.apply_updates(diff_model, updates), static_model

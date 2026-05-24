@@ -1,5 +1,7 @@
 """Utility functions for parameter counting and printing."""
 
+import logging
+
 import equinox as eqx
 import jax
 
@@ -20,7 +22,7 @@ def _colorize(text: str, color: str | None) -> str:
     return f"{_COLORS[color]}{text}{_RESET}"
 
 
-def _print_tree(
+def _build_tree_string(
     node,
     class_names: dict[tuple[str, ...], str],
     prefix="",
@@ -28,9 +30,10 @@ def _print_tree(
     current_depth=1,
     depth: int | None = None,
     color: str | None = None,
-) -> None:
+) -> list[str]:
+    lines = []
     if depth is not None and current_depth > depth:
-        return
+        return lines
     children = node["__children__"] if "__children__" in node else node
     items = list(children.items())
     for i, (key, val) in enumerate(items):
@@ -41,20 +44,25 @@ def _print_tree(
         if "__leaf__" in val:
             if depth is None or current_depth <= depth:
                 shape, size = val["__leaf__"]
-                print(f"{prefix}{branch}{key}: {shape} ({size:,})")
+                lines.append(f"{prefix}{branch}{key}: {shape} ({size:,})")
         else:
             cls = class_names.get(child_path, "")
             cls_str = f" [{_colorize(cls, color)}]" if cls else ""
-            print(f"{prefix}{branch}{key}/{cls_str} ({_sum_params(val):,})")
-            _print_tree(
-                val,
-                class_names,
-                prefix + extend,
-                child_path,
-                current_depth + 1,
-                depth,
-                color,
+            lines.append(
+                f"{prefix}{branch}{key}/{cls_str} ({_sum_params(val):,})"
             )
+            lines.extend(
+                _build_tree_string(
+                    val,
+                    class_names,
+                    prefix + extend,
+                    child_path,
+                    current_depth + 1,
+                    depth,
+                    color,
+                )
+            )
+    return lines
 
 
 # Sum params in subtree
@@ -114,12 +122,16 @@ def print_param_tree(
 
     total = _sum_params({"__children__": tree})
     root_cls = class_names.get((), type(model).__name__)
-    print(f"model/ [{_colorize(root_cls, color)}] ({total:,})")
-    _print_tree(
-        {"__children__": tree},
-        path=(),
-        depth=depth,
-        class_names=class_names,
-        color=color,
+
+    lines = [f"model/ [{_colorize(root_cls, color)}] ({total:,})"]
+    lines.extend(
+        _build_tree_string(
+            {"__children__": tree},
+            path=(),
+            depth=depth,
+            class_names=class_names,
+            color=color,
+        )
     )
-    print(f"\nTotal: {total:,}")
+    lines.append(f"\nTotal: {total:,}")
+    logging.info("\n".join(lines))

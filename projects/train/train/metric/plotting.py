@@ -713,6 +713,160 @@ def fg_bg_score_distribution(
     )
 
 
+@metric(type="Accumulated", stages=("val", "test"))
+def snr_vs_score_scatter(
+    target: BatchedTarget, pred: BatchedTarget, params: BatchedParams, **kwargs
+) -> ImageLog:
+    """Scatter plot of foreground detection score vs. network SNR.
+
+    A vertical dashed line marks the maximum background score, indicating
+    where the background distribution ends relative to the foreground.
+    """
+    if params is None or "snr" not in params:
+        plt.figure(figsize=(10, 6))
+        plt.text(0.5, 0.5, "SNR not available", ha="center", va="center")
+        plt.tight_layout()
+        image = plt.gcf()
+        plt.close()
+        return ImageLog(
+            value=image, caption="Detection Statistic vs. SNR (no SNR data)"
+        )
+
+    target = target.flatten()
+    if pred.ndim > 1 and pred.shape[-1] >= 2:
+        scores = pred[:, -1].flatten()
+    else:
+        scores = pred.flatten()
+
+    fg_d = scores[target == 1]
+    bkg_d = scores[target == 0]
+    snr = np.array(params["snr"]).flatten()
+
+    plt.figure(figsize=(10, 6))
+    plt.scatter(fg_d, snr, alpha=0.1, s=3, color="royalblue")
+
+    max_bkg = bkg_d.max()
+    plt.axvline(
+        x=max_bkg,
+        color="red",
+        linestyle="--",
+        label=f"Max Background Score: {max_bkg:.2f}",
+        linewidth=0.5,
+    )
+
+    plt.xlabel("Detection Statistic (Score)")
+    plt.ylabel("Network SNR")
+    plt.yscale("log")
+    plt.title("Detection Statistic vs. SNR for Foreground Events")
+    plt.grid(True, which="both", ls="--", lw=0.5, alpha=0.5)
+    plt.legend()
+    plt.tight_layout()
+
+    image = plt.gcf()
+    plt.close()
+
+    return ImageLog(
+        value=image,
+        caption="Detection Statistic vs. SNR scatter",
+    )
+
+
+@metric(type="Accumulated", stages=("val", "test"))
+def recoveries_vs_snr(
+    target: BatchedTarget, pred: BatchedTarget, params: BatchedParams, **kwargs
+) -> ImageLog:
+    """Plot number of recovered injections per SNR bin at FPR=0.001."""
+    if params is None or "snr" not in params:
+        fig = plt.figure(figsize=(6, 4))
+        plt.text(0.5, 0.5, "SNR not available", ha="center", va="center")
+        plt.tight_layout()
+        image = plt.gcf()
+        plt.close()
+        return ImageLog(value=image, caption="Recoveries vs SNR")
+
+    target_fpr = 0.001
+    bin_step = 1
+
+    if pred.ndim > 1:
+        pred = pred[..., -1]
+    pred = pred.flatten()
+    target = target.flatten()
+
+    s_snr_signal = np.array(params["snr"]).flatten()
+    s_score_signal = pred[target == 1].flatten()
+
+    fpr, _, thresholds = roc_curve(target, pred)
+    idx = np.argmin(np.abs(fpr - target_fpr))
+    threshold = thresholds[idx]
+
+    bin_start = np.floor(s_snr_signal.min())
+    bin_stop = np.ceil(s_snr_signal.max()) + bin_step
+    bins = np.arange(bin_start, bin_stop, bin_step)
+
+    total_counts = []
+    recovered_counts = []
+    for i in range(len(bins) - 1):
+        in_bin = (s_snr_signal >= bins[i]) & (s_snr_signal < bins[i + 1])
+        total_counts.append(int(np.sum(in_bin)))
+        recovered_counts.append(
+            int(np.sum(s_score_signal[in_bin] > threshold))
+        )
+
+    total_counts = np.array(total_counts, dtype=float)
+    recovered_counts = np.array(recovered_counts, dtype=float)
+
+    fig, ax = plt.subplots(figsize=(10, 6))
+    ax.stairs(
+        total_counts,
+        bins,
+        color="steelblue",
+        alpha=0.4,
+        fill=True,
+        label="Total injections",
+    )
+    ax.stairs(
+        recovered_counts,
+        bins,
+        color="steelblue",
+        alpha=0.9,
+        fill=True,
+        label="Recovered",
+    )
+    ax.set_xlabel("SNR")
+    ax.set_ylabel("Count")
+    ax.set_yscale("log")
+    ax.set_xscale("log")
+    x_ticks = [8, 9, 10, 11, 12, 15, 20, 25, 30, 40, 50, 70, 100]
+    ax.set_xticks(x_ticks)
+    ax.set_xticklabels([str(x) for x in x_ticks])
+    ax.set_title(f"Recoveries vs SNR at FPR = {target_fpr:.3f}")
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+    plt.tight_layout()
+    image = plt.gcf()
+    plt.close()
+
+    return ImageLog(value=image, caption="Recoveries vs SNR")
+
+
+class RecoveriesVsSnrCallback(CustomMetric):
+    """Lightning callback that logs recovery counts per SNR bin to WandB.
+
+    Instantiated with no arguments so it can be referenced directly in
+    a jsonargparse YAML config::
+
+        - class_path: train.metric.plotting.RecoveriesVsSnrCallback
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            metric=recoveries_vs_snr,
+            metric_name="recoveries_vs_snr",
+            type="Accumulated",
+            stages=("val", "test"),
+        )
+
+
 class FgBgScoreDistributionCallback(CustomMetric):
     """Lightning callback that logs the FG/BG score histogram to WandB.
 
@@ -747,6 +901,24 @@ class EfficiencyVsSnrCallback(CustomMetric):
         super().__init__(
             metric=efficiency_vs_snr,
             metric_name="efficiency_vs_snr",
+            type="Accumulated",
+            stages=("val", "test"),
+        )
+
+
+class SnrVsScoreScatterCallback(CustomMetric):
+    """Lightning callback that logs a scatter plot of SNR vs detection score.
+
+    Instantiated with no arguments so it can be referenced directly in
+    a jsonargparse YAML config::
+
+        - class_path: train.metric.plotting.SnrVsScoreScatterCallback
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            metric=snr_vs_score_scatter,
+            metric_name="snr_vs_score_scatter",
             type="Accumulated",
             stages=("val", "test"),
         )

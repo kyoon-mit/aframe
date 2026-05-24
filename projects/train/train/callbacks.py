@@ -314,3 +314,41 @@ class GradientTracker(Callback):
         norms = grad_norm(pl_module, norm_type=self.norm_type)
         total_norm = norms[f"grad_{float(self.norm_type)}_norm_total"]
         self.log(f"grad_norm_{self.norm_type}", total_norm)
+
+
+class CurriculumSNRCallback(Callback):
+    """Linearly anneal the minimum training SNR over ``decay_steps`` steps.
+
+    Requires ``trainer.datamodule.snr_sampler`` to be a
+    ``CurriculumPowerLaw`` instance (which exposes a mutable ``minimum``
+    attribute).  The SNR minimum starts at ``start_snr`` and decreases
+    linearly to ``end_snr`` over ``decay_steps`` training steps, then
+    stays fixed at ``end_snr`` for the remainder of training.
+
+    This implements a training curriculum: the model first sees only
+    easily-detectable high-SNR signals and progressively encounters
+    harder low-SNR events as training proceeds.
+    """
+
+    def __init__(
+        self,
+        start_snr: float = 12.0,
+        end_snr: float = 6.0,
+        decay_steps: int = 200_000,
+    ):
+        self.start_snr = start_snr
+        self.end_snr = end_snr
+        self.decay_steps = decay_steps
+
+    def on_train_batch_start(self, trainer, pl_module, batch, batch_idx):
+        t = min(1.0, trainer.global_step / self.decay_steps)
+        current_min = self.start_snr + t * (self.end_snr - self.start_snr)
+        trainer.datamodule.snr_sampler.minimum = current_min
+        if batch_idx == 0:
+            pl_module.log(
+                "train/curriculum_snr_min",
+                current_min,
+                on_step=True,
+                prog_bar=False,
+                sync_dist=True,
+            )

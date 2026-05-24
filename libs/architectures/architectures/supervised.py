@@ -342,6 +342,233 @@ class SupervisedTimeDomainLinOSS(JaxArchitecture):
         return self.linoss(X, state, key=key)
 
 
+class SupervisedTimeDomainOriginalLinOSS(JaxArchitecture):
+    """Wrapper around OriginalLinOSS for supervised GW detection.
+
+    Accepts the standard aframe input shape (num_ifos, time), transposes to
+    (time, num_ifos), and delegates to OriginalLinOSS which returns a scalar
+    detection logit.
+    """
+
+    from architectures.networks.original_linoss import OriginalLinOSS
+
+    linoss: OriginalLinOSS
+
+    def __init__(
+        self,
+        num_ifos: int,
+        sample_rate: float,
+        kernel_length: float,
+        hidden_dim: int = 64,
+        num_blocks: int = 6,
+        ssm_size: int = 64,
+        discretization: str = "IM",
+        drop_rate: float = 0.05,
+        conv_type: str = "none",
+        conv_kernel_size: int = 4,
+        conv_expansion: int = 2,
+        use_mlp_head: bool = False,
+        mlp_hidden_dim: int = 64,
+        mlp_depth: int = 3,
+        norm_pos: str = "pre",
+        norm_type: str = "batch",
+        encoder_type: str = "linear",
+        encoder_num_layers: int = 2,
+        encoder_kernel_size: int = 8,
+        patch_size: int = 16,
+        encoder_kernel_sizes: Optional[list] = None,
+        *,
+        seed: int = 0,
+    ) -> None:
+        import jax.random as jr
+        from architectures.networks.original_linoss import OriginalLinOSS
+
+        self.linoss = OriginalLinOSS(
+            N=num_ifos,
+            H=hidden_dim,
+            num_blocks=num_blocks,
+            ssm_size=ssm_size,
+            discretization=discretization,
+            drop_rate=drop_rate,
+            conv_type=conv_type,
+            conv_kernel_size=conv_kernel_size,
+            conv_expansion=conv_expansion,
+            use_mlp_head=use_mlp_head,
+            mlp_hidden_dim=mlp_hidden_dim,
+            mlp_depth=mlp_depth,
+            key=jr.PRNGKey(seed),
+            norm_pos=norm_pos,
+            norm_type=norm_type,
+            encoder_type=encoder_type,
+            encoder_num_layers=encoder_num_layers,
+            encoder_kernel_size=encoder_kernel_size,
+            patch_size=patch_size,
+            encoder_kernel_sizes=encoder_kernel_sizes,
+        )
+
+    def __call__(self, X, state, key=None):
+        # X: (num_ifos, time) → transpose to (time, num_ifos)
+        return self.linoss(X.T, state, key=key)
+
+    def forward(self, X, state, key=None):
+        return self.linoss(X.T, state, key=key)
+
+
+class SupervisedHeterodyneLinOSS(JaxArchitecture):
+    """JAX/Equinox architecture for heterodyne input via SSM channel attention.
+
+    Each interferometer has ``num_chirp_masses`` channels (one per heterodyne
+    template). A shared small LinOSS encodes each channel; the embeddings
+    drive a cross-attention that reduces the N channels to ``n_out`` weighted
+    combinations. Those ``num_ifos × n_out`` timeseries are then processed by
+    the standard LinOSS detection backbone.
+    """
+
+    from architectures.networks.heterodyne_linoss import HeterodyneLinOSS
+
+    model: HeterodyneLinOSS
+
+    def __init__(
+        self,
+        num_ifos: int,
+        sample_rate: float,
+        kernel_length: float,
+        num_chirp_masses: int,
+        encoder_d_model: int = 32,
+        encoder_state_dim: int = 32,
+        n_out: int = 4,
+        d_k: int = 32,
+        d_v: int = 8,
+        temporal_kernel_size: int = 8,
+        temporal_stride: int = 8,
+        encoder_r_min: float = 0.9,
+        encoder_theta_max: float = 3.14159265359,
+        time_hidden_dim: int = 32,
+        time_num_blocks: int = 3,
+        time_dropout_rate: float = 0.0,
+        time_state_dim: int = 32,
+        time_r_min: float = 0.9,
+        time_theta_max: float = 3.14159265359,
+        time_num_res_blocks: int = 0,
+        time_conv_kernel_size: int = 4,
+        time_conv_position: str = "pre",
+        resnet_layers: tuple[int, ...] = (2, 2, 2),
+        resnet_latent_dim: int = 64,
+        resnet_kernel_size: int = 7,
+        resnet_norm_groups: int = 16,
+        mlp_width: int = 64,
+        mlp_depth: int = 2,
+        *,
+        seed: int = 0,
+    ) -> None:
+        import jax.random as jr
+        from architectures.networks.heterodyne_linoss import HeterodyneLinOSS
+
+        self.model = HeterodyneLinOSS(
+            num_ifos=num_ifos,
+            num_chirp_masses=num_chirp_masses,
+            encoder_d_model=encoder_d_model,
+            encoder_state_dim=encoder_state_dim,
+            n_out=n_out,
+            d_k=d_k,
+            d_v=d_v,
+            temporal_kernel_size=temporal_kernel_size,
+            temporal_stride=temporal_stride,
+            encoder_r_min=encoder_r_min,
+            encoder_theta_max=encoder_theta_max,
+            time_hidden_dim=time_hidden_dim,
+            time_num_blocks=time_num_blocks,
+            time_dropout_rate=time_dropout_rate,
+            time_state_dim=time_state_dim,
+            time_r_min=time_r_min,
+            time_theta_max=time_theta_max,
+            time_num_res_blocks=time_num_res_blocks,
+            time_conv_kernel_size=time_conv_kernel_size,
+            time_conv_position=time_conv_position,
+            resnet_layers=resnet_layers,
+            resnet_latent_dim=resnet_latent_dim,
+            resnet_kernel_size=resnet_kernel_size,
+            resnet_norm_groups=resnet_norm_groups,
+            mlp_width=mlp_width,
+            mlp_depth=mlp_depth,
+            key=jr.PRNGKey(seed),
+        )
+
+    def __call__(self, X, state, key=None):
+        return self.model(X, state, key)
+
+    def forward(self, X, state, key=None):
+        return self.model(X, state, key)
+
+
+class SupervisedHeterodynePoolingLinOSS(JaxArchitecture):
+    """Heterodyne LinOSS with pooling backbone + conv ResNet head.
+
+    Feeds all num_ifos * num_chirp_masses heterodyned channels directly into
+    PoolingLinossHeavyBackbone (no attention reduction). A conv ResNet1D then
+    reads out a scalar logit from the downsampled sequence.
+
+    Input shape: (num_ifos * num_chirp_masses, time)
+    """
+
+    from architectures.networks.linoss import LinOSS
+
+    linoss: "LinOSS"
+
+    def __init__(
+        self,
+        num_ifos: int,
+        sample_rate: float,
+        kernel_length: float,
+        num_chirp_masses: int,
+        time_hidden_dim: int,
+        time_num_blocks: int,
+        time_dropout_rate: float,
+        time_state_dim: int,
+        time_r_min: float,
+        time_theta_max: float,
+        time_num_res_blocks: int,
+        time_conv_kernel_size: int,
+        time_conv_position: str = "pre",
+        resnet_layers: tuple[int, ...] = (2, 2, 2),
+        resnet_latent_dim: int = 64,
+        resnet_kernel_size: int = 7,
+        resnet_norm_groups: int = 16,
+        mlp_width: int = 64,
+        mlp_depth: int = 2,
+        *,
+        seed: int = 0,
+    ) -> None:
+        import jax.random as jr
+        from architectures.networks.linoss import LinOSS
+
+        self.linoss = LinOSS(
+            time_in_features=num_ifos * num_chirp_masses,
+            time_hidden_dim=time_hidden_dim,
+            time_num_blocks=time_num_blocks,
+            time_dropout_rate=time_dropout_rate,
+            time_state_dim=time_state_dim,
+            time_r_min=time_r_min,
+            time_theta_max=time_theta_max,
+            time_num_res_blocks=time_num_res_blocks,
+            time_conv_kernel_size=time_conv_kernel_size,
+            time_conv_position=time_conv_position,
+            resnet_layers=resnet_layers,
+            resnet_latent_dim=resnet_latent_dim,
+            resnet_kernel_size=resnet_kernel_size,
+            resnet_norm_groups=resnet_norm_groups,
+            mlp_width=mlp_width,
+            mlp_depth=mlp_depth,
+            key=jr.PRNGKey(seed),
+        )
+
+    def __call__(self, X, state, key=None):
+        return self.linoss(X, state, key=key)
+
+    def forward(self, X, state, key=None):
+        return self.linoss(X, state, key=key)
+
+
 class SupervisedHeterodyneTimeDomainResNet(SupervisedArchitecture):
     """
     Time Domain ResNet that processes a Heterodyned timeseries.

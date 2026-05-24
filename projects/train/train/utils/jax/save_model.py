@@ -8,6 +8,7 @@ from lightning.pytorch import Callback, LightningModule
 from lightning.pytorch.trainer import Trainer
 
 from train.callbacks import get_save_dir
+from train.utils.jax.checksum import compute_model_checksum
 
 logger = logging.getLogger(__name__)
 
@@ -112,6 +113,16 @@ class JAXCheckpointManager(Callback):
             else score < self.best_metric
         )
 
+    def _get_input_shape(self, trainer: Trainer) -> tuple[int, int]:
+        """Return ``(num_ifos, time_len)`` from the attached datamodule."""
+        if hasattr(trainer, "datamodule") and trainer.datamodule is not None:
+            dm = trainer.datamodule
+        else:
+            dm = trainer.lightning_module.trainer.datamodule
+        num_ifos = len(dm.hparams.ifos)
+        time_len = int(dm.hparams.sample_rate * dm.hparams.kernel_length)
+        return num_ifos, time_len
+
     def _save_checkpoint(
         self,
         trainer: Trainer,
@@ -120,17 +131,29 @@ class JAXCheckpointManager(Callback):
     ):
         self._cleanup_old_checkpoints(checkpoint_type)
 
-        model_path = self._get_checkpoint_path(trainer, score)
+        model = trainer.lightning_module.jax_model
+        state = trainer.lightning_module.jax_model_state
+        opt_state = trainer.lightning_module.opt_state
+
+        # Compute integrity checksum before writing to disk.
+        checksum = None
+        try:
+            num_ifos, time_len = self._get_input_shape(trainer)
+            checksum = compute_model_checksum(model, state, num_ifos, time_len)
+            logger.info(f"Computed checkpoint checksum: {checksum}")
+        except Exception as e:
+            logger.warning(
+                f"Could not compute checkpoint checksum: {e}."
+                " Saving without checksum."
+            )
+            num_ifos, time_len = None, None
+
+        model_path = self._get_checkpoint_path(
+            trainer, score, checksum, num_ifos, time_len
+        )
 
         # Save model and state as tuple
-        eqx.tree_serialise_leaves(
-            model_path,
-            (
-                trainer.lightning_module.jax_model,
-                trainer.lightning_module.jax_model_state,
-                trainer.lightning_module.opt_state,
-            ),
-        )
+        eqx.tree_serialise_leaves(model_path, (model, state, opt_state))
 
         current_step = trainer.global_step
         # Track checkpoint
@@ -145,11 +168,23 @@ class JAXCheckpointManager(Callback):
             logger.info(f"Saved step checkpoint at step {current_step}")
 
     def _get_checkpoint_path(
-        self, trainer: Trainer, score: float | None = None
+        self,
+        trainer: Trainer,
+        score: float | None = None,
+        checksum: str | None = None,
+        num_ifos: int | None = None,
+        time_len: int | None = None,
     ) -> Path:
-        suffix = f"_metric_{score}" if score is not None else ""
+        metric_part = f"_metric_{score}" if score is not None else ""
         current_step = trainer.global_step
-        base_name = f"checkpoint_step_{current_step}{suffix}"
+        checksum_part = (
+            f"_{num_ifos}_{time_len}_{checksum}"
+            if checksum is not None
+            else ""
+        )
+        base_name = (
+            f"checkpoint_step_{current_step}{metric_part}{checksum_part}"
+        )
         return self.output_dir / f"{base_name}.eqx"
 
     def _cleanup_old_checkpoints(self, checkpoint_type: str):

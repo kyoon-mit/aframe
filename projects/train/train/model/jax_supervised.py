@@ -18,6 +18,10 @@ from train.utils.jax.load_model import load_model
 from train.utils.jax.training import (
     jax_apply_training_step,
     jax_apply_snr_weighted_training_step,
+    jax_apply_focal_training_step,
+    jax_apply_hnm_training_step,
+    jax_apply_pauc_training_step,
+    jax_apply_focal_hnm_training_step,
     jax_inference,
 )
 
@@ -40,6 +44,7 @@ class JaxSupervisedAframe(AframeBase):
         warmup_steps: int = 1000,
         seed: int = 42,
         load_from_checkpoint: str | None = None,
+        reset_optimizer_on_load: bool = True,
     ):
         super().__init__(
             arch=Architecture(),
@@ -80,12 +85,27 @@ class JaxSupervisedAframe(AframeBase):
         self.opt_state = self.optimizer.init(diff_model)
 
         if load_from_checkpoint is not None:
-            self.jax_model, self.jax_model_state, self.opt_state = load_model(
+            self.jax_model, self.jax_model_state, loaded_opt = load_model(
                 load_from_checkpoint,
                 self.jax_model,
                 self.opt_state,
                 self.jax_model_state,
             )
+            if reset_optimizer_on_load:
+                diff_model, _ = eqx.partition(
+                    self.jax_model, self.jax_model_filter_spec
+                )
+                self.opt_state = self.optimizer.init(diff_model)
+                logger.info(
+                    "Optimizer state reset after checkpoint load"
+                    " (fresh LR schedule starting from step 0)."
+                )
+            else:
+                self.opt_state = loaded_opt
+                logger.info(
+                    "Optimizer state restored from checkpoint"
+                    " (continuing LR schedule from saved step)."
+                )
 
         self.rng_key = key
 
@@ -156,6 +176,7 @@ class JaxSupervisedAframe(AframeBase):
         logits, new_state = jax_inference(
             self.jax_model, X_time_j, self.jax_model_state, keys
         )
+        self.jax_model_state = new_state
 
         return torch.from_numpy(np.array(logits, copy=True))
 
@@ -182,7 +203,6 @@ class JaxSupervisedAframe(AframeBase):
         y_bg_np = np.array(y_bg.cpu()).flatten()
         y_fg_np = np.array(y_fg.cpu()).flatten()
 
-        # Convert stacked params tensor back to a named dict
         param_names = self.trainer.datamodule.val_param_names
         params_dict = {
             name: params_tensor[:, i].cpu().numpy()
@@ -197,6 +217,278 @@ class JaxSupervisedAframe(AframeBase):
             bg_outputs=y_bg_np,
             params=params_dict,
         )
+
+
+class JaxFocalLossSupervisedAframe(JaxSupervisedAframe):
+    """Jax supervised model trained with focal loss.
+
+    Focal loss down-weights easy examples so the gradient concentrates on
+    hard/misclassified samples:  ``L = (1 - p_t)^gamma * BCE``.
+    Higher ``gamma`` focuses more aggressively on hard cases.
+    """
+
+    def __init__(self, gamma: float = 2.0, **kwargs):
+        super().__init__(**kwargs)
+        self.gamma = gamma
+
+    def training_step(self, batch):
+        X_time, y = batch
+        X_time = jnp.asarray(X_time.cpu().numpy())
+        y = jnp.asarray(y.cpu().numpy())
+
+        self.rng_key, k = jr.split(self.rng_key)
+        batch_size = X_time.shape[0]
+        keys = jr.split(k, batch_size)
+
+        (
+            self.jax_model,
+            self.jax_model_state,
+            self.opt_state,
+            metrics,
+        ) = jax_apply_focal_training_step(
+            self.jax_model,
+            self.jax_model_filter_spec,
+            self.jax_model_state,
+            X_time,
+            y,
+            self.gamma,
+            self.opt_state,
+            self.optimizer.update,
+            keys,
+        )
+
+        loss = metrics["loss"].item()
+        self.log(
+            "train/loss",
+            loss,
+            on_step=True,
+            on_epoch=True,
+            prog_bar=True,
+            sync_dist=True,
+        )
+        self.log(
+            "train/lr",
+            float(self.opt_state[1].hyperparams["learning_rate"]),
+            on_step=True,
+            on_epoch=True,
+            prog_bar=True,
+            sync_dist=True,
+        )
+
+        optimizers = self.optimizers()
+        if isinstance(optimizers, (list, tuple)):
+            for opt in optimizers:
+                opt.step()
+        else:
+            optimizers.step()
+
+        return torch.tensor(0.0)
+
+
+class JaxHardNegMiningSupervisedAframe(JaxSupervisedAframe):
+    """Jax supervised model with hard negative mining.
+
+    BCE is computed over all positives and the ``n_hard_negs`` highest-scoring
+    background samples per batch. Easy negatives are excluded from the
+    gradient, forcing the model to improve its ranking at the hard end.
+    """
+
+    def __init__(self, n_hard_negs: int = 64, **kwargs):
+        super().__init__(**kwargs)
+        self.n_hard_negs = n_hard_negs
+
+    def training_step(self, batch):
+        X_time, y = batch
+        X_time = jnp.asarray(X_time.cpu().numpy())
+        y = jnp.asarray(y.cpu().numpy())
+
+        self.rng_key, k = jr.split(self.rng_key)
+        batch_size = X_time.shape[0]
+        keys = jr.split(k, batch_size)
+
+        (
+            self.jax_model,
+            self.jax_model_state,
+            self.opt_state,
+            metrics,
+        ) = jax_apply_hnm_training_step(
+            self.jax_model,
+            self.jax_model_filter_spec,
+            self.jax_model_state,
+            X_time,
+            y,
+            self.n_hard_negs,
+            self.opt_state,
+            self.optimizer.update,
+            keys,
+        )
+
+        loss = metrics["loss"].item()
+        self.log(
+            "train/loss",
+            loss,
+            on_step=True,
+            on_epoch=True,
+            prog_bar=True,
+            sync_dist=True,
+        )
+        self.log(
+            "train/lr",
+            float(self.opt_state[1].hyperparams["learning_rate"]),
+            on_step=True,
+            on_epoch=True,
+            prog_bar=True,
+            sync_dist=True,
+        )
+
+        optimizers = self.optimizers()
+        if isinstance(optimizers, (list, tuple)):
+            for opt in optimizers:
+                opt.step()
+        else:
+            optimizers.step()
+
+        return torch.tensor(0.0)
+
+
+class JaxPAUCSupervisedAframe(JaxSupervisedAframe):
+    """Jax supervised model trained with a pAUC surrogate loss.
+
+    Optimises a squared-hinge pairwise loss over (positive, hard-negative)
+    pairs where hard negatives are the ``n_hard_negs`` highest-scoring
+    background samples in each batch. This directly targets the low-FPR
+    regime of the ROC curve rather than the full AUC.
+
+    The ``margin`` parameter sets the desired score gap: a positive must
+    outscore each hard negative by at least ``margin`` for zero loss.
+    """
+
+    def __init__(self, n_hard_negs: int = 16, margin: float = 1.0, **kwargs):
+        super().__init__(**kwargs)
+        self.n_hard_negs = n_hard_negs
+        self.margin = margin
+
+    def training_step(self, batch):
+        X_time, y = batch
+        X_time = jnp.asarray(X_time.cpu().numpy())
+        y = jnp.asarray(y.cpu().numpy())
+
+        self.rng_key, k = jr.split(self.rng_key)
+        batch_size = X_time.shape[0]
+        keys = jr.split(k, batch_size)
+
+        (
+            self.jax_model,
+            self.jax_model_state,
+            self.opt_state,
+            metrics,
+        ) = jax_apply_pauc_training_step(
+            self.jax_model,
+            self.jax_model_filter_spec,
+            self.jax_model_state,
+            X_time,
+            y,
+            self.n_hard_negs,
+            self.margin,
+            self.opt_state,
+            self.optimizer.update,
+            keys,
+        )
+
+        loss = metrics["loss"].item()
+        self.log(
+            "train/loss",
+            loss,
+            on_step=True,
+            on_epoch=True,
+            prog_bar=True,
+            sync_dist=True,
+        )
+        self.log(
+            "train/lr",
+            float(self.opt_state[1].hyperparams["learning_rate"]),
+            on_step=True,
+            on_epoch=True,
+            prog_bar=True,
+            sync_dist=True,
+        )
+
+        optimizers = self.optimizers()
+        if isinstance(optimizers, (list, tuple)):
+            for opt in optimizers:
+                opt.step()
+        else:
+            optimizers.step()
+
+        return torch.tensor(0.0)
+
+
+class JaxFocalHNMSupervisedAframe(JaxSupervisedAframe):
+    """Focal loss combined with hard negative mining.
+
+    Applies focal down-weighting (concentrates on hard examples globally)
+    AND restricts the loss to the top-``n_hard_negs`` hardest negatives per
+    batch (ignores trivially easy negatives entirely).
+    """
+
+    def __init__(self, gamma: float = 2.0, n_hard_negs: int = 64, **kwargs):
+        super().__init__(**kwargs)
+        self.gamma = gamma
+        self.n_hard_negs = n_hard_negs
+
+    def training_step(self, batch):
+        X_time, y = batch
+        X_time = jnp.asarray(X_time.cpu().numpy())
+        y = jnp.asarray(y.cpu().numpy())
+
+        self.rng_key, k = jr.split(self.rng_key)
+        batch_size = X_time.shape[0]
+        keys = jr.split(k, batch_size)
+
+        (
+            self.jax_model,
+            self.jax_model_state,
+            self.opt_state,
+            metrics,
+        ) = jax_apply_focal_hnm_training_step(
+            self.jax_model,
+            self.jax_model_filter_spec,
+            self.jax_model_state,
+            X_time,
+            y,
+            self.gamma,
+            self.n_hard_negs,
+            self.opt_state,
+            self.optimizer.update,
+            keys,
+        )
+
+        loss = metrics["loss"].item()
+        self.log(
+            "train/loss",
+            loss,
+            on_step=True,
+            on_epoch=True,
+            prog_bar=True,
+            sync_dist=True,
+        )
+        self.log(
+            "train/lr",
+            float(self.opt_state[1].hyperparams["learning_rate"]),
+            on_step=True,
+            on_epoch=True,
+            prog_bar=True,
+            sync_dist=True,
+        )
+
+        optimizers = self.optimizers()
+        if isinstance(optimizers, (list, tuple)):
+            for opt in optimizers:
+                opt.step()
+        else:
+            optimizers.step()
+
+        return torch.tensor(0.0)
 
 
 class JaxSNRWeightedSupervisedAframe(JaxSupervisedAframe):
