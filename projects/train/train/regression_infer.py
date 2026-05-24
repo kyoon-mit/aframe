@@ -34,6 +34,7 @@ Minimal YAML
 """
 
 import glob
+import json
 import logging
 import math
 from pathlib import Path
@@ -48,7 +49,7 @@ from ml4gw.transforms import Whiten
 from tqdm import tqdm
 
 from ledger.events import EventSet, RecoveredInjectionSet
-from ledger.injections import InterferometerResponseSet, waveform_class_factory
+from ledger.injections import InjectionParameterSet, InterferometerResponseSet, waveform_class_factory
 from utils.preprocessing import PsdEstimator
 
 log = logging.getLogger(__name__)
@@ -288,6 +289,7 @@ def score_sequence(
     psd_estimator: PsdEstimator,
     whitener: Whiten,
     device: torch.device,
+    resampler: Optional[nn.Module] = None,
 ) -> tuple[np.ndarray, Optional[np.ndarray]]:
     """Run the regression model over one background segment.
 
@@ -301,12 +303,16 @@ def score_sequence(
     def _score(x_np: np.ndarray) -> np.ndarray:
         # x_np: (B, n_ifos, sample_length_samples)
         x = torch.from_numpy(x_np).to(device)
+        if resampler is not None:
+            x = resampler(x)                # (B, n_ifos, L_resampled)
         x, psds = psd_estimator(x)          # (B, n_ifos, L_kernel)
         x = whitener(x, psds)               # (B, n_ifos, L_whiten)
-        x = model._prepare_input(x)         # transpose if LinOSS
-        out = model(x)                      # (B, 2*n_vars)
-        var = softplus(out[:, n_vars:])     # (B, n_vars)
-        sigma = torch.sqrt(var[:, 0])       # (B,)  chirp_mass sigma
+        x = model._prepare_input(x)         # applies input norm + transpose if LinOSS
+        out = model(x)                      # (B, 2*n_vars) in normalized output space
+        var = softplus(out[:, n_vars:])     # (B, n_vars) — normalized variance
+        sigma = torch.sqrt(var[:, 0])       # (B,)  chirp_mass sigma (normalized)
+        # sigma is scaled by y_std but ranking is preserved — no un-normalization needed
+        # for the detection statistic. Physical sigma = sigma * model.y_std[0].
         return sigma.cpu().numpy()
 
     bg_parts, fg_parts = [], []
@@ -351,6 +357,7 @@ def main(
     batch_size: int = 128,
     device: str = "cuda",
     verbose: bool = False,
+    raw_sample_rate: Optional[float] = None,
 ) -> None:
     """Aggregate inference over all background segments and all shift combinations.
 
@@ -376,7 +383,7 @@ def main(
         raise ValueError(
             f"Unknown model_class {model_class!r}. Choose from {list(cls_map)}"
         )
-    model = cls_map[model_class].load_from_checkpoint(checkpoint)
+    model = cls_map[model_class].load_from_checkpoint(checkpoint, strict=False)
     model.eval()
 
     dev = torch.device(device if torch.cuda.is_available() else "cpu")
@@ -384,6 +391,16 @@ def main(
     log.info(f"Model loaded, running on {dev}")
 
     # ── build preprocessing modules ──────────────────────────────────── #
+    # Resample if background files are at a different rate than the model expects
+    resampler = None
+    data_rate = raw_sample_rate if raw_sample_rate is not None else sample_rate
+    if raw_sample_rate is not None and raw_sample_rate != sample_rate:
+        import torchaudio
+        resampler = torchaudio.transforms.Resample(
+            int(raw_sample_rate), int(sample_rate)
+        ).to(dev)
+        log.info(f"Resampling background from {raw_sample_rate} Hz → {sample_rate} Hz")
+
     window_length = kernel_length + fduration
     psd_estimator = PsdEstimator(
         window_length,
@@ -394,7 +411,7 @@ def main(
     ).to(dev)
     whitener = Whiten(fduration, sample_rate, highpass, lowpass).to(dev)
 
-    sample_length = kernel_length + fduration + psd_length
+    sample_length = kernel_length + fduration + psd_length  # seconds (same for any data_rate)
 
     # ── find background files ─────────────────────────────────────────── #
     bg_files = sorted(glob.glob(str(Path(background_dir) / "*.hdf5")))
@@ -402,15 +419,37 @@ def main(
         raise FileNotFoundError(f"No HDF5 files found in {background_dir}")
     log.info(f"Found {len(bg_files)} background segments, {len(shifts)} shifts")
 
-    # ── run inference ─────────────────────────────────────────────────── #
-    all_bg = EventSet()
-    all_fg = RecoveredInjectionSet()
+    # ── load full injection set (for rejected_params) ─────────────────── #
+    inj_cls = waveform_class_factory(ifos, InterferometerResponseSet, "ResponseSet")
+    full_injection_set = inj_cls.read(injection_set_fname)
 
+    # ── resume from checkpoint if present ────────────────────────────── #
+    checkpoint_path = outdir / "checkpoint.json"
+    bg_path = outdir / "background.hdf5"
+    fg_path = outdir / "foreground.hdf5"
+
+    if checkpoint_path.exists():
+        ckpt = json.loads(checkpoint_path.read_text())
+        done_pairs = {(d["fname"], str(d["shift"])) for d in ckpt["done_pairs"]}
+        covered_intervals: list[tuple[float, float]] = [tuple(x) for x in ckpt["covered_intervals"]]
+        all_bg = EventSet.read(bg_path) if bg_path.exists() else EventSet()
+        all_fg = RecoveredInjectionSet.read(fg_path) if fg_path.exists() else RecoveredInjectionSet()
+        log.info(f"Resuming: {len(done_pairs)} pairs already done, {len(all_bg)} bg events so far")
+    else:
+        done_pairs: set[tuple[str, str]] = set()
+        covered_intervals: list[tuple[float, float]] = []
+        all_bg = EventSet()
+        all_fg = RecoveredInjectionSet()
+
+    # ── run inference ─────────────────────────────────────────────────── #
     for fname in bg_files:
         for shift_combo in shifts:
-            log.info(
-                f"  segment {Path(fname).name}  shifts={shift_combo}"
-            )
+            pair_key = (Path(fname).name, str(shift_combo))
+            if pair_key in done_pairs:
+                log.info(f"  Skipping {Path(fname).name}  shifts={shift_combo}  (already done)")
+                continue
+
+            log.info(f"  segment {Path(fname).name}  shifts={shift_combo}")
             seq = RegressionSequence(
                 background_fname=fname,
                 injection_set_fname=injection_set_fname,
@@ -423,10 +462,15 @@ def main(
 
             if seq.n_steps == 0:
                 log.warning(f"  Segment too short, skipping.")
+                done_pairs.add(pair_key)
                 continue
 
+            # track covered GPS interval (injections are zero-lag, same for all shifts)
+            if shift_combo == shifts[0]:
+                covered_intervals.append((seq.t0, seq.t0 + seq.duration))
+
             bg_ts, fg_ts = score_sequence(
-                model, seq, psd_estimator, whitener, dev
+                model, seq, psd_estimator, whitener, dev, resampler=resampler
             )
 
             # background events
@@ -440,7 +484,7 @@ def main(
                 integration_window_length=integration_window_length,
                 cluster_window_length=cluster_window_length,
             )
-            all_bg = all_bg.append(bg_events)
+            all_bg.append(bg_events)
 
             # foreground events (zero-lag only)
             if fg_ts is not None and seq.injection_set is not None:
@@ -455,17 +499,37 @@ def main(
                     cluster_window_length=cluster_window_length,
                 )
                 recovered = seq.recover(fg_events)
-                all_fg = all_fg.append(recovered)
+                all_fg.append(recovered)
 
-    # ── write outputs ─────────────────────────────────────────────────── #
-    bg_path = outdir / "background.hdf5"
-    fg_path = outdir / "foreground.hdf5"
+            # checkpoint: persist after every pair so restarts skip done work
+            done_pairs.add(pair_key)
+            all_bg.write(bg_path)
+            if len(all_fg) > 0:
+                all_fg.write(fg_path)
+            checkpoint_path.write_text(json.dumps({
+                "done_pairs": [{"fname": k[0], "shift": k[1]} for k in done_pairs],
+                "covered_intervals": covered_intervals,
+            }))
+
+    # ── rejected params: injections outside all processed segments ───────── #
+    inj_times = full_injection_set.injection_time
+    covered_mask = np.zeros(len(inj_times), dtype=bool)
+    for t0_seg, t1_seg in covered_intervals:
+        covered_mask |= (inj_times >= t0_seg) & (inj_times < t1_seg)
+    rejected = full_injection_set[~covered_mask]
+
+    # ── write final outputs ───────────────────────────────────────────── #
+    rj_path = outdir / "rejected_params.hdf5"
     all_bg.write(bg_path)
-    all_fg.write(fg_path)
+    if len(all_fg) > 0:
+        all_fg.write(fg_path)
+    rejected.write(rj_path)
+    checkpoint_path.unlink(missing_ok=True)  # clean up on successful completion
     log.info(
         f"Done.  background events: {len(all_bg)}  "
         f"(Tb={all_bg.Tb/SECONDS_PER_YEAR:.2f} yr)  |  "
-        f"foreground events: {len(all_fg)}"
+        f"foreground events: {len(all_fg)}  |  "
+        f"rejected injections: {len(rejected)}"
     )
     log.info(f"Results written to {outdir}")
 
@@ -476,7 +540,9 @@ def cli():
     parser.add_function_arguments(main)
     cfg = parser.parse_args()
     cfg = parser.instantiate_classes(cfg)
-    main(**cfg)
+    cfg_dict = vars(cfg)
+    cfg_dict.pop("config", None)
+    main(**cfg_dict)
 
 
 if __name__ == "__main__":
