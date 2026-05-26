@@ -1,13 +1,13 @@
 import torch
 from architectures.supervised import SupervisedArchitecture
 
-from train.model.base import AframeBase
+from train.model.base import ClassificationAframe
 from train.metrics import TimeSlideAUROC
 
 Tensor = torch.Tensor
 
 
-class SupervisedAframe(AframeBase):
+class SupervisedAframe(ClassificationAframe):
     def __init__(self, arch: SupervisedArchitecture, *args, **kwargs) -> None:
         super().__init__(arch, *args, **kwargs)
 

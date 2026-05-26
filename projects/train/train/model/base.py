@@ -12,43 +12,26 @@ Tensor = torch.Tensor
 
 
 class AframeBase(pl.LightningModule):
-    """
-    Args:
-        arch: Architecture to train on
-        metric: Metric used for evaluation
-        learning_rate:
-            Hyperparameter controlling size of gradient steps
-            during training
-        pct_lr_ramp:
-            Fraction of number of training epochs over which
-            learning rate will ramp up to its specified value
-        patience:
-            Number of epochs to wait for an increase in
-            validation AUROC before terminating training.
-            If left as `None`, will never terminate
-            training early
-        save_top_k_models:
-            Maximum number of best-performing model checkpoints
-            to keep during training
+    """Shared infrastructure for all Aframe models.
+
+    Owns the architecture wrapper, logging utilities, and the
+    ``training_step`` dispatch loop. Detection-specific concerns
+    (AUROC metric, timeslide validation, OneCycleLR) live in
+    ``ClassificationAframe``; regression concerns live in
+    ``RegressionAframe``.
     """
 
     def __init__(
         self,
         arch: Architecture,
-        metric: TimeSlideAUROC,
-        learning_rate: float,
-        pct_lr_ramp: float,
-        weight_decay: float = 0.0,
         verbose: bool = False,
     ) -> None:
         super().__init__()
-        # construct our model up front and record all
-        # our hyperparameters to our logdir;
         self.model = arch
-        self.metric = metric
         self.verbose = verbose
         self._logger = self.init_logging(verbose)
-        self.save_hyperparameters(ignore=["arch", "metric"])
+        # NOTE: save_hyperparameters is NOT called here — subclasses own it
+        # so they can control which callables/objects are excluded.
 
     def init_logging(self, verbose):
         log_format = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
@@ -57,7 +40,6 @@ class AframeBase(pl.LightningModule):
             level=logging.DEBUG if verbose else logging.INFO,
             stream=sys.stdout,
         )
-
         world_size, rank = self.get_world_size_and_rank()
         logger_name = self.__class__.__name__
         if world_size > 1:
@@ -65,45 +47,25 @@ class AframeBase(pl.LightningModule):
         return logging.getLogger(logger_name)
 
     def get_world_size_and_rank(self) -> tuple[int, int]:
-        """
-        Name says it all, but generalizes to the case
-        where we aren't running distributed training.
-        """
         if not torch.distributed.is_initialized():
             return 1, 0
-        else:
-            world_size = torch.distributed.get_world_size()
-            rank = torch.distributed.get_rank()
-            return world_size, rank
+        return (
+            torch.distributed.get_world_size(),
+            torch.distributed.get_rank(),
+        )
 
     def forward(self, X: Tensor) -> Tensor:
-        """
-        Override this method to dictate how the outputs
-        of the neural network component of your model
-        are generated. This is distinct from `self.score`
-        in that the latter might include post-processing
-        steps used to produce a single detection statistic
-        value. E.g. for autoencoders, `score` might include
-        computing some reconstruction loss.
-        """
         raise NotImplementedError
 
     def train_step(self, batch: Tensor) -> Union[Tensor, dict[str, Tensor]]:
-        """
-        Override this method to dictate how your model
-        produces loss(es) to be optimized during training.
-        Can either return a single tensor specifying batch-level
-        losses, or a dictionary mapping from names of different
-        loss terms to tensors. In the latter case, each loss term
-        will be logged separately and they'll be combined together
-        using `compute_loss_fn`, which should be overridden in that case.
-        """
         raise NotImplementedError
 
-    # define some hacky callbacks that can be
-    # used during the `self.score` method of
-    # downstream child classes to record more
-    # detailed plots during the course of training
+    def score(self, X: Tensor) -> Tensor:
+        raise NotImplementedError
+
+    def compute_loss_fn(self, **losses):
+        raise NotImplementedError
+
     def on_validation_epoch_start(self):
         self.validating = True
 
@@ -115,37 +77,9 @@ class AframeBase(pl.LightningModule):
             if hasattr(cb, "on_validation_score"):
                 cb.on_validation_score(self.trainer, self, *tensors)
 
-    def score(self, X: Tensor) -> Tensor:
-        """
-        Override this method to produce a detection
-        statistics for a batch of inputs.
-        """
-        raise NotImplementedError
-
-    def compute_loss_fn(self, **losses):
-        """
-        Override this method if your train step returns
-        a dictionary of losses to aggregate them into
-        a single loss that gets optimized.
-        """
-        raise NotImplementedError
-
     def training_step(self, batch: tuple[Tensor, Tensor]) -> Tensor:
         loss = self.train_step(batch)
 
-        # TODO: maybe check if our model has a .loss
-        # attribute and if so include it as a loss
-        # term, this way models can do arbitrary things
-        # to penalize themselves if desired. Should probably
-        # just be added to whatever pops out of
-        # self.compute_loss_fn, under the assumption that the
-        # model has applied the appropriate scale to this
-        # value. More complicated functionality can be
-        # achieved by subclasses in self.train_step.
-
-        # if our train step returned a dictionary of losses,
-        # log them all separately then combine them into a
-        # single loss via `compute_loss_fn`
         if isinstance(loss, dict):
             for name, value in loss.items():
                 self.log(
@@ -169,28 +103,38 @@ class AframeBase(pl.LightningModule):
         )
         return loss
 
+
+class ClassificationAframe(AframeBase):
+    """AframeBase + timeslide-AUROC validation and OneCycleLR optimizer.
+
+    This is the base for all detection/classification models (``SupervisedAframe``
+    and its variants).  Regression models inherit from ``RegressionAframe`` instead.
+    """
+
+    def __init__(
+        self,
+        arch: Architecture,
+        metric: TimeSlideAUROC,
+        learning_rate: float,
+        pct_lr_ramp: float,
+        weight_decay: float = 0.0,
+        verbose: bool = False,
+    ) -> None:
+        super().__init__(arch, verbose)
+        self.metric = metric
+        self.save_hyperparameters(ignore=["arch", "metric"])
+
     def validation_step(self, batch, _) -> None:
         shift, X_bg, X_inj = batch
 
         y_bg = self.score(X_bg)
 
-        # compute predictions over multiple views of
-        # each injection and use their average as our
-        # prediction
         num_views, batch, *shape = X_inj.shape
         X_inj = X_inj.view(num_views * batch, *shape)
         y_fg = self.score(X_inj)
-        y_fg = y_fg.view(num_views, batch)
-        y_fg = y_fg.mean(0)
+        y_fg = y_fg.view(num_views, batch).mean(0)
 
-        # include the shift associated with this data
-        # in our outputs to reconstruct background
-        # timeseries at aggregation time
         self.metric.update(shift, y_bg, y_fg)
-
-        # lightning will take care of updating then
-        # computing the metric at the end of the
-        # validation epoch
         self.log(
             "valid_auroc",
             self.metric,
@@ -205,8 +149,6 @@ class AframeBase(pl.LightningModule):
         else:
             world_size = torch.distributed.get_world_size()
 
-        # scale lr by number of GPUs
-        # https://arxiv.org/pdf/1706.02677.pdf
         lr = self.hparams.learning_rate * world_size
         self._logger.info(f"Scaled lr by {world_size} to {lr}")
         optimizer = torch.optim.AdamW(
@@ -218,5 +160,4 @@ class AframeBase(pl.LightningModule):
             max_lr=lr,
             total_steps=self.trainer.estimated_stepping_batches,
         )
-        scheduler_config = {"scheduler": scheduler, "interval": "step"}
-        return {"optimizer": optimizer, "lr_scheduler": scheduler_config}
+        return {"optimizer": optimizer, "lr_scheduler": {"scheduler": scheduler, "interval": "step"}}

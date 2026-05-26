@@ -23,10 +23,14 @@ class SpectrogramDomainSupervisedAframeDataset(SupervisedAframeDataset):
             spectrogram_shape=self.spectrogram_shape,
         )
 
-    def inject(self, X, waveforms=None):
-        X, y, psds = super().inject(X, waveforms)
-        X = self.whitener(X, psds)
-        X = self.qtransform(X)
+    def apply_transforms(self, X, psds):
+        return self.qtransform(self.whitener(X, psds))
+
+    def inject(self, X, waveforms=None, params=None):
+        X, y, psds, params_out = super().inject(X, waveforms, params)
+        X = self.apply_transforms(X, psds)
+        if params is not None:
+            return X, y, params_out
         return X, y
 
     def build_val_batches(
@@ -117,14 +121,15 @@ class FrequencyDomainSupervisedAframeDataset(SupervisedAframeDataset):
 
         return X_bg, X_inj
 
-    def inject(self, X, waveforms=None):
-        X, y, psds = super().inject(X, waveforms)
-
-        # fft whiten and bandpass in frequency domain
+    def apply_transforms(self, X, psds):
         X = self.whiten(X, psds)
+        return torch.cat([X.real, X.imag], dim=1)
 
-        # split into real and imaginary parts
-        X = torch.cat([X.real, X.imag], dim=1)
+    def inject(self, X, waveforms=None, params=None):
+        X, y, psds, params_out = super().inject(X, waveforms, params)
+        X = self.apply_transforms(X, psds)
+        if params is not None:
+            return X, y, params_out
         return X, y
 
 
@@ -217,14 +222,16 @@ class TimeSpectrogramDomainSupervisedAframeDataset(SupervisedAframeDataset):
         # first input is timeseries and second input is spectrogram
         return (X_bg[1], X_bg_spec), (X_fg[1], X_fg_spec)
 
-    def inject(self, X, waveforms=None):
-        X, y, psds = super().inject(X, waveforms)
+    def apply_transforms(self, X, psds):
         X = self.whitener(X, psds)
         if self.decimator is not None:
             X = self.decimator(X)
-
-        # converting first segment of timeseries to q transform
         X_spec = self.qtransform(X[0])
+        return (X[1], X_spec)
 
-        # first input is timeseries and second input is spectrogram
-        return (X[1], X_spec), y
+    def inject(self, X, waveforms=None, params=None):
+        X, y, psds, params_out = super().inject(X, waveforms, params)
+        X = self.apply_transforms(X, psds)
+        if params is not None:
+            return X, y, params_out
+        return X, y

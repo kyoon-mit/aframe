@@ -6,3 +6,10 @@ from .time_frequency_domain import (
 from .multimodal import MultiModalSupervisedAframeDataset
 from .supervised import SupervisedAframeDataset
 from .time_domain import TimeDomainSupervisedAframeDataset
+from .mixin import RegressionSupervisedMixin
+
+
+class TimeDomainRegressionDataset(
+    RegressionSupervisedMixin, TimeDomainSupervisedAframeDataset
+):
+    pass

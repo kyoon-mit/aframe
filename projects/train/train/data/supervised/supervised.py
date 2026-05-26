@@ -43,7 +43,7 @@ class SupervisedAframeDataset(BaseAframeDataset):
         return self.hparams.waveform_prob + self.swap_prob + self.mute_prob
 
     @torch.no_grad()
-    def inject(self, X, waveforms=None):
+    def inject(self, X, waveforms=None, params=None):
         if self.waveforms_from_disk and waveforms is None:
             raise ValueError(
                 "Waveforms should be passed to the `inject` method "
@@ -71,6 +71,8 @@ class SupervisedAframeDataset(BaseAframeDataset):
             N = mask.sum().item()
             idx = torch.randperm(waveforms.shape[0])[:N]
             waveforms = waveforms[idx].to(X.device).float()
+            if params is not None:
+                params = params[idx].to(X.device).float()
             hc, hp = waveforms[:, 0], waveforms[:, 1]
         else:
             hc, hp = self.waveform_sampler.sample(X[mask])
@@ -106,4 +108,9 @@ class SupervisedAframeDataset(BaseAframeDataset):
         y = torch.zeros((X.size(0), 1), device=X.device)
         y[mask] += 1
 
-        return X, y, psds
+        n_params = params.shape[-1] if params is not None else 0
+        params_out = torch.zeros(X.size(0), n_params, device=X.device)
+        if params is not None:
+            params_out[mask] = params
+
+        return X, y, psds, params_out
