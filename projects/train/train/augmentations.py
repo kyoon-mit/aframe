@@ -1,4 +1,5 @@
 from typing import Optional, Union
+from typing import Literal
 
 import torch
 from ml4gw import gw
@@ -162,8 +163,9 @@ class SnrSampler:
         max_min_snr: float,
         min_min_snr: float,
         max_snr: float,
-        alpha: float,
         decay_steps: int,
+        alpha: float | None = None,
+        distribution_type: Literal["powerlaw", "uniform"] = "powerlaw",
     ):
         self.max_min_snr = max_min_snr
         self.min_min_snr = min_min_snr
@@ -171,8 +173,15 @@ class SnrSampler:
         self.alpha = alpha
         self.decay_steps = decay_steps
         self._step = 0
+        self.distribution_type = distribution_type
 
-        self.dist = PowerLaw(max_min_snr, max_snr, alpha)
+        if distribution_type == "powerlaw" and alpha is None:
+            raise ValueError("Must specify alpha for power law distribution")
+
+        if self.distribution_type == "powerlaw":
+            self.dist = PowerLaw(max_min_snr, max_snr, alpha)
+        elif self.distribution_type == "uniform":
+            self.dist = torch.distributions.Uniform(min_min_snr, max_snr)
 
     def __call__(self, N):
         return self.sample((N,))
@@ -191,7 +200,10 @@ class SnrSampler:
         diff = self.max_min_snr - self.min_min_snr
         new = self.max_min_snr - frac * diff
 
-        self.dist = PowerLaw(new, self.max_snr, self.alpha)
+        if self.distribution_type == "powerlaw":
+            self.dist = PowerLaw(new, self.max_snr, self.alpha)
+        elif self.distribution_type == "uniform":
+            self.dist = torch.distributions.Uniform(new, self.max_snr)
 
 
 class WaveformProjector(torch.nn.Module):

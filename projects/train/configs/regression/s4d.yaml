@@ -55,42 +55,42 @@ data:
     target_parameters: [chirp_mass]
     n_val_waveforms: 4096
 
-    snr_sampler:
-      class_path: ml4gw.distributions.PowerLaw
-      init_args:
-        minimum: 8
-        maximum: 100
-        index: -3
+snr_sampler:
+  class_path: train.augmentations.SnrSampler
+  init_args:
+    max_min_snr: 30.0
+    min_min_snr: 4.0
+    max_snr: 50.0
+    decay_steps: 100000
+    distribution_type: uniform
 
-    waveform_sampler:
-      class_path: train.data.waveforms.WaveformLoader
-      init_args:
-        ifos: [H1, L1]
-        sample_rate: 2048
-        val_waveform_file: /home/barmstrong/aframe_new/data/bns/aframe_train/val_waveforms.hdf5
-        training_waveform_path: /home/barmstrong/aframe_new/data/bns/aframe_train/training_waveforms.hdf5
+  waveform_sampler:
+    class_path: train.data.waveforms.WaveformLoader
+    init_args:
+      ifos: [H1, L1]
+      sample_rate: 2048
+      val_waveform_file: /home/barmstrong/aframe_new/data/bns/aframe_train/val_waveforms.hdf5
+      training_waveform_path: /home/barmstrong/aframe_new/data/bns/aframe_train/training_waveforms.hdf5
 
-    dec:
-      class_path: ml4gw.distributions.Cosine
-    psi:
-      class_path: torch.distributions.Uniform
-      init_args:
-        low: 0
-        high: 3.14159
-        validate_args: false
-    phi:
-      class_path: torch.distributions.Uniform
-      init_args:
-        low: -3.14159
-        high: 3.14159
-        validate_args: false
+  dec:
+    class_path: ml4gw.distributions.Cosine
+  psi:
+    class_path: torch.distributions.Uniform
+    init_args:
+      low: 0
+      high: 3.14159
+      validate_args: false
+  phi:
+    class_path: torch.distributions.Uniform
+    init_args:
+      low: -3.14159
+      high: 3.14159
+      validate_args: false
 
 trainer:
   accelerator: auto
   strategy: auto
   devices: auto
-  num_nodes: 1
-  precision: null
 
   max_epochs: 3000
   min_epochs: 60
