@@ -48,16 +48,17 @@ class DropoutNd(nn.Module):
     def __init__(self, p: float = 0.5, tie: bool = True, transposed: bool = True):
         super().__init__()
         if p < 0 or p >= 1:
-            raise ValueError(
-                f"dropout probability must be in [0, 1), got {p}"
-            )
+            raise ValueError(f"dropout probability must be in [0, 1), got {p}")
+
         self.p = p
         self.tie = tie
         self.transposed = transposed
         self.binomial = torch.distributions.binomial.Binomial(probs=1 - self.p)
 
     def forward(self, X: torch.Tensor) -> torch.Tensor:
-        """X: (batch, dim, lengths...) if transposed else (batch, lengths..., dim)."""
+        """X: (batch, dim, lengths...) if transposed
+        else (batch, lengths..., dim).
+        """
         if self.training:
             if not self.transposed:
                 X = rearrange(X, "b ... d -> b d ...")
@@ -83,9 +84,9 @@ class S4DKernel(nn.Module):
         super().__init__()
 
         H = d_model
-        log_dt = torch.rand(H) * (
-            math.log(dt_max) - math.log(dt_min)
-        ) + math.log(dt_min)
+        log_dt = torch.rand(H) * (math.log(dt_max) - math.log(dt_min)) + math.log(
+            dt_min
+        )
 
         C = torch.randn(H, N // 2, dtype=torch.cfloat)
         self.C = nn.Parameter(torch.view_as_real(C))
@@ -98,19 +99,23 @@ class S4DKernel(nn.Module):
 
     def forward(self, L: int) -> torch.Tensor:
         """Returns: (H, L) convolution kernel."""
-        dt = torch.exp(self.log_dt)               # (H,)
-        C = torch.view_as_complex(self.C)         # (H, N//2)
+
+        dt = torch.exp(self.log_dt)  # (H,)
+        C = torch.view_as_complex(self.C)  # (H, N//2)
         # torch.complex(...) instead of `1j` for torch.compile safety
         A = torch.complex(-torch.exp(self.log_A_real), self.A_imag)  # (H, N//2)
 
-        dtA = A * dt.unsqueeze(-1)                                    # (H, N//2)
-        K = dtA.unsqueeze(-1) * torch.arange(L, device=A.device)     # (H, N//2, L)
+        dtA = A * dt.unsqueeze(-1)  # (H, N//2)
+        K = dtA.unsqueeze(-1) * torch.arange(L, device=A.device)  # (H, N//2, L)
+
         C = C * (torch.exp(dtA) - 1.0) / A
         K = 2 * torch.einsum("hn, hnl -> hl", C, torch.exp(K)).real  # (H, L)
         return K
 
-    def register(self, name: str, tensor: torch.Tensor, lr: float | None = None) -> None:
-        """Register a tensor with a configurable learning rate and 0 weight decay."""
+    def register(
+        self, name: str, tensor: torch.Tensor, lr: float | None = None
+    ) -> None:
+        """Register a tensor with a configurable LR and 0 weight decay."""
         if lr == 0.0:
             self.register_buffer(name, tensor)
         else:
@@ -160,9 +165,9 @@ class S4D(nn.Module):
             u = u.transpose(-1, -2)
         L = u.size(-1)
 
-        k = self.kernel(L=L)                               # (H, L)
-        k_f = torch.fft.rfft(k, n=2 * L)                  # (H, L)
-        u_f = torch.fft.rfft(u, n=2 * L)                  # (B, H, L)
+        k = self.kernel(L=L)  # (H, L)
+        k_f = torch.fft.rfft(k, n=2 * L)  # (H, L)
+        u_f = torch.fft.rfft(u, n=2 * L)  # (B, H, L)
         y = torch.fft.irfft(u_f * k_f, n=2 * L)[..., :L]  # (B, H, L)
 
         y = y + u * self.D.unsqueeze(-1)  # D-term skip connection
@@ -196,13 +201,22 @@ class S4Model(nn.Module):
 
         self.encoder = nn.Linear(d_input, d_model)
 
-        self.s4_layers = nn.ModuleList([
-            S4D(d_model, d_state=d_state, dropout=dropout, transposed=True,
-                dt_min=dt_min, dt_max=dt_max, lr=lr)
-            for _ in range(n_layers)
-        ])
-        self.norms    = nn.ModuleList([nn.LayerNorm(d_model) for _ in range(n_layers)])
-        self.dropouts = nn.ModuleList([DropoutNd(dropout)    for _ in range(n_layers)])
+        self.s4_layers = nn.ModuleList(
+            [
+                S4D(
+                    d_model,
+                    d_state=d_state,
+                    dropout=dropout,
+                    transposed=True,
+                    dt_min=dt_min,
+                    dt_max=dt_max,
+                    lr=lr,
+                )
+                for _ in range(n_layers)
+            ]
+        )
+        self.norms = nn.ModuleList([nn.LayerNorm(d_model) for _ in range(n_layers)])
+        self.dropouts = nn.ModuleList([DropoutNd(dropout) for _ in range(n_layers)])
 
         self.decoder = nn.Linear(d_model, d_output)
 
@@ -215,14 +229,17 @@ class S4Model(nn.Module):
             (B, d_output)
         """
         x = x.transpose(-1, -2)  # (B, L, d_input)
-        x = self.encoder(x)      # (B, L, d_model)
+
+        x = self.encoder(x)  # (B, L, d_model)
         x = x.transpose(-1, -2)  # (B, d_model, L)
 
-        for layer, norm, dropout in zip(self.s4_layers, self.norms, self.dropouts, strict=True):
+        for layer, norm, dropout in zip(
+            self.s4_layers, self.norms, self.dropouts, strict=True
+        ):
             z, _ = layer(x)
             z = dropout(z)
             x = norm((z + x).transpose(-1, -2)).transpose(-1, -2)  # postnorm
 
         x = x.transpose(-1, -2)  # (B, L, d_model)
-        x = x.mean(dim=1)        # (B, d_model) — pool over sequence
-        return self.decoder(x)   # (B, d_output)
+        x = x.mean(dim=1)  # (B, d_model) — pool over sequence
+        return self.decoder(x)  # (B, d_output)

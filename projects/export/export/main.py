@@ -1,8 +1,6 @@
-import io
 import logging
 from typing import Optional
 
-import h5py
 import hermes.quiver as qv
 import torch
 
@@ -133,15 +131,25 @@ def export(
     if aframe_instances is not None:
         scale_model(aframe, aframe_instances)
 
-    # Infer the shape of each input from the batch file.
-    # Assumes the output is stored as "y"
-    with open_file(batch_file, "rb") as f:
-        batch_file = h5py.File(io.BytesIO(f.read()))
-        input_shape_dict = {
-            key: (batch_size,) + tuple(batch_file[key].shape[1:])
-            for key in batch_file.keys()
-            if key != "y"
-        }
+    # Infer the actual output shapes of the preprocessor by running a
+    # dummy forward pass. The snapshotter concatenates its state with each
+    # new update, so its output size is state_size + batch_size * stride.
+    stride = int(sample_rate / inference_sampling_rate)
+    state_size = int(
+        (kernel_length + fduration + psd_length - 1 / inference_sampling_rate)
+        * sample_rate
+    )
+    strain_size = state_size + batch_size * stride
+    dummy_strain = torch.zeros(2, num_ifos, strain_size)
+    with torch.no_grad():
+        preproc_outputs = preprocessor(dummy_strain)
+    if isinstance(preproc_outputs, torch.Tensor):
+        preproc_outputs = (preproc_outputs,)
+    input_shape_dict = {
+        key: (batch_size,) + tuple(t.shape[1:])
+        for key, t in zip(["X", "X_spec"], preproc_outputs, strict=False)
+    }
+    logging.info(f"Inferred preprocessor output shapes: {input_shape_dict}")
 
     # the network will have some different keyword
     # arguments required for export depending on

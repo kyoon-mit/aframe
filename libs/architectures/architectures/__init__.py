@@ -7,5 +7,8 @@ from .supervised import (
     SupervisedTimeDomainResNet,
     SupervisedTimeSpectrogramResNet,
     SupervisedTimeDomainLinOSS,
+    SupervisedTimeDomainOriginalLinOSS,
     SupervisedHeterodyneTimeDomainResNet,
+    SupervisedHeterodyneLinOSS,
+    SupervisedHeterodynePoolingLinOSS,
 )

@@ -5,7 +5,9 @@ from typing import Union
 import lightning.pytorch as pl
 import torch
 from architectures import Architecture
+import numpy as np
 
+from train.metric import LightningStepOutput
 from train.metrics import TimeSlideAUROC
 
 Tensor = torch.Tensor
@@ -83,7 +85,7 @@ class AframeBase(pl.LightningModule):
         if isinstance(loss, dict):
             for name, value in loss.items():
                 self.log(
-                    name,
+                    f"train/{name}",
                     value.mean(),
                     on_step=True,
                     on_epoch=True,
@@ -94,7 +96,7 @@ class AframeBase(pl.LightningModule):
 
         loss = loss.mean()
         self.log(
-            "train_loss",
+            "train/loss",
             loss,
             on_step=True,
             on_epoch=True,
@@ -102,6 +104,44 @@ class AframeBase(pl.LightningModule):
             logger=True,
         )
         return loss
+
+    def validation_step(self, batch, _) -> LightningStepOutput:
+        shift, X_bg, X_inj, params_tensor = batch
+
+        y_bg = self.score(X_bg)
+
+        num_views, batch, *shape = X_inj.shape
+        X_inj = X_inj.view(num_views * batch, *shape)
+        y_fg = self.score(X_inj)
+        y_fg = y_fg.view(num_views, batch).mean(0)
+
+        self.metric.update(shift, y_bg, y_fg)
+        self.log(
+            "val/valid_auroc",
+            self.metric,
+            on_step=True,
+            on_epoch=True,
+            sync_dist=True,
+        )
+
+        y_bg_np = np.array(y_bg.cpu()).flatten()
+        y_fg_np = np.array(y_fg.cpu()).flatten()
+
+        # Convert stacked params tensor back to a named dict
+        param_names = self.trainer.datamodule.val_param_names
+        params_dict = {
+            name: params_tensor[:, i].cpu().numpy()
+            for i, name in enumerate(param_names)
+        }
+
+        return LightningStepOutput(
+            targets=np.concatenate(
+                [np.zeros(len(y_bg_np)), np.ones(len(y_fg_np))]
+            ),
+            outputs=np.concatenate([y_bg_np, y_fg_np]),
+            bg_outputs=y_bg_np,
+            params=params_dict,
+        )
 
 
 class ClassificationAframe(AframeBase):
@@ -136,11 +176,30 @@ class ClassificationAframe(AframeBase):
 
         self.metric.update(shift, y_bg, y_fg)
         self.log(
-            "valid_auroc",
+            "val/valid_auroc",
             self.metric,
             on_step=True,
             on_epoch=True,
             sync_dist=True,
+        )
+
+        y_bg_np = np.array(y_bg.cpu()).flatten()
+        y_fg_np = np.array(y_fg.cpu()).flatten()
+
+        # Convert stacked params tensor back to a named dict
+        param_names = self.trainer.datamodule.val_param_names
+        params_dict = {
+            name: _params[:, i].cpu().numpy()
+            for i, name in enumerate(param_names)
+        }
+
+        return LightningStepOutput(
+            targets=np.concatenate(
+                [np.zeros(len(y_bg_np)), np.ones(len(y_fg_np))]
+            ),
+            outputs=np.concatenate([y_bg_np, y_fg_np]),
+            bg_outputs=y_bg_np,
+            params=params_dict,
         )
 
     def configure_optimizers(self):
@@ -160,4 +219,7 @@ class ClassificationAframe(AframeBase):
             max_lr=lr,
             total_steps=self.trainer.estimated_stepping_batches,
         )
-        return {"optimizer": optimizer, "lr_scheduler": {"scheduler": scheduler, "interval": "step"}}
+        return {
+            "optimizer": optimizer,
+            "lr_scheduler": {"scheduler": scheduler, "interval": "step"},
+        }

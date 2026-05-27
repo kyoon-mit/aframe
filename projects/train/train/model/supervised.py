@@ -64,7 +64,7 @@ class SupervisedMultiModalAframe(SupervisedAframe):
         # computing the metric at the end of the
         # validation epoch
         self.log(
-            "valid_auroc",
+            "val/valid_auroc",
             self.metric,
             on_step=True,
             on_epoch=True,
@@ -160,7 +160,7 @@ class SupervisedTimeSpectrogramAframe(SupervisedAframe):
         # validation epoch
         # tracking metric for each data type
         self.log(
-            "valid_auroc",
+            "val/valid_auroc",
             self.metric,
             on_step=True,
             on_epoch=True,
@@ -168,7 +168,7 @@ class SupervisedTimeSpectrogramAframe(SupervisedAframe):
         )
 
         self.log(
-            "valid_auroc_X",
+            "val/valid_auroc_X",
             self.metric_X,
             on_step=True,
             on_epoch=True,
@@ -176,7 +176,7 @@ class SupervisedTimeSpectrogramAframe(SupervisedAframe):
         )
 
         self.log(
-            "valid_auroc_X_spec",
+            "val/valid_auroc_X_spec",
             self.metric_X_spec,
             on_step=True,
             on_epoch=True,

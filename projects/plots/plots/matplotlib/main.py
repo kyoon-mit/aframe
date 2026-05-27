@@ -1,3 +1,4 @@
+import csv
 import logging
 from pathlib import Path
 from typing import Callable, List, Optional
@@ -89,6 +90,69 @@ def make_grid(combos):
     return fig, axes
 
 
+def _apply_vetos(
+    background_events, foreground_events, vetos, ifos, start, stop
+):
+    veto_parser = VetoParser(
+        VETO_DEFINER_FILE,
+        GATE_PATHS,
+        start,
+        stop,
+        ifos,
+    )
+    catalog_vetos = get_catalog_vetos(start, stop)
+    for cat in vetos:
+        for i, ifo in enumerate(ifos):
+            cat_vetos = (
+                catalog_vetos
+                if cat == "CATALOG"
+                else veto_parser.get_vetos(cat)[ifo]
+            )
+            back_count = len(background_events)
+            fore_count = len(foreground_events)
+            if len(cat_vetos) > 0:
+                background_events = background_events.apply_vetos(cat_vetos, i)
+                foreground_events = foreground_events.apply_vetos(cat_vetos, i)
+            logging.info(
+                f"\t{back_count - len(background_events)} {cat} "
+                f"background events removed for ifo {ifo}"
+            )
+            logging.info(
+                f"\t{fore_count - len(foreground_events)} {cat} "
+                f"foreground events removed for ifo {ifo}"
+            )
+    return background_events, foreground_events
+
+
+def _save_csvs(
+    output_dir,
+    mass_combos,
+    fars,
+    aframe_sv,
+    general_sv,
+    gwtc3_sv,
+    pipelines,
+    model_name,
+):
+    for i, (m1, m2) in enumerate(mass_combos):
+        csv_path = output_dir / f"sv_{m1}_{m2}.csv"
+        with open(csv_path, "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["x", model_name] + pipelines)
+            for j, (x, y) in enumerate(zip(fars, aframe_sv[i], strict=False)):
+                row = [x, y] + [
+                    gwtc3_sv[p][f"{m1}-{m2}"][j] for p in pipelines
+                ]
+                writer.writerow(row)
+
+    csv_path = output_dir / "sv_general.csv"
+    with open(csv_path, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["x", model_name])
+        for x, y in zip(fars, general_sv, strict=False):
+            writer.writerow([x, y])
+
+
 def main(
     background: Path,
     foreground: Path,
@@ -104,6 +168,8 @@ def main(
     sigma: float = 0.1,
     verbose: bool = False,
     vetos: Optional[List[VETO_CATEGORIES]] = None,
+    aframe_only: bool = False,
+    model_name: str = "aframe",
 ):
     """
     Compute and plot the sensitive volume of an aframe analysis
@@ -136,6 +202,12 @@ def main(
             The width of the log normal mass distribution to use
         verbose:
             If true, log at the debug level
+        aframe_only:
+            If True, skip computing SV for GWTC-3 pipelines and only
+            plot aframe results.
+        model_name:
+            Name used as the y-column header in the saved CSV files
+            and as the plot legend label.
     """
     configure_logging(log_file, verbose)
     logging.info("Reading in inference outputs")
@@ -170,39 +242,13 @@ def main(
 
     # optionally apply vetos
     if vetos is not None:
-        veto_parser = VetoParser(
-            VETO_DEFINER_FILE,
-            GATE_PATHS,
-            start,
-            stop,
-            ifos,
+        background_events, foreground_events = _apply_vetos(
+            background_events, foreground_events, vetos, ifos, start, stop
         )
-
-        catalog_vetos = get_catalog_vetos(start, stop)
-
-        for cat in vetos:
-            for i, ifo in enumerate(ifos):
-                if cat == "CATALOG":
-                    vetos = catalog_vetos
-                else:
-                    vetos = veto_parser.get_vetos(cat)[ifo]
-                back_count = len(background_events)
-                fore_count = len(foreground_events)
-                if len(vetos) > 0:
-                    background_events = background_events.apply_vetos(vetos, i)
-                    foreground_events = foreground_events.apply_vetos(vetos, i)
-                logging.info(
-                    f"\t{back_count - len(background_events)} {cat} "
-                    f"background events removed for ifo {ifo}"
-                )
-                logging.info(
-                    f"\t{fore_count - len(foreground_events)} {cat} "
-                    f"foreground events removed for ifo {ifo}"
-                )
 
     logging.info("Computing data likelihood under source prior")
     source, _ = source_prior(DEFAULT_COSMOLOGY)
-    source_probs = get_prob(source, foreground)
+    source_probs = get_prob(source, foreground_events)
     source_rejected_probs = get_prob(source, rejected_params_set)
 
     logging.info("Computing maximum astrophysical volume")
@@ -260,11 +306,24 @@ def main(
     aframe_sv *= v0
     aframe_err *= v0
 
+    # General SV: uniform weights over the source prior (no mass reweighting)
+    total_injections = len(foreground_events) + len(rejected_params_set)
+    general_weight = np.ones(len(foreground_events)) / total_injections
+    general_sv, general_err = compute.sensitive_volume(
+        foreground_events.detection_statistic,
+        general_weight[np.newaxis, :],
+        thresholds,
+    )
+    general_sv = general_sv[0] * v0
+    general_err = general_err[0] * v0
+
     fpr_mask = all_fars >= min_fpr
     fars = all_fars[fpr_mask]
     thresholds = thresholds[fpr_mask]
     aframe_sv = aframe_sv[:, fpr_mask]
     aframe_err = aframe_err[:, fpr_mask]
+    general_sv = general_sv[fpr_mask]
+    general_err = general_err[fpr_mask]
 
     output_dir.mkdir(exist_ok=True, parents=True)
     with h5py.File(output_dir / "sensitive_volume.h5", "w") as f:
@@ -274,14 +333,50 @@ def main(
             g = f.create_group("-".join(map(str, combo)))
             g.create_dataset("sv", data=aframe_sv[i])
             g.create_dataset("err", data=aframe_err[i])
+        g = f.create_group("general")
+        g.create_dataset("sv", data=general_sv)
+        g.create_dataset("err", data=general_err)
 
-    logging.info("Calculating SV vs FAR for GWTC-3 pipelines")
-    gwtc3_sv, gwtc3_err = gwtc3_pipeline_sv(
-        mass_combos=mass_combos,
-        injection_file=INJECTION_FILE,
-        detection_criterion="far",
-        detection_thresholds=fars,
-        output_dir=output_dir,
+    logging.info("Saving general SV plot")
+    fig_gen, ax_gen = plt.subplots(1, 1, figsize=(6, 4))
+    ax_gen.set_title("Sensitive Volume (source prior integrated)")
+    ax_gen.set_xscale("log")
+    ax_gen.set_xlabel("False Alarm Rate [yr$^{-1}$]")
+    ax_gen.set_ylabel("Sensitive Volume [Gpc$^3$]")
+    ax_gen.set_xlim(min_fpr, max_far)
+    ax_gen.plot(
+        fars, general_sv, linewidth=1.5, color=PALETTE[0], label=model_name
+    )
+    plot_err_bands(ax_gen, fars, general_sv, general_err, color=PALETTE[0])
+    ax_gen.legend(loc="upper left", fontsize=8)
+    fig_gen.tight_layout()
+    fig_gen.savefig(
+        output_dir / "sensitive_volume_general.png", bbox_inches="tight"
+    )
+    plt.close(fig_gen)
+
+    if not aframe_only:
+        logging.info("Calculating SV vs FAR for GWTC-3 pipelines")
+        gwtc3_sv, gwtc3_err = gwtc3_pipeline_sv(
+            mass_combos=mass_combos,
+            injection_file=INJECTION_FILE,
+            detection_criterion="far",
+            detection_thresholds=fars,
+            output_dir=output_dir,
+        )
+
+    logging.info("Saving SV data to CSV files")
+    gwtc3_sv = {} if aframe_only else gwtc3_sv
+    pipelines = [] if aframe_only else list(gwtc3_sv.keys())
+    _save_csvs(
+        output_dir,
+        mass_combos,
+        fars,
+        aframe_sv,
+        general_sv,
+        gwtc3_sv,
+        pipelines,
+        model_name,
     )
 
     fig, axes = make_grid(mass_combos)
@@ -291,7 +386,7 @@ def main(
 
     for i, ax in enumerate(axes):
         color = PALETTE[0]
-        label = "aframe" if i == 0 else None
+        label = model_name if i == 0 else None
         ax.plot(
             fars,
             aframe_sv[i],
@@ -303,15 +398,18 @@ def main(
         )  # make aframe lines transparent in all but first plot
         plot_err_bands(ax, fars, aframe_sv[i], aframe_err[i], color=color)
 
-        for pipeline, color in zip(gwtc3_sv.keys(), PALETTE[1:], strict=True):
-            m1, m2 = mass_combos[i]
-            mass_key = f"{m1}-{m2}"
-            sv = gwtc3_sv[pipeline][mass_key]
-            err = gwtc3_err[pipeline][mass_key]
+        if not aframe_only:
+            for pipeline, color in zip(
+                gwtc3_sv.keys(), PALETTE[1:], strict=False
+            ):
+                m1, m2 = mass_combos[i]
+                mass_key = f"{m1}-{m2}"
+                sv = gwtc3_sv[pipeline][mass_key]
+                err = gwtc3_err[pipeline][mass_key]
 
-            label = pipeline if i == 0 else None
-            ax.plot(fars, sv, linewidth=1.5, color=color, label=label)
-            plot_err_bands(ax, fars, sv, err, color=color)
+                label = pipeline if i == 0 else None
+                ax.plot(fars, sv, linewidth=1, color=color, label=label)
+                plot_err_bands(ax, fars, sv, err, color=color)
 
     # Add legend to first axis
     handles, labels = axes[0].get_legend_handles_labels()
