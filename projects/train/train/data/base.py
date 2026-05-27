@@ -155,7 +155,6 @@ class BaseAframeDataset(pl.LightningDataModule):
         self,
         # data loading args
         background_dir: str,
-        waveforms_dir: str,
         ifos: Sequence[str],
         sample_rate: float,
         dec: Distribution,
@@ -179,6 +178,7 @@ class BaseAframeDataset(pl.LightningDataModule):
         snr_sampler: Optional[
             Union[TransformedDist, Callable[[int], Tensor]]
         ] = None,
+        waveforms_dir: Optional[str] = None,
         # validation args
         val_batch_size: Optional[int] = None,
         valid_stride: Optional[float] = None,
@@ -223,7 +223,11 @@ class BaseAframeDataset(pl.LightningDataModule):
         self.background_dir = fs_utils.get_data_dir(
             self.hparams.background_dir
         )
-        self.waveforms_dir = fs_utils.get_data_dir(self.hparams.waveforms_dir)
+        self.waveforms_dir = (
+            fs_utils.get_data_dir(self.hparams.waveforms_dir)
+            if self.hparams.waveforms_dir is not None
+            else None
+        )
         self.verbose = verbose
 
     def init_logging(self, verbose: bool):
@@ -249,15 +253,15 @@ class BaseAframeDataset(pl.LightningDataModule):
         )
         fs_utils.download_training_data(bucket, self.background_dir)
 
-        bucket, _ = fs_utils.split_data_dir(self.hparams.waveforms_dir)
-        if bucket is None:
-            return
-        logger.info(
-            "Downloading waveform data from S3 bucket {} to {}".format(
-                bucket, self.waveforms_dir
-            )
-        )
-        fs_utils.download_training_data(bucket, self.waveforms_dir)
+        if self.hparams.waveforms_dir is not None:
+            bucket, _ = fs_utils.split_data_dir(self.hparams.waveforms_dir)
+            if bucket is not None:
+                logger.info(
+                    "Downloading waveform data from S3 bucket {} to {}".format(
+                        bucket, self.waveforms_dir
+                    )
+                )
+                fs_utils.download_training_data(bucket, self.waveforms_dir)
 
     # ================================================ #
     # Distribution utilities

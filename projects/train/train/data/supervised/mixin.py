@@ -66,17 +66,36 @@ class RegressionSupervisedMixin:
         self.build_transforms()
         self.transforms_to_device()
 
-        # Fixed-seed validation prior params (consistent across epochs / ranks)
-        rng_state = torch.get_rng_state()
-        torch.manual_seed(42 + rank)
         n = self.n_val_waveforms // world_size
-        self._val_prior_params = self.waveform_sampler.training_prior(
-            n, device="cpu"
-        )
-        self.val_params = compute_target_params_tensor(
-            self._val_prior_params, self.target_parameters
-        )
-        torch.set_rng_state(rng_state)
+        if self.waveforms_from_disk:
+            # Val file contains projected per-IFO waveforms (H1, L1) + parameters.
+            # Use waveform_sampler's own waveform_set_cls so the field names match.
+            waveform_set = self.waveform_sampler.waveform_set_cls.read(
+                self.waveform_sampler.val_waveform_file
+            )
+            start, stop = rank * n, rank * n + n
+            # waveforms property stacks sorted IFO fields → (N, n_ifos, L)
+            self._val_waveforms = torch.tensor(
+                waveform_set.waveforms[start:stop], dtype=torch.float32
+            )
+            param_dict = {
+                k: torch.tensor(getattr(waveform_set, k)[start:stop], dtype=torch.float32)
+                for k in ["mass_1", "mass_2"]
+            }
+            self.val_params = compute_target_params_tensor(
+                param_dict, self.target_parameters
+            )
+        else:
+            # Generator path: sample a fixed-seed set of prior params.
+            rng_state = torch.get_rng_state()
+            torch.manual_seed(42 + rank)
+            self._val_prior_params = self.waveform_sampler.training_prior(
+                n, device="cpu"
+            )
+            self.val_params = compute_target_params_tensor(
+                self._val_prior_params, self.target_parameters
+            )
+            torch.set_rng_state(rng_state)
 
     # ------------------------------------------------------------------ #
     # Batch transfer hooks                                                 #
@@ -168,15 +187,23 @@ class RegressionSupervisedMixin:
 
         B = X.shape[0]
         idx = torch.randperm(len(self.val_params))[:B]
-        prior_params = {
-            k: v[idx].to(X.device) for k, v in self._val_prior_params.items()
-        }
-        hc, hp = self.waveform_sampler(**prior_params)
-        waveforms = torch.stack([hc, hp], dim=1).float()
-        waveforms = self.slice_waveforms(waveforms)
         params = self.val_params[idx].to(X.device)
 
-        X = self._project_and_inject(X, waveforms, psds)
+        if self.waveforms_from_disk:
+            # Waveforms are already projected per-IFO — inject directly.
+            waveforms = self._val_waveforms[idx].to(X.device).float()
+            waveforms = self.slice_waveforms(waveforms)
+            kernels = sample_kernels(waveforms, kernel_size=X.size(-1), coincident=True)
+            X = X + kernels
+        else:
+            prior_params = {
+                k: v[idx].to(X.device) for k, v in self._val_prior_params.items()
+            }
+            hc, hp = self.waveform_sampler(**prior_params)
+            waveforms = torch.stack([hc, hp], dim=1).float()
+            waveforms = self.slice_waveforms(waveforms)
+            X = self._project_and_inject(X, waveforms, psds)
+
         X = self.apply_transforms(X, psds)
         return X, params
 

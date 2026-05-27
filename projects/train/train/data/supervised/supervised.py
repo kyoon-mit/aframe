@@ -16,7 +16,7 @@ class SupervisedAframeDataset(BaseAframeDataset):
         **kwargs,
     ) -> None:
         super().__init__(*args, **kwargs)
-        if swap_prob is not None and 0 < swap_prob < 1:
+        if swap_prob is not None and 0 <= swap_prob <= 1:
             self.swapper = aug.ChannelSwapper(swap_prob)
             self.swap_prob = swap_prob
         elif swap_prob is not None:
@@ -27,7 +27,7 @@ class SupervisedAframeDataset(BaseAframeDataset):
             self.swapper = None
             self.swap_prob = 0
 
-        if mute_prob is not None and 0 < mute_prob < 1:
+        if mute_prob is not None and 0 <= mute_prob <= 1:
             self.muter = aug.ChannelMuter(mute_prob)
             self.mute_prob = mute_prob
         elif mute_prob is not None:

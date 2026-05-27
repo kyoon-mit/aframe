@@ -31,7 +31,7 @@ trainer:
         mode: min
         save_top_k: 1
         save_last: true
-        filename: 's4d_chirp_mass_gaussnll_{epoch:02d}'
+        filename: "s4d_chirp_mass_gaussnll_{epoch:02d}"
         auto_insert_metric_name: false
 
     - class_path: lightning.pytorch.callbacks.ModelCheckpoint
@@ -39,7 +39,7 @@ trainer:
         monitor: val/mse/out_0
         mode: min
         save_top_k: 3
-        filename: 's4d_chirp_mass_mse_{epoch:02d}'
+        filename: "s4d_chirp_mass_mse_{epoch:02d}"
         auto_insert_metric_name: false
 
     - class_path: lightning.pytorch.callbacks.EarlyStopping
@@ -62,11 +62,11 @@ trainer:
 model:
   class_path: train.model.regression.LitS4DGaussianNLL
   init_args:
-    d_input: 2          # H1, L1
-    d_output: 2         # chirp_mass mean + chirp_mass var
+    d_input: 2 # H1, L1
+    d_output: 2 # chirp_mass mean + chirp_mass var
     normalize_input: true
-    y_mean: [1.2]      # center of chirp_mass prior [0.87, 2.22]
-    y_std: [0.35]      # ~std of uniform [0.87, 2.22]
+    y_mean: [1.2] # center of chirp_mass prior [0.87, 2.22]
+    y_std: [0.35] # ~std of uniform [0.87, 2.22]
     d_model: 64
     d_state: 64
     n_layers: 4
@@ -98,7 +98,7 @@ data:
     ifos: [H1, L1]
     sample_rate: 512
     kernel_length: 1.0
-    left_pad: 0.5      # ~0.5s jitter; must satisfy left_pad + right_pad < kernel_length=1.0
+    left_pad: 0.5 # ~0.5s jitter; must satisfy left_pad + right_pad < kernel_length=1.0
     right_pad: 0.0
     fduration: 1.0
     psd_length: 20.0
@@ -117,7 +117,7 @@ data:
         max_min_snr: 30.0
         min_min_snr: 4.0
         max_snr: 50.0
-        alpha: -0.01    # near-flat; alpha=0 not supported by PowerLaw
+        alpha: -0.01 # near-flat; alpha=0 not supported by PowerLaw
         decay_steps: 100000
     waveform_sampler:
       class_path: train.data.waveforms.generator.cbc_regression.RegressionCBCGenerator
@@ -127,8 +127,8 @@ data:
         # val_waveform_file: /path/to/val_waveforms.hdf5
         approximant:
           class_path: ml4gw.waveforms.IMRPhenomPv2
-        duration: 64.0    # total waveform; coal at 64 - right_pad = 63s
-        right_pad: 1.0    # 1s post-coal silence → coal at 63s
+        duration: 64.0 # total waveform; coal at 64 - right_pad = 63s
+        right_pad: 1.0 # 1s post-coal silence → coal at 63s
         window_offset: 3.0 # shift signal_idx 3s before coal → model sees [59s, 60s]
         f_min: 20.0
         f_ref: 50.0
