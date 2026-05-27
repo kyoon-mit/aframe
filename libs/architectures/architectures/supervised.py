@@ -297,12 +297,13 @@ class SupervisedTimeDomainLinOSS(JaxArchitecture):
         time_theta_max: float,
         time_num_res_blocks: int,
         time_conv_kernel_size: int,
-        resnet_layers: tuple[int, ...],
-        resnet_latent_dim: int,
-        resnet_kernel_size: int,
-        resnet_norm_groups: int,
-        mlp_width: int,
-        mlp_depth: int,
+        time_conv_position: str = "pre",
+        resnet_layers: tuple[int, ...] = (2, 2, 2),
+        resnet_latent_dim: int = 64,
+        resnet_kernel_size: int = 21,
+        resnet_norm_groups: int = 16,
+        mlp_width: int = 64,
+        mlp_depth: int = 2,
         *,
         seed: int = 0,
     ) -> None:
@@ -320,6 +321,7 @@ class SupervisedTimeDomainLinOSS(JaxArchitecture):
             time_theta_max=time_theta_max,
             time_num_res_blocks=time_num_res_blocks,
             time_conv_kernel_size=time_conv_kernel_size,
+            time_conv_position=time_conv_position,
             resnet_layers=resnet_layers,
             resnet_latent_dim=resnet_latent_dim,
             resnet_kernel_size=resnet_kernel_size,
@@ -334,3 +336,43 @@ class SupervisedTimeDomainLinOSS(JaxArchitecture):
 
     def forward(self, X, state, key=None):
         return self.linoss(X, state, key=key)
+
+
+class SupervisedHeterodyneTimeDomainResNet(SupervisedArchitecture):
+    """
+    Time Domain ResNet that processes a Heterodyned timeseries.
+
+    Args:
+        num_chirp_masses (int):
+            Number of chirp masses used to define the input channel
+            dimension (in_channels = num_ifos x num_chirp_masses).
+    """
+
+    def __init__(
+        self,
+        num_ifos: int,
+        num_chirp_masses: int,
+        layers: list[int],
+        kernel_size: int = 3,
+        zero_init_residual: bool = False,
+        groups: int = 1,
+        width_per_group: int = 64,
+        stride_type: Optional[list[Literal["stride", "dilation"]]] = None,
+        norm_layer: Optional[NormLayer] = None,
+        **kwargs,
+    ) -> None:
+        super().__init__()
+        self.time_domain_resnet = ResNet1D(
+            in_channels=num_ifos * num_chirp_masses,
+            layers=layers,
+            classes=1,
+            kernel_size=kernel_size,
+            zero_init_residual=zero_init_residual,
+            groups=groups,
+            width_per_group=width_per_group,
+            stride_type=stride_type,
+            norm_layer=norm_layer,
+        )
+
+    def forward(self, X):
+        return self.time_domain_resnet(X)

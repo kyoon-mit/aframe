@@ -125,7 +125,7 @@ class ClassificationAframe(AframeBase):
         self.save_hyperparameters(ignore=["arch", "metric"])
 
     def validation_step(self, batch, _) -> None:
-        shift, X_bg, X_inj = batch
+        shift, X_bg, X_inj, _params = batch
 
         y_bg = self.score(X_bg)
 

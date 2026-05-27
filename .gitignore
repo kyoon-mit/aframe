@@ -17,3 +17,6 @@ runs/
 
 # Weights & Biases
 wandb/
+
+CLAUDE.md
+aframe_results

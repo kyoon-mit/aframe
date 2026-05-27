@@ -113,4 +113,12 @@ class SupervisedAframeDataset(BaseAframeDataset):
         if params is not None:
             params_out[mask] = params
 
+        # Store per-sample SNR for optional use by subclasses (e.g. SNR-
+        # weighted loss).  Background and augmented samples get 0.
+        snr_weights = torch.zeros(X.size(0), device=X.device)
+        snr_weights[idx] = snrs.float()
+        snr_weights[idx[swap_indices]] = 0.0
+        snr_weights[idx[mute_indices]] = 0.0
+        self._train_snr_weights = snr_weights
+
         return X, y, psds, params_out

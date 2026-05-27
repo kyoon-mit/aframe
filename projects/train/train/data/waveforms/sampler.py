@@ -1,6 +1,8 @@
+from dataclasses import fields as dc_fields
 from pathlib import Path
 from typing import List
 
+import numpy as np
 import torch
 from utils import x_per_y
 
@@ -66,15 +68,35 @@ class WaveformSampler(torch.nn.Module):
 
     # Assuming that we're going to be loading validation waveforms
     # from disk for now, so this function can be defined here.
-    def get_val_waveforms(self, world_size, rank):
-        """
-        Returns validation waveforms for this device
+    def get_val_waveforms(
+        self, world_size, rank
+    ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
+        """Returns validation waveforms and injection parameters.
+
+        Returns:
+            Tuple of (waveforms, params) where waveforms has shape
+            ``(N, num_ifos, T)`` and params is a dict mapping each
+            scalar injection parameter name to a float32 tensor of
+            shape ``(N,)``.  Multi-dimensional parameters (e.g.
+            ``ifo_snrs``) are skipped.
         """
         start, stop = self.get_slice_bounds(
             self.num_val_waveforms, world_size, rank
         )
         waveform_set = self.waveform_set_cls.read(self.val_waveform_file)
-        return torch.Tensor(waveform_set.waveforms[start:stop])
+        waveforms = torch.Tensor(waveform_set.waveforms[start:stop])
+
+        params: dict[str, torch.Tensor] = {}
+        for f in dc_fields(waveform_set):
+            if f.metadata.get("kind") != "parameter":
+                continue
+            val = getattr(waveform_set, f.name)
+            if isinstance(val, np.ndarray) and val.ndim == 1:
+                params[f.name] = torch.from_numpy(
+                    val[start:stop].astype(np.float32)
+                )
+
+        return waveforms, params
 
     def get_test_waveforms(self):
         raise NotImplementedError

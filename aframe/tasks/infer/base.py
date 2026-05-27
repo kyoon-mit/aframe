@@ -73,7 +73,7 @@ class InferBase(
                 "amount of data, and the aggregation process will be slow. It "
                 "is not recommended to save the output timeseries for long "
                 "timeslides or high inference rates",
-                stacklevel=2.0,
+                stacklevel=2,
             )
 
     @property
@@ -218,6 +218,7 @@ class InferBase(
             shifts=shifts,
             background_fname=fname,
             injection_set_fname=self.injection_set_fname,
+            triton_address=ip,
         )
 
         postprocessor = Postprocessor(

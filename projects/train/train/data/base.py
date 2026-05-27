@@ -170,6 +170,7 @@ class BaseAframeDataset(pl.LightningDataModule):
         psd_length: float,
         # augmentation args
         waveform_prob: float = 1,
+        jitter: float = 0.1,
         left_pad: float = 0,
         right_pad: float = 0,
         fftlength: Optional[float] = None,
@@ -352,6 +353,20 @@ class BaseAframeDataset(pl.LightningDataModule):
         """
         fnames = glob.glob(f"{self.background_dir}/background/*.hdf5")
         fnames = sorted([Path(fname) for fname in fnames])
+        # check files are not broken and remove broken files from the list
+        final_fnames = []
+        for fn in fnames:
+            try:
+                with h5py.File(fn, "r") as f:
+                    for ifo in self.hparams.ifos:
+                        _ = f[ifo][0]
+                final_fnames.append(fn)
+            except Exception as e:
+                self._logger.warning(
+                    f"File {fn} is broken and will be skipped"
+                )
+                self._logger.warning(e)
+        fnames = final_fnames
         durations = [int(fname.stem.split("-")[-1]) for fname in fnames]
         valid_fnames = []
         valid_duration = 0
@@ -419,17 +434,41 @@ class BaseAframeDataset(pl.LightningDataModule):
         start_idx = signal_idx - (kernel_size - self.right_pad_size)
         stop_idx = signal_idx + (kernel_size - self.left_pad_size)
 
+        jitter_samples = int(self.hparams.jitter * self.hparams.sample_rate)
+        if jitter_samples > 0:
+            jitters = torch.randint(
+                -jitter_samples,
+                jitter_samples + 1,
+                (waveforms.shape[0],),
+                device=waveforms.device,
+            )
+            # To compute padding need min and max of jitters
+            max_jitter = torch.max(jitters).item() if len(jitters) > 0 else 0
+            min_jitter = torch.min(jitters).item() if len(jitters) > 0 else 0
+        else:
+            max_jitter = 0
+            min_jitter = 0
+
         # If start_idx is less than 0, add padding on the left
-        left_pad = -1 * min(start_idx, 0)
+        left_pad = -1 * min(start_idx + min_jitter, 0)
         # If stop_idx is larger than the dataset, add padding on the right
-        right_pad = max(stop_idx - waveforms.shape[-1], 0)
+        right_pad = max(stop_idx + max_jitter - waveforms.shape[-1], 0)
         # If we're padding on the left, we need to readjust the indices
         if left_pad > 0:
             start_idx += left_pad
             stop_idx += left_pad
 
         waveforms = torch.nn.functional.pad(waveforms, [left_pad, right_pad])
-        waveforms = waveforms[..., start_idx:stop_idx]
+
+        if jitter_samples > 0:
+            sliced = []
+            for i, jitter in enumerate(jitters):
+                start = start_idx + jitter.item()
+                stop = stop_idx + jitter.item()
+                sliced.append(waveforms[i, ..., start:stop])
+            waveforms = torch.stack(sliced)
+        else:
+            waveforms = waveforms[..., start_idx:stop_idx]
 
         return waveforms
 
@@ -524,9 +563,18 @@ class BaseAframeDataset(pl.LightningDataModule):
             self.val_batch_size,
         )
 
-        self.val_waveforms = self.waveform_sampler.get_val_waveforms(
-            world_size, rank
+        self.val_waveforms, self.val_params = (
+            self.waveform_sampler.get_val_waveforms(world_size, rank)
         )
+        # Stack all scalar injection params into a single (N, P) tensor so
+        # they can be passed through a TensorDataset alongside waveforms.
+        self.val_param_names = list(self.val_params.keys())
+        if self.val_param_names:
+            self.val_params_tensor = torch.stack(
+                [self.val_params[k] for k in self.val_param_names], dim=1
+            )
+        else:
+            self.val_params_tensor = torch.zeros(len(self.val_waveforms), 0)
         if self.waveforms_from_disk:
             self.waveform_sampler.get_train_waveforms(
                 world_size, rank, self.device
@@ -579,7 +627,7 @@ class BaseAframeDataset(pl.LightningDataModule):
             # on the local device, the relevant tensors will be
             # empty, so just pass them through with a 0 shift to
             # indicate that this should be ignored
-            [background, _, timeslide_idx], [signals] = batch
+            [background, _, timeslide_idx], [signals, params] = batch
 
             # If we're validating, unfold the background
             # data into a batch of overlapping kernels now that
@@ -587,8 +635,10 @@ class BaseAframeDataset(pl.LightningDataModule):
             # much data from CPU to GPU. Once everything is
             # on-device, pre-inject signals into background.
             shift = self.timeslides[timeslide_idx].shift_size
-            X_bg, X_fg = self.build_val_batches(background, signals)
-            batch = (shift, X_bg, X_fg)
+            X_bg, X_fg, params = self.build_val_batches(
+                background, signals, params
+            )
+            batch = (shift, X_bg, X_fg, params)
         return batch
 
     @torch.no_grad()
@@ -607,7 +657,8 @@ class BaseAframeDataset(pl.LightningDataModule):
         self,
         background: Tensor,
         signals: Tensor,
-    ) -> tuple[Tensor, Tensor, Tensor]:
+        params: Optional[Tensor] = None,
+    ) -> tuple[Tensor, Tensor, Tensor, Optional[Tensor]]:
         """
         Unfold a timeseries of background data
         into a batch of kernels, then inject
@@ -617,9 +668,12 @@ class BaseAframeDataset(pl.LightningDataModule):
         Args:
             background: A tensor of background data
             signals: A tensor of signals to inject
+            params: Optional tensor of injection parameters
+                with shape ``(N, P)``; sliced to match signals.
 
         Returns:
-            raw strain background kernels, injected kernels, and psds
+            raw strain background kernels, injected kernels, psds,
+            and (potentially truncated) params tensor
         """
 
         # unfold the background data into kernels
@@ -636,6 +690,8 @@ class BaseAframeDataset(pl.LightningDataModule):
         step = int(len(X) / len(signals))
         if not step:
             signals = signals[: len(X)]
+            if params is not None:
+                params = params[: len(X)]
         else:
             X = X[::step][: len(signals)]
             psd = psd[::step][: len(signals)]
@@ -669,7 +725,7 @@ class BaseAframeDataset(pl.LightningDataModule):
             X_inj.append(injected)
         X_inj = torch.stack(X_inj)
 
-        return X, X_inj, psd
+        return X, X_inj, psd, params
 
     def val_dataloader(self) -> ZippedDataset:
         """
@@ -687,7 +743,9 @@ class BaseAframeDataset(pl.LightningDataModule):
         # throughout all those batches.
         num_waveforms = len(self.val_waveforms)
         signal_batch_size = (num_waveforms - 1) // self.valid_loader_length + 1
-        signal_dataset = torch.utils.data.TensorDataset(self.val_waveforms)
+        signal_dataset = torch.utils.data.TensorDataset(
+            self.val_waveforms, self.val_params_tensor
+        )
         signal_loader = torch.utils.data.DataLoader(
             signal_dataset,
             batch_size=signal_batch_size,

@@ -430,7 +430,14 @@ class CausalBottleneck1D(eqx.Module):
 
 
 class PoolingLinossHeavyBlock(eqx.Module):
-    """A LinOSS block with a pooling layer and channel expansion."""
+    """A LinOSS block with a pooling layer and channel expansion.
+
+    Args:
+        conv_position: Where to place the causal bottleneck convolutions
+            relative to the sequence mixer. ``"pre"`` applies them before
+            the mixer; ``"post"`` applies them after the mixer (but still
+            inside the residual branch, before the skip-add).
+    """
 
     norm: eqx.nn.LayerNorm
     mixer: LinOSSMixer
@@ -439,6 +446,7 @@ class PoolingLinossHeavyBlock(eqx.Module):
     res_blocks: list[CausalBottleneck1D]
     pool: eqx.nn.MaxPool1d
     expand: eqx.nn.Linear
+    conv_position: str = eqx.field(static=True)
 
     def __init__(
         self,
@@ -448,6 +456,7 @@ class PoolingLinossHeavyBlock(eqx.Module):
         dropout_rate: float,
         num_res_blocks: int = 2,
         conv_kernel_size: int = 3,
+        conv_position: str = "pre",
         *,
         key: PRNGKeyArray,
         r_min: float = 0.9,
@@ -469,20 +478,25 @@ class PoolingLinossHeavyBlock(eqx.Module):
         self.pool = eqx.nn.MaxPool1d(kernel_size=2, stride=2)
         # Linear layer to double channels after pooling
         self.expand = eqx.nn.Linear(in_dim, out_dim, key=exp_k)
+        self.conv_position = conv_position
 
     def __call__(self, x: Array, state: eqx.nn.State, key: PRNGKeyArray):
         d1, d2 = jr.split(key)
         skip = x
 
-        # Heavy ResNet-like convolutions (Standard Convs now)
-        for res_block in self.res_blocks:
-            x, state = res_block(x, state, key)
+        if self.conv_position == "pre":
+            for res_block in self.res_blocks:
+                x, state = res_block(x, state, key)
 
         x = self.mixer(x, key=key)
         x, state = jax.vmap(self.norm)(x, state)
         x = self.drop(jax.nn.gelu(x), key=d1)
         x = jax.vmap(self.glu)(x)
         x = self.drop(x, key=d2)
+
+        if self.conv_position == "post":
+            for res_block in self.res_blocks:
+                x, state = res_block(x, state, key)
 
         y = skip + x
 
@@ -511,6 +525,7 @@ class PoolingLinossHeavyBackbone(eqx.Module):
         state_dim: int,
         num_res_blocks: int = 2,
         conv_kernel_size: int = 3,
+        conv_position: str = "pre",
         *,
         key: PRNGKeyArray,
         r_min: float = 0.9,
@@ -532,6 +547,7 @@ class PoolingLinossHeavyBackbone(eqx.Module):
                     dropout_rate=dropout_rate,
                     num_res_blocks=num_res_blocks,
                     conv_kernel_size=conv_kernel_size,
+                    conv_position=conv_position,
                     key=bk,
                     r_min=r_min,
                     theta_max=theta_max,
@@ -563,6 +579,7 @@ class LinOSS(eqx.Module):
         time_theta_max: float,
         time_num_res_blocks: int,
         time_conv_kernel_size: int,
+        time_conv_position: str,
         resnet_layers: tuple[int, ...],
         resnet_latent_dim: int,
         resnet_kernel_size: int,
@@ -583,6 +600,7 @@ class LinOSS(eqx.Module):
             theta_max=time_theta_max,
             num_res_blocks=time_num_res_blocks,
             conv_kernel_size=time_conv_kernel_size,
+            conv_position=time_conv_position,
             key=k_time,
         )
 

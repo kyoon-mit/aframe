@@ -1,11 +1,9 @@
 model:
   class_path: train.model.jax_supervised.JaxSupervisedAframe
   init_args:
-    # architecture (provided to satisfy AframeBase)
     arch:
       class_path: architectures.supervised.SupervisedTimeDomainLinOSS
       init_args:
-        # LinOSS Heavy parameters
         time_in_features: 2
         time_hidden_dim: 16
         time_num_blocks: 4
@@ -16,36 +14,30 @@ model:
         time_num_res_blocks: 2
         time_conv_kernel_size: 21
         time_conv_position: post
-        # ResNet1D Readout parameters
         resnet_layers: [2, 2, 2]
         resnet_latent_dim: 64
         resnet_kernel_size: 21
         resnet_norm_groups: 16
-        # MLP parameters
         mlp_width: 64
         mlp_depth: 2
 
-    # Validation metric
     metric:
       class_path: train.metrics.TimeSlideAUROC
       init_args:
         max_fpr: 1e-3
         pool_length: 8
 
-    # optimization / general params
     learning_rate: 5e-5
     pct_lr_ramp: 0.115
     weight_decay: 3e-5
     max_steps: 500000
-    warmup_steps: 2000
+    warmup_steps: 4000
     clip_grad_norm: 10.0
     seed: 43
-    load_from_checkpoint: /lustre/home/barmstrong/aframe/projects/train/lightning_logs/aframe/sgwjmaxu/checkpoints/checkpoint_step_320000_metric_0.5319264531135559.eqx
 
 data:
   class_path: train.data.supervised.TimeDomainSupervisedAframeDataset
   init_args:
-    # loading args
     waveforms_dir: /home/barmstrong/aframe_new/data/bns/aframe_train/
     background_dir: /home/barmstrong/aframe_new/data/bns/background_data
     ifos: [H1, L1]
@@ -54,26 +46,22 @@ data:
     num_files_per_batch: 10
     chunk_size: 1000
     chunks_per_epoch: 20
-    # preprocessing args
     batch_size: 128
     val_batch_size: 256
     kernel_length: 4
     psd_length: 20
     fduration: 2
     max_num_workers: 16
-    # augmentation args
     waveform_prob: 0.277
     swap_prob: 0.014
     mute_prob: 0.055
     left_pad: 3.95
     right_pad: 0.05
     fftlength: 2
-    # schedule: [[0, 16, 512], [16, 20, 2048]]
-    # split: True
     snr_sampler:
       class_path: ml4gw.distributions.PowerLaw
       init_args:
-        minimum: 6
+        minimum: 8
         maximum: 100
         index: -3
     waveform_sampler:
@@ -95,7 +83,6 @@ data:
         low: 0
         high: 6.28318
         validate_args: false
-    # validation args
     valid_stride: 0.5
     num_valid_views: 5
     valid_livetime: 57600
@@ -104,7 +91,7 @@ trainer:
   logger:
     - class_path: train.callbacks.AframeWandbLogger
       init_args:
-        name: "linoss"
+        name: "linoss_conv_post"
         save_dir: lightning_logs
         project: "aframe"
   callbacks:
@@ -113,7 +100,6 @@ trainer:
         monitor: "val/valid_auroc_epoch"
         mode: "max"
         patience: 500
-    # Use JAXCheckpointManager instead of ModelCheckpoint to save checkpoints in a way that is compatible with JAX
     - class_path: train.utils.jax.save_model.JAXCheckpointManager
       init_args:
         monitor: "val/valid_auroc_epoch"
