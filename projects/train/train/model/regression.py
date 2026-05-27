@@ -16,13 +16,9 @@ def _log_gaussian_nll(
     indiv_mse: ArrayLike,
     variance: ArrayLike,
 ) -> None:
-    task.log(
-        f"{stage}/gaussnll", nll, on_step=False, on_epoch=True, prog_bar=True
-    )
+    task.log(f"{stage}/gaussnll", nll, on_step=False, on_epoch=True, prog_bar=True)
     for i in range(len(indiv_mse)):
-        task.log(
-            f"{stage}/mse/out_{i}", indiv_mse[i], on_step=False, on_epoch=True
-        )
+        task.log(f"{stage}/mse/out_{i}", indiv_mse[i], on_step=False, on_epoch=True)
         task.log(
             f"{stage}/sigma_{i}",
             torch.sqrt(variance[i].mean(dim=0)),
@@ -31,7 +27,7 @@ def _log_gaussian_nll(
         )
 
 
-def _log_within_pct(
+def _log_within_percentile(
     task: pl.LightningModule,
     stage: str,
     mean_norm: torch.Tensor,
@@ -126,9 +122,7 @@ class RegressionAframe(AframeBase):
         y_norm = self._normalize_target(y_target)
         indiv_mse = nn.MSELoss(reduction="none")(mean, y_norm).T.mean(dim=1)
         nll = self.criterion(mean, y_norm, var)
-        spread = F.softplus(
-            y_norm.detach().var(dim=0) - mean.var(dim=0)
-        ).mean()
+        spread = F.softplus(y_norm.detach().var(dim=0) - mean.var(dim=0)).mean()
         loss = nll + self.lambda_spread * spread
         return loss, nll, spread, indiv_mse, var, mean, y_target
 
@@ -140,11 +134,11 @@ class RegressionAframe(AframeBase):
         return loss
 
     def validation_step(self, batch, batch_idx):
-        loss, nll, spread, indiv_mse, var, mean_norm, y_target = (
-            self.compute_loss(batch)
+        loss, nll, spread, indiv_mse, var, mean_norm, y_target = self.compute_loss(
+            batch
         )
         _log_gaussian_nll(self, "val", nll, indiv_mse, var)
-        _log_within_pct(self, "val", mean_norm, y_target)
+        _log_within_percentile(self, "val", mean_norm, y_target)
         self.log("val/spread_penalty", spread, on_step=False, on_epoch=True)
         self.log("val/loss", loss, on_step=False, on_epoch=True)
         return loss
@@ -188,7 +182,7 @@ class RegressionAframe(AframeBase):
         }
 
 
-class LitS4DGaussianNLL(RegressionAframe):
+class RegressionAframeS4D(RegressionAframe):
     """S4D sequence model trained with GaussianNLL for parameter estimation.
 
     Pass a pre-built ``S4Model`` (or compatible) as ``arch``.
@@ -212,6 +206,7 @@ class LitS4DGaussianNLL(RegressionAframe):
         y_mean: list[float] | None = None,
         y_std: list[float] | None = None,
         normalize_input: bool = False,
+        log_gradients: bool = False,
     ) -> None:
         super().__init__(
             arch,
@@ -226,43 +221,45 @@ class LitS4DGaussianNLL(RegressionAframe):
             normalize_input=normalize_input,
         )
         self._lr_scheduler_factory = lr_scheduler
+        self.log_gradients = log_gradients
         self.save_hyperparameters(ignore=["arch", "lr_scheduler"])
 
     def on_after_backward(self) -> None:
-        for name, param in self.named_parameters():
-            if param.grad is not None:
-                self.log(
-                    f"grad_norm/{name}",
-                    param.grad.norm(),
-                    on_step=True,
-                    on_epoch=False,
-                )
-            if "log_A_real" in name:
-                self.log(
-                    f"ssm/A_real_mean/{name}",
-                    -param.exp().mean(),
-                    on_step=False,
-                    on_epoch=True,
-                )
-                self.log(
-                    f"ssm/A_real_max/{name}",
-                    -param.exp().max(),
-                    on_step=False,
-                    on_epoch=True,
-                )
-            if "log_dt" in name:
-                self.log(
-                    f"ssm/dt_mean/{name}",
-                    param.exp().mean(),
-                    on_step=False,
-                    on_epoch=True,
-                )
-                self.log(
-                    f"ssm/dt_max/{name}",
-                    param.exp().max(),
-                    on_step=False,
-                    on_epoch=True,
-                )
+        if self.log_gradients:
+            for name, param in self.named_parameters():
+                if param.grad is not None:
+                    self.log(
+                        f"grad_norm/{name}",
+                        param.grad.norm(),
+                        on_step=True,
+                        on_epoch=False,
+                    )
+                if "log_A_real" in name:
+                    self.log(
+                        f"ssm/A_real_mean/{name}",
+                        -param.exp().mean(),
+                        on_step=False,
+                        on_epoch=True,
+                    )
+                    self.log(
+                        f"ssm/A_real_max/{name}",
+                        -param.exp().max(),
+                        on_step=False,
+                        on_epoch=True,
+                    )
+                if "log_dt" in name:
+                    self.log(
+                        f"ssm/dt_mean/{name}",
+                        param.exp().mean(),
+                        on_step=False,
+                        on_epoch=True,
+                    )
+                    self.log(
+                        f"ssm/dt_max/{name}",
+                        param.exp().max(),
+                        on_step=False,
+                        on_epoch=True,
+                    )
 
     def configure_optimizers(self):
         hp = self.hparams
@@ -278,9 +275,7 @@ class LitS4DGaussianNLL(RegressionAframe):
         ]
         unique_hps = [
             dict(s)
-            for s in sorted(
-                set(frozenset(p._optim.items()) for p in optim_params)
-            )
+            for s in sorted(set(frozenset(p._optim.items()) for p in optim_params))
         ]
         for ohp in unique_hps:
             group = {
@@ -300,42 +295,3 @@ class LitS4DGaussianNLL(RegressionAframe):
                 "interval": hp.lr_scheduler_interval,
             },
         }
-
-
-class LitLinOSSGaussianNLL(RegressionAframe):
-    """LinOSS sequence model trained with GaussianNLL for parameter estimation.
-
-    Pass a pre-built ``LinOSSModel`` (or compatible) as ``arch``.
-    LinOSS expects ``(B, L, d_input)`` so the input is transposed in ``forward``.
-    """
-
-    def __init__(
-        self,
-        arch,
-        d_output: int,
-        learning_rate: float = 1e-3,
-        weight_decay: float = 0.0,
-        warmup_steps: int = 1000,
-        beta_nll: float = 0.5,
-        lambda_spread: float = 0.0,
-        y_mean: list[float] | None = None,
-        y_std: list[float] | None = None,
-        normalize_input: bool = False,
-    ) -> None:
-        super().__init__(
-            arch,
-            d_output=d_output,
-            learning_rate=learning_rate,
-            weight_decay=weight_decay,
-            warmup_steps=warmup_steps,
-            beta_nll=beta_nll,
-            lambda_spread=lambda_spread,
-            y_mean=y_mean,
-            y_std=y_std,
-            normalize_input=normalize_input,
-        )
-        self.save_hyperparameters(ignore=["arch"])
-
-    def forward(self, X: torch.Tensor) -> torch.Tensor:
-        # LinOSS expects (B, L, d_input); X arrives as (B, d_input, L)
-        return self.model(X.transpose(1, 2))

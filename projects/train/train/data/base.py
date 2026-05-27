@@ -155,6 +155,7 @@ class BaseAframeDataset(pl.LightningDataModule):
         self,
         # data loading args
         background_dir: str,
+        waveforms_dir: str,
         ifos: Sequence[str],
         sample_rate: float,
         dec: Distribution,
@@ -170,7 +171,6 @@ class BaseAframeDataset(pl.LightningDataModule):
         psd_length: float,
         # augmentation args
         waveform_prob: float = 1,
-        jitter: float = 0.1,
         left_pad: float = 0,
         right_pad: float = 0,
         fftlength: Optional[float] = None,
@@ -179,7 +179,6 @@ class BaseAframeDataset(pl.LightningDataModule):
         snr_sampler: Optional[
             Union[TransformedDist, Callable[[int], Tensor]]
         ] = None,
-        waveforms_dir: Optional[str] = None,
         # validation args
         val_batch_size: Optional[int] = None,
         valid_stride: Optional[float] = None,
@@ -224,11 +223,7 @@ class BaseAframeDataset(pl.LightningDataModule):
         self.background_dir = fs_utils.get_data_dir(
             self.hparams.background_dir
         )
-        self.waveforms_dir = (
-            fs_utils.get_data_dir(self.hparams.waveforms_dir)
-            if self.hparams.waveforms_dir is not None
-            else None
-        )
+        self.waveforms_dir = fs_utils.get_data_dir(self.hparams.waveforms_dir)
         self.verbose = verbose
 
     def init_logging(self, verbose: bool):
@@ -254,15 +249,14 @@ class BaseAframeDataset(pl.LightningDataModule):
         )
         fs_utils.download_training_data(bucket, self.background_dir)
 
-        if self.hparams.waveforms_dir is not None:
-            bucket, _ = fs_utils.split_data_dir(self.hparams.waveforms_dir)
-            if bucket is not None:
-                logger.info(
-                    "Downloading waveform data from S3 bucket {} to {}".format(
-                        bucket, self.waveforms_dir
-                    )
+        bucket, _ = fs_utils.split_data_dir(self.hparams.waveforms_dir)
+        if bucket is not None:
+            logger.info(
+                "Downloading waveform data from S3 bucket {} to {}".format(
+                    bucket, self.waveforms_dir
                 )
-                fs_utils.download_training_data(bucket, self.waveforms_dir)
+            )
+            fs_utils.download_training_data(bucket, self.waveforms_dir)
 
     # ================================================ #
     # Distribution utilities
@@ -353,20 +347,6 @@ class BaseAframeDataset(pl.LightningDataModule):
         """
         fnames = glob.glob(f"{self.background_dir}/background/*.hdf5")
         fnames = sorted([Path(fname) for fname in fnames])
-        # check files are not broken and remove broken files from the list
-        final_fnames = []
-        for fn in fnames:
-            try:
-                with h5py.File(fn, "r") as f:
-                    for ifo in self.hparams.ifos:
-                        _ = f[ifo][0]
-                final_fnames.append(fn)
-            except Exception as e:
-                self._logger.warning(
-                    f"File {fn} is broken and will be skipped"
-                )
-                self._logger.warning(e)
-        fnames = final_fnames
         durations = [int(fname.stem.split("-")[-1]) for fname in fnames]
         valid_fnames = []
         valid_duration = 0
@@ -434,41 +414,17 @@ class BaseAframeDataset(pl.LightningDataModule):
         start_idx = signal_idx - (kernel_size - self.right_pad_size)
         stop_idx = signal_idx + (kernel_size - self.left_pad_size)
 
-        jitter_samples = int(self.hparams.jitter * self.hparams.sample_rate)
-        if jitter_samples > 0:
-            jitters = torch.randint(
-                -jitter_samples,
-                jitter_samples + 1,
-                (waveforms.shape[0],),
-                device=waveforms.device,
-            )
-            # To compute padding need min and max of jitters
-            max_jitter = torch.max(jitters).item() if len(jitters) > 0 else 0
-            min_jitter = torch.min(jitters).item() if len(jitters) > 0 else 0
-        else:
-            max_jitter = 0
-            min_jitter = 0
-
         # If start_idx is less than 0, add padding on the left
-        left_pad = -1 * min(start_idx + min_jitter, 0)
+        left_pad = -1 * min(start_idx, 0)
         # If stop_idx is larger than the dataset, add padding on the right
-        right_pad = max(stop_idx + max_jitter - waveforms.shape[-1], 0)
+        right_pad = max(stop_idx - waveforms.shape[-1], 0)
         # If we're padding on the left, we need to readjust the indices
         if left_pad > 0:
             start_idx += left_pad
             stop_idx += left_pad
 
         waveforms = torch.nn.functional.pad(waveforms, [left_pad, right_pad])
-
-        if jitter_samples > 0:
-            sliced = []
-            for i, jitter in enumerate(jitters):
-                start = start_idx + jitter.item()
-                stop = stop_idx + jitter.item()
-                sliced.append(waveforms[i, ..., start:stop])
-            waveforms = torch.stack(sliced)
-        else:
-            waveforms = waveforms[..., start_idx:stop_idx]
+        waveforms = waveforms[..., start_idx:stop_idx]
 
         return waveforms
 

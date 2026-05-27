@@ -85,15 +85,15 @@ class AframeCLI(LightningCLI):
             apply_on="parse",
         )
 
-        parser.link_arguments(
-            (
-                "model.init_args.metric.init_args.pool_length",
-                "data.init_args.valid_stride",
-            ),
-            "trainer.num_sanity_val_steps",
-            compute_fn=lambda x, y: int(x / y),
-            apply_on="parse",
-        )
+        # parser.link_arguments(
+        #     (
+        #         "model.init_args.metric.init_args.pool_length",
+        #         "data.init_args.valid_stride",
+        #     ),
+        #     "trainer.num_sanity_val_steps",
+        #     compute_fn=lambda x, y: int(x / y),
+        #     apply_on="parse",
+        # )
 
 
 def main(args=None):

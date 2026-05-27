@@ -1,61 +1,5 @@
-seed_everything: 20260422
-
-# =========================
-# Trainer
-# =========================
-trainer:
-  accelerator: auto
-  strategy: auto
-  devices: auto
-  num_nodes: 1
-  precision: null
-
-  max_epochs: 3000
-  min_epochs: 60
-  check_val_every_n_epoch: 1
-  log_every_n_steps: 10
-  enable_progress_bar: true
-
-  logger:
-    - class_path: train.callbacks.AframeWandbLogger
-      init_args:
-        name: "aframe_regression"
-        save_dir: lightning_logs
-        project: "aframe"
-  callbacks:
-    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
-      init_args:
-        monitor: val/gaussnll
-        mode: min
-        save_top_k: 1
-        save_last: true
-        filename: "bns_regression_gaussnll_{epoch:02d}"
-        auto_insert_metric_name: false
-
-    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
-      init_args:
-        monitor: val/mse/out_0
-        mode: min
-        save_top_k: 3
-        filename: "bns_regression_mse_{epoch:02d}"
-        auto_insert_metric_name: false
-
-    - class_path: lightning.pytorch.callbacks.EarlyStopping
-      init_args:
-        monitor: val/mse/out_0
-        mode: min
-        patience: 20
-        verbose: true
-
-    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
-      init_args:
-        logging_interval: epoch
-
-# =========================
-# Model
-# =========================
 model:
-  class_path: train.model.LitS4DGaussianNLL
+  class_path: train.model.RegressionAframeS4D
   init_args:
     arch:
       class_path: architectures.networks.s4d.S4Model
@@ -79,13 +23,6 @@ model:
     beta_nll: 0.3
     lambda_spread: 0.3
 
-# Sampling rates to use:
-# - 2048Hz
-# -
-
-# =========================
-# Data
-# =========================
 data:
   class_path: train.data.supervised.TimeDomainRegressionDataset
   init_args:
@@ -147,3 +84,55 @@ data:
         low: -3.14159
         high: 3.14159
         validate_args: false
+
+trainer:
+  accelerator: auto
+  strategy: auto
+  devices: auto
+  num_nodes: 1
+  precision: null
+
+  max_epochs: 3000
+  min_epochs: 60
+  check_val_every_n_epoch: 1
+  log_every_n_steps: 10
+  enable_progress_bar: true
+
+  logger:
+    - class_path: train.callbacks.AframeWandbLogger
+      init_args:
+        name: "aframe_regression"
+        save_dir: out
+        project: "aframe_regression"
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        monitor: val/gaussnll
+        mode: min
+        save_top_k: 1
+        save_last: true
+        filename: "bns_regression_gaussnll_{epoch:02d}"
+        auto_insert_metric_name: false
+
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        monitor: val/mse/out_0
+        mode: min
+        save_top_k: 3
+        filename: "bns_regression_mse_{epoch:02d}"
+        auto_insert_metric_name: false
+
+    - class_path: lightning.pytorch.callbacks.EarlyStopping
+      init_args:
+        monitor: val/mse/out_0
+        mode: min
+        patience: 20
+        verbose: true
+
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: epoch
+
+# Sampling rates to use:
+# - 2048Hz
+# -

@@ -8,7 +8,6 @@ from lightning.pytorch import Callback, LightningModule
 from lightning.pytorch.trainer import Trainer
 
 from train.callbacks import get_save_dir
-from train.utils.jax.checksum import compute_model_checksum
 
 logger = logging.getLogger(__name__)
 
@@ -135,21 +134,17 @@ class JAXCheckpointManager(Callback):
         state = trainer.lightning_module.jax_model_state
         opt_state = trainer.lightning_module.opt_state
 
-        # Compute integrity checksum before writing to disk.
-        checksum = None
         try:
             num_ifos, time_len = self._get_input_shape(trainer)
-            checksum = compute_model_checksum(model, state, num_ifos, time_len)
-            logger.info(f"Computed checkpoint checksum: {checksum}")
         except Exception as e:
             logger.warning(
-                f"Could not compute checkpoint checksum: {e}."
-                " Saving without checksum."
+                f"Could not compute checkpoint inputs shape: {e}."
+                " Saving without shape information."
             )
             num_ifos, time_len = None, None
 
         model_path = self._get_checkpoint_path(
-            trainer, score, checksum, num_ifos, time_len
+            trainer, score, num_ifos, time_len
         )
 
         # Save model and state as tuple
@@ -171,20 +166,12 @@ class JAXCheckpointManager(Callback):
         self,
         trainer: Trainer,
         score: float | None = None,
-        checksum: str | None = None,
         num_ifos: int | None = None,
         time_len: int | None = None,
     ) -> Path:
         metric_part = f"_metric_{score}" if score is not None else ""
         current_step = trainer.global_step
-        checksum_part = (
-            f"_{num_ifos}_{time_len}_{checksum}"
-            if checksum is not None
-            else ""
-        )
-        base_name = (
-            f"checkpoint_step_{current_step}{metric_part}{checksum_part}"
-        )
+        base_name = f"checkpoint_step_{current_step}{metric_part}"
         return self.output_dir / f"{base_name}.eqx"
 
     def _cleanup_old_checkpoints(self, checkpoint_type: str):
