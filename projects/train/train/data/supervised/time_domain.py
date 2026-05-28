@@ -2,41 +2,8 @@ import math
 import torch
 from typing import Literal
 
-from ml4gw.distributions import PowerLaw
 from ml4gw.transforms import Heterodyne
 from train.data.supervised.supervised import SupervisedAframeDataset
-
-
-class CurriculumPowerLaw(PowerLaw):
-    """Power-law SNR sampler whose minimum can be updated at runtime.
-
-    ``ml4gw.distributions.PowerLaw`` bakes ``minimum`` into the base
-    distribution at construction time, so it cannot be mutated. This
-    subclass stores the current minimum separately and recreates the
-    distribution on each ``sample`` call, allowing a Lightning callback
-    to gradually lower the minimum SNR during training.
-    """
-
-    def __init__(self, minimum: float, maximum: float, index: float):
-        super().__init__(minimum, maximum, index)
-        self._minimum = minimum
-        self._maximum = maximum
-        self._index = index
-
-    @property
-    def minimum(self) -> float:
-        return self._minimum
-
-    @minimum.setter
-    def minimum(self, value: float) -> None:
-        self._minimum = value
-
-    def sample(self, sample_shape=None):
-        if sample_shape is None:
-            sample_shape = torch.Size()
-        return PowerLaw(self._minimum, self._maximum, self._index).sample(
-            sample_shape
-        )
 
 
 class TimeDomainSupervisedAframeDataset(SupervisedAframeDataset):
@@ -57,29 +24,10 @@ class TimeDomainSupervisedAframeDataset(SupervisedAframeDataset):
     def apply_transforms(self, X, psds):
         return self.whitener(X, psds)
 
-    def inject(self, X, waveforms=None, params=None):
-        X, y, psds, params_out = super().inject(X, waveforms, params)
+    def inject(self, X, params, waveforms):
+        X, y, psds, params_out = super().inject(X=X, waveforms=waveforms, params=params)
         X = self.apply_transforms(X, psds)
-        if params is not None:
-            return X, y, params_out
-        return X, y
-
-
-class SNRWeightedTimeDomainDataset(TimeDomainSupervisedAframeDataset):
-    """Time-domain dataset that returns per-sample SNR weights alongside
-    (X, y) so the model can weight the training loss by injection SNR
-    and apply an asymmetric penalty for false positives.
-
-    The third element of the training batch is a ``(batch_size,)`` float
-    tensor where each entry is the injected SNR for true-signal samples
-    and ``0`` for background / augmented (swapped/muted) samples.
-    """
-
-    def inject(self, X, waveforms=None):
-        X, y = super().inject(X, waveforms)
-        # _train_snr_weights is set by SupervisedAframeDataset.inject
-        snr_weights = self._train_snr_weights
-        return X, y, snr_weights
+        return X, y, params_out
 
 
 class HeterodyneTimeDomainSupervisedAframeDataset(SupervisedAframeDataset):
@@ -124,9 +72,7 @@ class HeterodyneTimeDomainSupervisedAframeDataset(SupervisedAframeDataset):
             chirp_mass_spacing,
         )
 
-        self.keep_last_n_samples = int(
-            keep_last_n_seconds * self.hparams.sample_rate
-        )
+        self.keep_last_n_samples = int(keep_last_n_seconds * self.hparams.sample_rate)
 
     def build_transforms(self, *args, **kwargs):
         super().build_transforms(*args, **kwargs)
@@ -145,9 +91,7 @@ class HeterodyneTimeDomainSupervisedAframeDataset(SupervisedAframeDataset):
         chirp_mass_spacing: Literal["linear", "log"],
     ) -> torch.Tensor:
         if chirp_mass_spacing == "linear":
-            return torch.linspace(
-                chirp_mass_low, chirp_mass_high, num_chirp_masses
-            )
+            return torch.linspace(chirp_mass_low, chirp_mass_high, num_chirp_masses)
         elif chirp_mass_spacing == "log":
             return torch.logspace(
                 math.log10(chirp_mass_low),
@@ -155,9 +99,7 @@ class HeterodyneTimeDomainSupervisedAframeDataset(SupervisedAframeDataset):
                 num_chirp_masses,
             )
         else:
-            raise ValueError(
-                f"Invalid chirp mass spacing: {chirp_mass_spacing}"
-            )
+            raise ValueError(f"Invalid chirp mass spacing: {chirp_mass_spacing}")
 
     def build_val_batches(self, background, signals, params=None):
         X_bg, X_inj, psds, params = super().build_val_batches(

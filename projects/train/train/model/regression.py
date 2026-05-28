@@ -114,31 +114,43 @@ class RegressionAframe(AframeBase):
     ) -> tuple[torch.Tensor, torch.Tensor]:
         return mean * self.y_std + self.y_mean, sigma * self.y_std
 
+    def m1_m2_to_chirp_mass(self, m1: torch.Tensor, m2: torch.Tensor) -> torch.Tensor:
+        return (m1 * m2) ** (3 / 5) / (m1 + m2) ** (1 / 5)
+
     def compute_loss(self, batch):
-        X, y_target, _ = batch
+        X, labels, params = batch
+
         outputs = self(self._prepare_input(X))
         mean = outputs[:, : self.n_vars]
         var = self.var_activation(outputs[:, self.n_vars :])
-        y_norm = self._normalize_target(y_target)
+
+        chirp_mass = self.m1_m2_to_chirp_mass(params["mass_1"], params["mass_2"])
+        y_norm = self._normalize_target(chirp_mass).reshape(mean.shape)
+
         indiv_mse = nn.MSELoss(reduction="none")(mean, y_norm).T.mean(dim=1)
         nll = self.criterion(mean, y_norm, var)
         spread = F.softplus(y_norm.detach().var(dim=0) - mean.var(dim=0)).mean()
         loss = nll + self.lambda_spread * spread
-        return loss, nll, spread, indiv_mse, var, mean, y_target
+
+        return loss, nll, spread, indiv_mse, var, mean
 
     def training_step(self, batch, batch_idx):
-        loss, nll, spread, indiv_mse, var, _, _ = self.compute_loss(batch)
+        loss, nll, spread, indiv_mse, var, _ = self.compute_loss(batch)
         _log_gaussian_nll(self, "train", nll, indiv_mse, var)
         self.log("train/spread_penalty", spread, on_step=False, on_epoch=True)
         self.log("train/loss", loss, on_step=False, on_epoch=True)
         return loss
 
     def validation_step(self, batch, batch_idx):
-        loss, nll, spread, indiv_mse, var, mean_norm, y_target = self.compute_loss(
-            batch
-        )
+        *_, params = batch
+
+        val_batch = batch[2][-1], None, params
+        loss, nll, spread, indiv_mse, var, mean_norm = self.compute_loss(val_batch)
+
+        chirp_mass = self.m1_m2_to_chirp_mass(params["mass_1"], params["mass_2"])
+
         _log_gaussian_nll(self, "val", nll, indiv_mse, var)
-        _log_within_percentile(self, "val", mean_norm, y_target)
+        _log_within_percentile(self, "val", mean_norm, chirp_mass)
         self.log("val/spread_penalty", spread, on_step=False, on_epoch=True)
         self.log("val/loss", loss, on_step=False, on_epoch=True)
         return loss

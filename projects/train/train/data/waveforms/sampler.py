@@ -91,6 +91,7 @@ class WaveformSampler(torch.nn.Module):
             if f.metadata.get("kind") != "parameter":
                 continue
             val = getattr(waveform_set, f.name)
+            # TODO: Don't skip non scalar params.
             if isinstance(val, np.ndarray) and val.ndim == 1:
                 params[f.name] = torch.from_numpy(
                     val[start:stop].astype(np.float32)

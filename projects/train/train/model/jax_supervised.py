@@ -509,8 +509,6 @@ class JaxSNRWeightedSupervisedAframe(JaxSupervisedAframe):
     the model is encouraged to detect events that clearly exceed the noise
     floor.
 
-    Requires ``SNRWeightedTimeDomainDataset`` (or any dataset whose
-    training batches are 3-tuples ``(X, y, snr_weights)``).
     """
 
     def __init__(
