@@ -22,6 +22,11 @@ model:
     warmup_steps: 1000
     beta_nll: 0.3
     lambda_spread: 0.3
+    metric:
+      class_path: train.metrics.TimeSlideAUROC
+      init_args:
+        max_fpr: 1e-3
+        pool_length: 8
 
 data:
   class_path: train.data.supervised.TimeDomainSupervisedAframeDataset
@@ -57,7 +62,7 @@ data:
         max_min_snr: 30.0
         min_min_snr: 4.0
         max_snr: 50.0
-        decay_steps: 100000
+        decay_steps: 10000
         distribution_type: uniform
 
     waveform_sampler:
@@ -101,6 +106,7 @@ trainer:
         save_dir: outputs
         project: "aframe_regression"
   callbacks:
+    - class_path: train.metric.plotting.ChirpMassErrorVsSnrCallback
     - class_path: lightning.pytorch.callbacks.ModelCheckpoint
       init_args:
         monitor: val/gaussnll

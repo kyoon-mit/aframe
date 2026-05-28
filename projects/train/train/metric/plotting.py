@@ -1,6 +1,8 @@
 import corner
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.cm import ScalarMappable
+from matplotlib.colors import Normalize
 from scipy.stats import gaussian_kde
 from sklearn.metrics import roc_auc_score, roc_curve
 
@@ -922,3 +924,159 @@ class SnrVsScoreScatterCallback(CustomMetric):
             type="Accumulated",
             stages=("val", "test"),
         )
+
+
+def chirp_mass_error_vs_snr(
+    target: BatchedTarget,
+    pred: BatchedTarget,
+    params: BatchedParams,
+    all_outputs: dict | None = None,
+    **kwargs,
+) -> ImageLog:
+    """Scatter of relative chirp-mass error vs SNR, coloured by relative uncertainty.
+
+    Left y-axis: (pred - true) / true per sample (scatter, alpha=0.05).
+    Right y-axis: fraction of samples within ±5 % error per log-spaced SNR bin.
+    Colour encodes pred_std / pred (relative uncertainty); colourbar uses 5–95th
+    percentile range to avoid outlier saturation.
+    """
+    snr = np.asarray(params["snr"]).flatten()
+    cm_pred = np.asarray(pred).flatten()
+    cm_true = np.asarray(target).flatten()
+
+    valid = np.isfinite(snr) & np.isfinite(cm_pred) & np.isfinite(cm_true) & (cm_true != 0)
+    snr = snr[valid]
+    cm_pred = cm_pred[valid]
+    cm_true = cm_true[valid]
+
+    rel_error = (cm_pred - cm_true) / cm_true
+
+    has_std = (
+        all_outputs is not None
+        and "chirp_mass_std" in all_outputs
+        and all_outputs["chirp_mass_std"] is not None
+    )
+    if has_std:
+        cm_std = np.asarray(all_outputs["chirp_mass_std"]).flatten()[valid]
+        rel_uncertainty = cm_std / np.maximum(np.abs(cm_pred), 1e-6)
+    else:
+        rel_uncertainty = np.zeros_like(cm_pred)
+
+    snr_bins = np.logspace(np.log10(3.5), np.log10(100), 100)
+    bin_centers = (snr_bins[:-1] + snr_bins[1:]) / 2
+    bin_indices = np.digitize(snr, snr_bins)
+
+    within_5pct = []
+    for i in range(1, len(snr_bins)):
+        mask = bin_indices == i
+        if np.sum(mask) > 0:
+            within_5pct.append(float(np.mean(np.abs(rel_error[mask]) <= 0.05)))
+        else:
+            within_5pct.append(np.nan)
+
+    fig, ax1 = plt.subplots(figsize=(20, 8))
+
+    if has_std:
+        vmin, vmax = np.percentile(rel_uncertainty, [5, 95])
+        scatter = ax1.scatter(  # noqa: F841
+            snr,
+            rel_error,
+            alpha=0.05,
+            zorder=5,
+            c=rel_uncertainty,
+            cmap="hot",
+            vmin=vmin,
+            vmax=vmax,
+        )
+        sm = ScalarMappable(cmap="hot", norm=Normalize(vmin=vmin, vmax=vmax))
+        sm.set_array([])
+        cbar = plt.colorbar(sm, ax=ax1, pad=0.1)
+        cbar.set_label("Relative Chirp Mass Uncertainty")
+    else:
+        ax1.scatter(snr, rel_error, alpha=0.05, zorder=5, label="Samples")
+
+    log_ticks = [4, 5, 6, 7, 8, 9, 10, 12, 15, 20, 30, 50, 70, 100]
+    ax1.set_xscale("log")
+    ax1.set_xticks(log_ticks)
+    ax1.set_xticklabels([str(t) for t in log_ticks])
+    ax1.set_xlim(3.5, 100)
+    ax1.set_ylim(-1.1, 1.1)
+    ax1.set_yticks(np.linspace(-1, 1, 11))
+    ax1.axhline(0.05, color="r", linestyle="--", zorder=0, linewidth=1, label="±5% error bound")
+    ax1.axhline(-0.05, color="r", linestyle="--", zorder=0, linewidth=1)
+    ax1.set_ylabel("Chirp Mass Relative Prediction Error")
+    ax1.set_xlabel("SNR (Log Scale)")
+    ax1.grid(True, which="both", linestyle="--", linewidth=0.5, zorder=0)
+
+    ax2 = ax1.twinx()
+    ax2.plot(
+        bin_centers,
+        within_5pct,
+        color="green",
+        linewidth=1,
+        alpha=0.8,
+        label="Ratio within 5% error",
+        zorder=1,
+    )
+    ax2.set_ylabel("Ratio of Samples Within 5% Error", color="green")
+    ax2.tick_params(axis="y", labelcolor="green")
+    ax2.set_yticks(np.linspace(0, 1, 11))
+    ax2.set_ylim(-0.05, 1.05)
+    ax2.grid(False)
+
+    lines1, labels1 = ax1.get_legend_handles_labels()
+    lines2, labels2 = ax2.get_legend_handles_labels()
+    ax1.legend(lines1 + lines2, labels1 + labels2, loc="lower right")
+
+    plt.title(f"Chirp Mass Relative Prediction Error vs SNR (N={valid.sum()})")
+    plt.tight_layout()
+    image = plt.gcf()
+    plt.close()
+
+    return ImageLog(value=image, caption="Chirp Mass Relative Prediction Error vs SNR")
+
+
+class ChirpMassErrorVsSnrCallback(CustomMetric):
+    """Lightning callback that plots chirp-mass relative error vs SNR at validation epoch end.
+
+    Expects the model's validation_step to return a dict with:
+    - 'targets': true chirp masses (physical)
+    - 'outputs': predicted chirp masses (physical means)
+    - 'params': dict containing 'snr'
+    - 'all_outputs': dict containing 'chirp_mass_std' (optional)
+
+    Instantiated with no arguments::
+
+        - class_path: train.metric.plotting.ChirpMassErrorVsSnrCallback
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            metric=chirp_mass_error_vs_snr,
+            metric_name="chirp_mass_error_vs_snr",
+            type="Accumulated",
+            stages=("val", "test"),
+        )
+
+    def log_metric(self, trainer, pl_module, outputs, stage):
+        if not isinstance(outputs, dict):
+            return
+        if "targets" not in outputs or "outputs" not in outputs:
+            return
+
+        try:
+            image_log = chirp_mass_error_vs_snr(
+                target=outputs["targets"],
+                pred=outputs["outputs"],
+                params=outputs.get("params") or {},
+                all_outputs=outputs.get("all_outputs"),
+            )
+            image_log.log(
+                trainer,
+                pl_module,
+                f"{stage}/{self.metric_name}",
+                prog_bar=False,
+                batch_size=len(outputs["targets"]),
+            )
+        except Exception as e:
+            print(f"Error logging metric {self.metric_name}: {e}")

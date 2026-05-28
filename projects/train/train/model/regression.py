@@ -6,6 +6,7 @@ from lightning.pytorch.cli import LRSchedulerCallable
 from numpy.typing import ArrayLike
 
 from train.model.base import AframeBase
+from train.metrics import TimeSlideAUROC
 from train.utils.beta_nll_loss import BetaNLLLoss
 
 
@@ -21,7 +22,7 @@ def _log_gaussian_nll(
         task.log(f"{stage}/mse/out_{i}", indiv_mse[i], on_step=False, on_epoch=True)
         task.log(
             f"{stage}/sigma_{i}",
-            torch.sqrt(variance[i].mean(dim=0)),
+            torch.sqrt(variance[:, i].mean(dim=0)),
             on_step=False,
             on_epoch=True,
         )
@@ -33,6 +34,7 @@ def _log_within_percentile(
     mean_norm: torch.Tensor,
     y_target: torch.Tensor,
 ) -> None:
+    y_target = y_target.reshape_as(mean_norm)
     mean_phys = mean_norm * task.y_std + task.y_mean
     rel_err = (mean_phys - y_target).abs() / y_target.abs().clamp(min=1e-8)
     for pct in [1, 2, 5, 10]:
@@ -64,6 +66,7 @@ class RegressionAframe(AframeBase):
         d_output: int,
         learning_rate: float,
         weight_decay: float,
+        metric: TimeSlideAUROC,
         warmup_steps: int = 1000,
         beta_nll: float = 0.5,
         lambda_spread: float = 0.0,
@@ -72,6 +75,7 @@ class RegressionAframe(AframeBase):
         normalize_input: bool = False,
     ) -> None:
         super().__init__(arch)
+        self.metric = metric
         if d_output % 2 != 0:
             raise ValueError(
                 f"d_output={d_output} must be even (n_vars means + n_vars variances)."
@@ -101,6 +105,12 @@ class RegressionAframe(AframeBase):
     def forward(self, X: torch.Tensor) -> torch.Tensor:
         return self.model(X)
 
+    def score(self, X: torch.Tensor) -> torch.Tensor:
+        """Detection score: negative mean predicted variance (lower uncertainty → higher score)."""
+        outputs = self(self._prepare_input(X))
+        _, var_pre = outputs.chunk(2, dim=-1)
+        return -self.var_activation(var_pre).mean(dim=-1)
+
     def _prepare_input(self, X: torch.Tensor) -> torch.Tensor:
         if self.normalize_input:
             X = X / X.std(dim=-1, keepdim=True).clamp(min=1e-8)
@@ -121,13 +131,13 @@ class RegressionAframe(AframeBase):
         X, labels, params = batch
 
         outputs = self(self._prepare_input(X))
-        mean = outputs[:, : self.n_vars]
-        var = self.var_activation(outputs[:, self.n_vars :])
+        mean, var = outputs.chunk(2, dim=-1)
+        var = self.var_activation(var)
 
         chirp_mass = self.m1_m2_to_chirp_mass(params["mass_1"], params["mass_2"])
         y_norm = self._normalize_target(chirp_mass).reshape(mean.shape)
 
-        indiv_mse = nn.MSELoss(reduction="none")(mean, y_norm).T.mean(dim=1)
+        indiv_mse = nn.MSELoss(reduction="none")(mean, y_norm).mean(dim=0)
         nll = self.criterion(mean, y_norm, var)
         spread = F.softplus(y_norm.detach().var(dim=0) - mean.var(dim=0)).mean()
         loss = nll + self.lambda_spread * spread
@@ -137,15 +147,57 @@ class RegressionAframe(AframeBase):
     def training_step(self, batch, batch_idx):
         loss, nll, spread, indiv_mse, var, _ = self.compute_loss(batch)
         _log_gaussian_nll(self, "train", nll, indiv_mse, var)
-        self.log("train/spread_penalty", spread, on_step=False, on_epoch=True)
-        self.log("train/loss", loss, on_step=False, on_epoch=True)
+        self.log("train/spread_penalty", spread)
+        self.log("train/loss", loss)
         return loss
 
     def validation_step(self, batch, batch_idx):
-        *_, params = batch
+        shift, X_bg, X_sig, params = batch
 
-        val_batch = batch[2][-1], None, params
-        loss, nll, spread, indiv_mse, var, mean_norm = self.compute_loss(val_batch)
+        y_bg = self.score(X_bg)
+
+        n_views = X_sig.shape[0]
+        all_loss, all_nll, all_spread, all_indiv_mse, all_var, all_mean_norm = (
+            [],
+            [],
+            [],
+            [],
+            [],
+            [],
+        )
+        all_scores_fg = []
+        for i in range(n_views):
+            loss, nll, spread, indiv_mse, var, mean_norm = self.compute_loss(
+                (X_sig[i], None, params)
+            )
+            all_loss.append(loss)
+            all_nll.append(nll)
+            all_spread.append(spread)
+            all_indiv_mse.append(indiv_mse)
+            all_var.append(var)
+            all_mean_norm.append(mean_norm)
+            all_scores_fg.append(-var.mean(dim=-1))
+
+        y_fg = torch.stack(all_scores_fg).mean(dim=0)
+        self.metric.update(shift, y_bg, y_fg)
+        self.log(
+            "val/valid_auroc",
+            self.metric,
+            on_step=True,
+            on_epoch=True,
+            sync_dist=True,
+        )
+
+        loss = torch.stack(all_loss).mean()
+        nll = torch.stack(all_nll).mean()
+        spread = torch.stack(all_spread).mean()
+        indiv_mse = torch.stack(all_indiv_mse).mean(dim=0)
+        var = torch.stack(all_var).mean(dim=0)
+
+        # (n_views, batch, n_vars)
+        mean_norm_views = torch.stack(all_mean_norm)
+        mean_norm = mean_norm_views.mean(dim=0)
+        view_variance = mean_norm_views.var(dim=0, correction=0)  # (batch, n_vars)
 
         chirp_mass = self.m1_m2_to_chirp_mass(params["mass_1"], params["mass_2"])
 
@@ -153,7 +205,21 @@ class RegressionAframe(AframeBase):
         _log_within_percentile(self, "val", mean_norm, chirp_mass)
         self.log("val/spread_penalty", spread, on_step=False, on_epoch=True)
         self.log("val/loss", loss, on_step=False, on_epoch=True)
-        return loss
+        for i in range(view_variance.shape[-1]):
+            self.log(
+                f"val/view_var/out_{i}",
+                view_variance[:, i].mean(),
+                on_step=False,
+                on_epoch=True,
+            )
+
+        mean_phys, sigma_phys = self._unnormalize_output(mean_norm, torch.sqrt(var))
+        return {
+            "targets": chirp_mass.detach().cpu(),
+            "outputs": mean_phys.detach().cpu(),
+            "params": {"snr": params["snr"].detach().cpu()},
+            "all_outputs": {"chirp_mass_std": sigma_phys.detach().cpu()},
+        }
 
     def test_step(self, batch, batch_idx):
         X, y_target, _ = batch
@@ -208,6 +274,7 @@ class RegressionAframeS4D(RegressionAframe):
         self,
         arch,
         d_output: int,
+        metric: TimeSlideAUROC,
         base_lr: float = 1e-4,
         weight_decay: float = 0.0,
         warmup_steps: int = 1000,
@@ -223,6 +290,7 @@ class RegressionAframeS4D(RegressionAframe):
         super().__init__(
             arch,
             d_output=d_output,
+            metric=metric,
             learning_rate=base_lr,
             weight_decay=weight_decay,
             warmup_steps=warmup_steps,
@@ -234,7 +302,7 @@ class RegressionAframeS4D(RegressionAframe):
         )
         self._lr_scheduler_factory = lr_scheduler
         self.log_gradients = log_gradients
-        self.save_hyperparameters(ignore=["arch", "lr_scheduler"])
+        self.save_hyperparameters(ignore=["arch", "lr_scheduler", "metric"])
 
     def on_after_backward(self) -> None:
         if self.log_gradients:
