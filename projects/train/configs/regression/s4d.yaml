@@ -18,7 +18,7 @@ model:
     y_mean: [1.2] # centre of BNS chirp_mass prior [0.87, 2.22]
     y_std: [0.35] # approx std of uniform [0.87, 2.22]
     base_lr: 1e-4
-    weight_decay: 0.0
+    weight_decay: 0.01
     warmup_steps: 1000
     beta_nll: 0.3
     lambda_spread: 0.3
@@ -35,22 +35,23 @@ data:
     waveforms_dir: /home/barmstrong/aframe_new/data/bns/aframe_train/
     ifos: [H1, L1]
     sample_rate: 2048
-    kernel_length: 4.0
+    target_sample_rate: 512
+    kernel_length: 16.0
     fduration: 2.0
     fftlength: 2.0
     psd_length: 20
     highpass: 20
     lowpass: 1024
-    batch_size: 128
-    batches_per_epoch: 200
-    num_files_per_batch: 1
+    batch_size: 256
+    batches_per_epoch: 1000
+    num_files_per_batch: 4
     chunk_size: 10000
     chunks_per_epoch: 10
     waveform_prob: 1.0
     swap_prob: 0
     mute_prob: 0
-    left_pad: 3.75390625
-    right_pad: 0.00390625
+    left_pad: 7.75
+    right_pad: 0
     max_num_workers: 16
     valid_stride: 0.5
     num_valid_views: 5
@@ -61,8 +62,8 @@ data:
       init_args:
         max_min_snr: 30.0
         min_min_snr: 4.0
-        max_snr: 50.0
-        decay_steps: 10000
+        max_snr: 100.0
+        decay_steps: 30000
         distribution_type: uniform
 
     waveform_sampler:
@@ -96,7 +97,7 @@ trainer:
   max_epochs: 3000
   min_epochs: 60
   check_val_every_n_epoch: 1
-  log_every_n_steps: 10
+  log_every_n_steps: 25
   enable_progress_bar: true
 
   logger:
@@ -106,6 +107,8 @@ trainer:
         save_dir: outputs
         project: "aframe_regression"
   callbacks:
+    - class_path: train.callbacks.WaveformWindowDiagram
+    - class_path: train.metric.plotting.ValueDistributionCallback
     - class_path: train.metric.plotting.ChirpMassErrorVsSnrCallback
     - class_path: lightning.pytorch.callbacks.ModelCheckpoint
       init_args:
@@ -118,23 +121,12 @@ trainer:
 
     - class_path: lightning.pytorch.callbacks.ModelCheckpoint
       init_args:
-        monitor: val/mse/out_0
-        mode: min
+        monitor: val/valid_auroc_epoch
+        mode: max
         save_top_k: 3
-        filename: "bns_regression_mse_{epoch:02d}"
+        filename: "bns_regression_auroc_{epoch:02d}"
         auto_insert_metric_name: false
-
-    - class_path: lightning.pytorch.callbacks.EarlyStopping
-      init_args:
-        monitor: val/mse/out_0
-        mode: min
-        patience: 20
-        verbose: true
 
     - class_path: lightning.pytorch.callbacks.LearningRateMonitor
       init_args:
         logging_interval: epoch
-
-# Sampling rates to use:
-# - 2048Hz
-# -

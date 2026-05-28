@@ -9,6 +9,7 @@ from typing import Callable, Optional, Union
 import h5py
 import lightning.pytorch as pl
 import torch
+import torchaudio
 from ml4gw.augmentations import SignalInverter, SignalReverser
 from ml4gw.dataloading import Hdf5TimeSeriesDataset
 from ml4gw.transforms import Whiten
@@ -133,6 +134,10 @@ class BaseAframeDataset(pl.LightningDataModule):
             Highpass filter frequency in Hz.
         lowpass:
             Lowpass filter frequency in Hz.
+        target_sample_rate:
+            If set, resample the whitened time series to this rate (Hz)
+            before passing data to the model. Must be lower than
+            `sample_rate`. If ``None``, no resampling is performed.
         snr_sampler:
             A callable that samples SNRs for the injected signals.
             If `None`, SNRs will be left unchanged.
@@ -187,6 +192,7 @@ class BaseAframeDataset(pl.LightningDataModule):
         fftlength: Optional[float] = None,
         highpass: Optional[float] = None,
         lowpass: Optional[float] = None,
+        target_sample_rate: Optional[float] = None,
         snr_sampler: Optional[Union[TransformedDist, Callable[[int], Tensor]]] = None,
         # validation args
         val_batch_size: Optional[int] = None,
@@ -217,6 +223,7 @@ class BaseAframeDataset(pl.LightningDataModule):
         self.whitener = None
         self.projector = None
         self.psd_estimator = None
+        self.resampler = None
         self._on_device = False
 
         self.dec, self.psi, self.phi = dec, psi, phi
@@ -324,6 +331,11 @@ class BaseAframeDataset(pl.LightningDataModule):
         Length of the time-domain whitening filter in samples
         """
         return int(self.hparams.fduration * self.hparams.sample_rate)
+
+    @property
+    def model_sample_rate(self) -> float:
+        """Sample rate seen by the model (after optional resampling)."""
+        return self.hparams.target_sample_rate or self.hparams.sample_rate
 
     @property
     def left_pad_size(self) -> int:
@@ -479,6 +491,11 @@ class BaseAframeDataset(pl.LightningDataModule):
             self.hparams.highpass,
             self.hparams.lowpass,
         )
+        if self.hparams.target_sample_rate is not None:
+            self.resampler = torchaudio.transforms.Resample(
+                orig_freq=int(self.hparams.sample_rate),
+                new_freq=int(self.hparams.target_sample_rate),
+            )
 
     def sample_extrinsic(self, X: torch.Tensor):
         """

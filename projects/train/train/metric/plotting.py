@@ -926,6 +926,113 @@ class SnrVsScoreScatterCallback(CustomMetric):
         )
 
 
+@metric(type="Accumulated", stages=("val", "test"))
+def value_distribution(
+    target: BatchedTarget, pred: BatchedTarget, params: BatchedParams, **kwargs
+) -> ImageLog:
+    """Plot target and predicted value distributions split by signal (label=1) vs background (label=0)."""
+    target = np.asarray(target)
+    pred = np.asarray(pred)
+    if target.ndim == 1:
+        target = target[:, None]
+    if pred.ndim == 1:
+        pred = pred[:, None]
+
+    snr = np.asarray(params["snr"]).flatten()
+    is_signal = np.isfinite(snr)
+    is_bg = ~is_signal
+
+    n_components = pred.shape[-1]
+
+    plt.figure(figsize=(10, 6))
+
+    plotted = 0
+    for i in range(n_components):
+        t = target[:, i]
+        p = pred[:, i]
+        tgt = t[np.isfinite(t)]
+        sig = p[is_signal & np.isfinite(p)]
+        bg = p[is_bg & np.isfinite(p)]
+        if tgt.size == 0 and sig.size == 0 and bg.size == 0:
+            continue
+        plotted += 1
+
+        combined = np.concatenate([x for x in [tgt, sig, bg] if x.size > 0])
+        lo = float(np.min(combined))
+        hi = float(np.max(combined))
+        if lo == hi:
+            hi = lo + 1e-6
+        bins = np.linspace(lo, hi, 100)
+
+        suffix = f" (comp {i})" if n_components > 1 else ""
+        if tgt.size:
+            plt.hist(
+                tgt,
+                bins=bins,
+                histtype="step",
+                linewidth=1.5,
+                label=f"Target{suffix} (μ={tgt.mean():.3g})",
+            )
+        if sig.size:
+            plt.hist(
+                sig,
+                bins=bins,
+                histtype="step",
+                linewidth=1.5,
+                label=f"Pred Signal{suffix} (μ={sig.mean():.3g})",
+            )
+        if bg.size:
+            plt.hist(
+                bg,
+                bins=bins,
+                histtype="step",
+                linewidth=1.5,
+                label=f"Pred Background{suffix} (μ={bg.mean():.3g})",
+            )
+
+    if plotted == 0:
+        plt.text(
+            0.5,
+            0.5,
+            "No valid samples",
+            ha="center",
+            va="center",
+            transform=plt.gca().transAxes,
+        )
+    else:
+        plt.legend()
+
+    plt.xlabel("Value")
+    plt.ylabel("Count")
+    plt.title("Value Distribution: Target, Pred Signal, Pred Background")
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+    image = plt.gcf()
+    plt.close()
+
+    return ImageLog(
+        value=image,
+        caption="Value Distribution: Target, Pred Signal, Pred Background",
+    )
+
+
+class ValueDistributionCallback(CustomMetric):
+    """Lightning callback that plots target and predicted value distributions split by label.
+
+    Instantiated with no arguments::
+
+        - class_path: train.metric.plotting.ValueDistributionCallback
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            metric=value_distribution,
+            metric_name="value_distribution",
+            type="Accumulated",
+            stages=("val", "test"),
+        )
+
+
 def chirp_mass_error_vs_snr(
     target: BatchedTarget,
     pred: BatchedTarget,

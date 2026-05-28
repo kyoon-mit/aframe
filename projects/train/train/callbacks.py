@@ -4,7 +4,8 @@ import shutil
 import logging
 from typing import Optional
 
-
+import matplotlib.pyplot as plt
+import numpy as np
 import h5py
 import s3fs
 import torch
@@ -314,3 +315,128 @@ class GradientTracker(Callback):
         norms = grad_norm(pl_module, norm_type=self.norm_type)
         total_norm = norms[f"grad_{float(self.norm_type)}_norm_total"]
         self.log(f"grad_norm_{self.norm_type}", total_norm)
+
+
+class WaveformWindowDiagram(Callback):
+    """Log a one-shot diagram of the waveform slicing geometry to W&B.
+
+    Shows the sliced waveform extent, valid window placement range, and one
+    example sampled window (with whitened vs. cropped edges), all relative
+    to the merger at t=0.
+
+    Add to the YAML trainer callbacks list::
+
+        - class_path: train.callbacks.WaveformWindowDiagram
+    """
+
+    def on_train_start(self, trainer, pl_module):
+        if trainer.global_rank != 0:
+            return
+
+        dm = trainer.datamodule
+        hp = dm.hparams
+        kl = hp.kernel_length   # whitened kernel length (s)
+        fd = hp.fduration        # whitening filter duration (s)
+        lp = hp.left_pad         # min merger-to-left-edge gap (s, whitened)
+        rp = hp.right_pad        # min merger-to-right-edge gap (s, whitened)
+
+        # Convert pad constraints to the unwhitened timeline.
+        # Each side loses fd/2 to whitening, so in the unwhitened frame:
+        lp_u = lp + fd / 2
+        rp_u = rp + fd / 2
+        kernel_u = kl + fd       # unwhitened kernel duration (s)
+
+        # Sliced-waveform extents relative to merger at t=0.
+        wf_start = -(kernel_u - rp_u)   # = -(kl + fd/2 - rp)
+        wf_end   =  (kernel_u - lp_u)   # = kl + fd/2 - lp
+
+        # Valid window-start range (unwhitened kernel must fit inside slice).
+        win_start_min = wf_start
+        win_start_max = -lp_u            # merger always >= lp_u from left
+
+        # Sample one concrete window (fixed seed for reproducibility).
+        rng = np.random.default_rng(42)
+        frac = rng.uniform(0, 1)
+        win_start = win_start_min + frac * (win_start_max - win_start_min)
+        win_end   = win_start + kernel_u
+
+        # Whitened portion: fd/2 trimmed from each end.
+        wh_start = win_start + fd / 2
+        wh_end   = win_end   - fd / 2
+
+        # ── figure ──────────────────────────────────────────────────────────
+        fig, ax = plt.subplots(figsize=(13, 3.5))
+
+        Y_WF  = 0.75
+        Y_WIN = 0.35
+        LW    = 14
+
+        # Sliced waveform bar (blue)
+        ax.plot([wf_start, wf_end], [Y_WF, Y_WF], linewidth=LW,
+                color="steelblue", solid_capstyle="butt",
+                label="Sliced waveform")
+
+        # Valid window-start span (orange shading)
+        ax.axvspan(win_start_min, win_start_max, alpha=0.18,
+                   color="darkorange", label="Valid window-start zone")
+
+        # Sampled window: cropped (faded green) then whitened (solid green)
+        ax.plot([win_start, win_end], [Y_WIN, Y_WIN], linewidth=LW,
+                color="green", alpha=0.25, solid_capstyle="butt",
+                label="Unwhitened kernel (cropped)")
+        ax.plot([wh_start, wh_end], [Y_WIN, Y_WIN], linewidth=LW,
+                color="green", solid_capstyle="butt",
+                label="Whitened kernel (model input)")
+
+        # Merger line
+        ax.axvline(0, color="red", linewidth=1.8, linestyle="--",
+                   label="Merger (t = 0)")
+
+        # ── annotations ─────────────────────────────────────────────────────
+        def ann(x, y, label, ha="center", color="black", dy=0.09):
+            ax.text(x, y + dy, label, ha=ha, va="bottom",
+                    fontsize=7.5, color=color)
+
+        ann(wf_start, Y_WF, f"{wf_start:.2f}s", color="steelblue")
+        ann(wf_end,   Y_WF, f"{wf_end:.2f}s",   color="steelblue")
+
+        mid_valid = (win_start_min + win_start_max) / 2
+        jitter = win_start_max - win_start_min
+        ax.annotate(
+            "",
+            xy=(win_start_max, Y_WF - 0.18),
+            xytext=(win_start_min, Y_WF - 0.18),
+            arrowprops=dict(arrowstyle="<->", color="darkorange", lw=1.5),
+        )
+        ax.text(mid_valid, Y_WF - 0.12,
+                f"jitter = {jitter:.2f}s", ha="center",
+                fontsize=7.5, color="darkorange")
+
+        ann(win_start, Y_WIN, f"{win_start:.2f}s", color="grey")
+        ann(win_end,   Y_WIN, f"{win_end:.2f}s",   color="grey")
+        ann(wh_start, Y_WIN, f"{wh_start:.2f}s", color="darkgreen")
+        ann(wh_end,   Y_WIN, f"{wh_end:.2f}s",   color="darkgreen")
+
+        ax.set_xlim(wf_start - 0.4, wf_end + 0.4)
+        ax.set_ylim(0.1, 1.05)
+        ax.set_yticks([])
+        ax.set_xlabel("Time relative to merger (s)", fontsize=10)
+        ax.set_title(
+            f"Waveform window geometry  —  "
+            f"kernel_length={kl}s, fduration={fd}s, "
+            f"left_pad={lp}s, right_pad={rp}s",
+            fontsize=10,
+        )
+        ax.legend(loc="upper left", fontsize=8, framealpha=0.8)
+        ax.grid(True, axis="x", alpha=0.3)
+        plt.tight_layout()
+
+        for logger in trainer.loggers:
+            if isinstance(logger, WandbLogger):
+                import wandb
+                logger.experiment.log(
+                    {"waveform_window_geometry": wandb.Image(fig)}
+                )
+                break
+
+        plt.close(fig)

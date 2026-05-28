@@ -15,7 +15,7 @@ dependencies = [
     "torch==2.5.0",
     "lightning~=2.6.1",
     "jsonargparse[signatures]~=4.48",
-    "wandb>=0.15",
+    "wandb>=0.20",
     "bokeh~=3.0",
     "ray[default, tune]>=2.8.0,<3",
     "boto3~=1.30",
@@ -30,7 +30,8 @@ dependencies = [
     "bayesian-optimization>=1.4.3,<2",
     "filelock>=3.13.1,<4",
     "s3fs>=2024,<2025",
-    "lightray>=0.2.3",
+    # "lightray>=0.2.3",
+    "omegaconf>=2.3.0",
 ]
 
 [project.scripts]
