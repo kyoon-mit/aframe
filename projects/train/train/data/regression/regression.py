@@ -235,6 +235,7 @@ class RegressionTimeDomainDataset(BaseAframeDataset):
         *args,
         target_parameters: tuple[str, ...] = ("chirp_mass",),
         n_val_waveforms: int = 4096,
+        val_batches_fraction: float = 0.1,
         waveforms_dir: str = ".",
         num_files_per_batch: int = 1,
         prefetch_factor: int = 4,
@@ -521,7 +522,7 @@ class RegressionTimeDomainDataset(BaseAframeDataset):
     def val_dataloader(self):
         from ml4gw.dataloading import Hdf5TimeSeriesDataset
 
-        val_batches = max(1, self.batches_per_epoch // 10)
+        val_batches = max(1, int(self.batches_per_epoch * self.hparams.val_batches_fraction))
         val_dataset = Hdf5TimeSeriesDataset(
             self.valid_fnames,
             channels=self.hparams.ifos,

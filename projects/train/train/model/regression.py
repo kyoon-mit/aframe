@@ -2,7 +2,7 @@ import math
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
+
 import lightning.pytorch as pl
 from lightning.pytorch.cli import LRSchedulerCallable
 from numpy.typing import ArrayLike
@@ -151,22 +151,25 @@ class _RegressionBase(pl.LightningModule):
         y_norm = self._normalize_target(y_target)
         indiv_mse = nn.MSELoss(reduction='none')(mean, y_norm).T.mean(dim=1)  # (n_vars,) in normalized space
         nll = self.criterion(mean, y_norm, var)
-        spread = F.softplus(y_norm.detach().var(dim=0) - mean.var(dim=0)).mean()
+        var_pred = mean.var(dim=0)
+        var_target = y_norm.detach().var(dim=0)
+        spread = (var_pred - var_target).pow(2).mean()
+        var_gap = (var_pred - var_target).mean()
         loss = nll + self.lambda_spread * spread
-        return loss, nll, spread, indiv_mse, var, mean, y_target
+        return loss, nll, var_gap, indiv_mse, var, mean, y_target
 
     def training_step(self, batch, batch_idx):
-        loss, nll, spread, indiv_mse, var, _, _ = self.compute_loss(batch)
+        loss, nll, var_gap, indiv_mse, var, _, _ = self.compute_loss(batch)
         _log_gaussian_nll(self, 'train', nll, indiv_mse, var)
-        self.log('train/spread_penalty', spread, on_step=False, on_epoch=True)
+        self.log('train/spread_penalty', var_gap, on_step=False, on_epoch=True)
         self.log('train/loss', loss, on_step=False, on_epoch=True)
         return loss
 
     def validation_step(self, batch, batch_idx):
-        loss, nll, spread, indiv_mse, var, mean_norm, y_target = self.compute_loss(batch)
+        loss, nll, var_gap, indiv_mse, var, mean_norm, y_target = self.compute_loss(batch)
         _log_gaussian_nll(self, 'val', nll, indiv_mse, var)
         _log_within_pct(self, 'val', mean_norm, y_target)
-        self.log('val/spread_penalty', spread, on_step=False, on_epoch=True)
+        self.log('val/spread_penalty', var_gap, on_step=False, on_epoch=True)
         self.log('val/loss', loss, on_step=False, on_epoch=True)
         return loss
 

@@ -11,6 +11,7 @@ model:
     learning_rate: 1.0e-3
     weight_decay: 0.0
     warmup_steps: 1000
+    beta_nll: 0.5
 
 data:
   class_path: train.data.regression.RegressionTimeDomainDataset
@@ -23,7 +24,7 @@ data:
     fduration: 1.0
     psd_length: 20.0
     fftlength: 2.0
-    highpass: 32.0
+    highpass: 20.0
     waveform_prob: 1.0
     target_parameters: [chirp_mass]
     batch_size: 128
@@ -45,45 +46,62 @@ data:
         sample_rate: 256
         # val_waveform_file: /path/to/val_waveforms.hdf5
         approximant:
-          class_path: ml4gw.waveforms.IMRPhenomD
-        duration: 64.0    # must cover kernel_length + right_pad
+          class_path: ml4gw.waveforms.IMRPhenomPv2
+        duration: 64.0
         f_min: 20.0
-        f_ref: 40.0
+        f_ref: 50.0
         training_prior:
           class_path: train.prior.AframePrior
           init_args:
-            conversion_function: train.conversion.aligned_to_lalsimulation_parameters
+            conversion_function: train.conversion.precessing_to_lalsimulation_parameters
             priors:
               chirp_mass:
                 class_path: torch.distributions.Uniform
                 init_args:
-                  low: 1.0
-                  high: 1.8
+                  low: 0.87
+                  high: 2.22
                   validate_args: false
               mass_ratio:
                 class_path: torch.distributions.Uniform
                 init_args:
-                  low: 0.125
+                  low: 0.5
                   high: 1.0
                   validate_args: false
-              chi1:
+              a_1:
                 class_path: torch.distributions.Uniform
                 init_args:
-                  low: -0.05
-                  high: 0.05
+                  low: 0.0
+                  high: 0.4
                   validate_args: false
-              chi2:
+              a_2:
                 class_path: torch.distributions.Uniform
                 init_args:
-                  low: -0.05
-                  high: 0.05
+                  low: 0.0
+                  high: 0.4
                   validate_args: false
-              distance:
-                class_path: ml4gw.distributions.UniformComovingVolume
+              tilt_1:
+                class_path: ml4gw.distributions.Sine
                 init_args:
-                  minimum: 10
-                  maximum: 500
-                  distance_type: luminosity_distance
+                  low: 0.0
+                  high: 3.14159
+                  validate_args: false
+              tilt_2:
+                class_path: ml4gw.distributions.Sine
+                init_args:
+                  low: 0.0
+                  high: 3.14159
+                  validate_args: false
+              phi_12:
+                class_path: torch.distributions.Uniform
+                init_args:
+                  low: 0.0
+                  high: 6.28318
+                  validate_args: false
+              phi_jl:
+                class_path: torch.distributions.Uniform
+                init_args:
+                  low: 0.0
+                  high: 6.28318
                   validate_args: false
               inclination:
                 class_path: ml4gw.distributions.Sine
