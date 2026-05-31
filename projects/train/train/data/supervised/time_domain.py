@@ -17,11 +17,19 @@ class TimeDomainSupervisedAframeDataset(SupervisedAframeDataset):
             X_fg.append(inj)
 
         X_fg = torch.stack(X_fg)
+        if self.resampler is not None:
+            X_bg = self.resampler(X_bg.contiguous())
+            X_fg = self.resampler(X_fg.contiguous())
         return X_bg, X_fg
+
+    def apply_transforms(self, X, psds):
+        X = self.whitener(X, psds)
+        if self.resampler is not None:
+            X = self.resampler(X.contiguous())
 
     def inject(self, X, waveforms=None):
         X, y, psds = super().inject(X, waveforms)
-        X = self.whitener(X, psds)
+        X = self.apply_transforms(X, psds)
         return X, y
 
 
