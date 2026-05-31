@@ -31,11 +31,15 @@ class WaveformLoader(WaveformSampler):
     ) -> None:
         super().__init__(*args, **kwargs)
         if training_waveform_path.is_dir():
-            self.training_waveform_files = list(training_waveform_path.iterdir())
+            self.training_waveform_files = list(
+                training_waveform_path.iterdir()
+            )
         else:
             self.training_waveform_files = [training_waveform_path]
 
-        waveform_set = WaveformPolarizationSet.read(self.training_waveform_files[0])
+        waveform_set = WaveformPolarizationSet.read(
+            self.training_waveform_files[0]
+        )
         if waveform_set.right_pad != self.right_pad:
             raise ValueError(
                 "Training waveform file does not have the same "
@@ -95,7 +99,7 @@ class Hdf5WaveformLoader(torch.utils.data.IterableDataset):
         self.chunk_size = chunk_size
 
         if path is not None:
-            self.path = path.parts if isinstance(path, Path) else path.split("/")
+            self.path = Path(path).parts
         else:
             self.path = None
 
@@ -108,6 +112,7 @@ class Hdf5WaveformLoader(torch.utils.data.IterableDataset):
         # of interest in a dictionary so we
         # can access them at will without needing
         # to reopen the files each time
+        self.param_keys = None
         for fname in self.fnames:
             f, g = self.open(fname)
             self.mmap_files[fname] = f
@@ -116,8 +121,18 @@ class Hdf5WaveformLoader(torch.utils.data.IterableDataset):
             }
 
             pm_grp = f["parameters"]
-            self.param_keys = list(pm_grp.keys())
-            self.param_datasets[fname] = {k: pm_grp[k] for k in self.param_keys}
+
+            keys = list(pm_grp.keys())
+            if self.param_keys is None:
+                self.param_keys = keys
+            elif set(keys) != set(self.param_keys):
+                raise ValueError(
+                    f"Parameter keys in {fname} ({keys}) do not match "
+                    f"those in the first file ({self.param_keys})"
+                )
+            self.param_datasets[fname] = {
+                k: pm_grp[k] for k in self.param_keys
+            }
 
             # store sizes of each dataset and warn if not chunked;
             # assumes all dsets have same attributes
@@ -130,7 +145,9 @@ class Hdf5WaveformLoader(torch.utils.data.IterableDataset):
                     "without using chunked storage. This can have "
                     "severe performance impacts at data loading time. "
                     "If you need faster loading, try re-generating "
-                    "your datset with chunked storage turned on.".format(fnames),
+                    "your datset with chunked storage turned on.".format(
+                        fnames
+                    ),
                     stacklevel=2,
                 )
 
@@ -170,12 +187,17 @@ class Hdf5WaveformLoader(torch.utils.data.IterableDataset):
             channel: self.mmap_datasets[fname][channel][start:end]
             for channel in self.channels
         }
-        params = {k: self.param_datasets[fname][k][start:end] for k in self.param_keys}
+        params = {
+            k: self.param_datasets[fname][k][start:end]
+            for k in self.param_keys
+        }
         return waveforms, params
 
     def sample_batch(self):
         # allocate batch up front
-        batch = np.zeros((self.batch_size, self.num_channels, self.waveform_size))
+        batch = np.zeros(
+            (self.batch_size, self.num_channels, self.waveform_size)
+        )
         params_buf = {
             k: np.zeros(
                 self.batch_size,
@@ -187,7 +209,9 @@ class Hdf5WaveformLoader(torch.utils.data.IterableDataset):
         for i in range(self.chunks_per_batch):
             fname = np.random.choice(self.fnames, p=self.probs)
 
-            chunk_size = min(self.chunk_size, self.batch_size - i * self.chunk_size)
+            chunk_size = min(
+                self.chunk_size, self.batch_size - i * self.chunk_size
+            )
 
             # select a random starting index for the chunk
             max_start = self.sizes[fname] - chunk_size
@@ -254,7 +278,9 @@ class ChunkedWaveformDataset(torch.utils.data.IterableDataset):
 
         def _next(it):
             [waveform_chunk], param_dict_chunk = next(it)
-            return waveform_chunk, {k: v[0] for k, v in param_dict_chunk.items()}
+            return waveform_chunk, {
+                k: v[0] for k, v in param_dict_chunk.items()
+            }
 
         waveform_chunk, param_chunk = _next(it)
         num_waveforms, _, _ = waveform_chunk.shape
