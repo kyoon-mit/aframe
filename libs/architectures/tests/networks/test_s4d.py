@@ -43,7 +43,9 @@ def test_ssm_kernel_linearity():
         s_f = torch.fft.rfft(signal, n=256)
         return torch.fft.irfft(k_f * s_f, n=256)[..., :128]
 
-    assert torch.allclose(convolve(a * u + b * v), a * convolve(u) + b * convolve(v), atol=1e-5)
+    assert torch.allclose(
+        convolve(a * u + b * v), a * convolve(u) + b * convolve(v), atol=1e-5
+    )
 
 
 def test_skip_connection_contributes():

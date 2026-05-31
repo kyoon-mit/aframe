@@ -12,7 +12,9 @@ from einops import rearrange, repeat
 class DropoutNd(nn.Module):
     """N-dimensional dropout that ties the mask across sequence positions."""
 
-    def __init__(self, p: float = 0.5, tie: bool = True, transposed: bool = True):
+    def __init__(
+        self, p: float = 0.5, tie: bool = True, transposed: bool = True
+    ):
         super().__init__()
         if p < 0 or p >= 1:
             raise ValueError(f"dropout probability must be in [0, 1), got {p}")
@@ -29,7 +31,9 @@ class DropoutNd(nn.Module):
         if self.training:
             if not self.transposed:
                 X = rearrange(X, "b ... d -> b d ...")
-            mask_shape = X.shape[:2] + (1,) * (X.ndim - 2) if self.tie else X.shape
+            mask_shape = (
+                X.shape[:2] + (1,) * (X.ndim - 2) if self.tie else X.shape
+            )
             mask = torch.rand(*mask_shape, device=X.device) < 1.0 - self.p
             X = X * mask * (1.0 / (1 - self.p))
             if not self.transposed:
@@ -51,9 +55,9 @@ class S4DKernel(nn.Module):
         super().__init__()
 
         H = d_model
-        log_dt = torch.rand(H) * (math.log(dt_max) - math.log(dt_min)) + math.log(
-            dt_min
-        )
+        log_dt = torch.rand(H) * (
+            math.log(dt_max) - math.log(dt_min)
+        ) + math.log(dt_min)
 
         C = torch.randn(H, N // 2, dtype=torch.cfloat)
         self.C = nn.Parameter(torch.view_as_real(C))
@@ -70,10 +74,14 @@ class S4DKernel(nn.Module):
         dt = torch.exp(self.log_dt)  # (H,)
         C = torch.view_as_complex(self.C)  # (H, N//2)
         # torch.complex(...) instead of `1j` for torch.compile safety
-        A = torch.complex(-torch.exp(self.log_A_real), self.A_imag)  # (H, N//2)
+        A = torch.complex(
+            -torch.exp(self.log_A_real), self.A_imag
+        )  # (H, N//2)
 
         dtA = A * dt.unsqueeze(-1)  # (H, N//2)
-        K = dtA.unsqueeze(-1) * torch.arange(L, device=A.device)  # (H, N//2, L)
+        K = dtA.unsqueeze(-1) * torch.arange(
+            L, device=A.device
+        )  # (H, N//2, L)
 
         C = C * (torch.exp(dtA) - 1.0) / A
         K = 2 * torch.einsum("hn, hnl -> hl", C, torch.exp(K)).real  # (H, L)
@@ -110,7 +118,9 @@ class S4D(nn.Module):
         self.transposed = transposed
         self.D = nn.Parameter(torch.randn(d_model))
 
-        self.kernel = S4DKernel(d_model, N=d_state, dt_min=dt_min, dt_max=dt_max, lr=lr)
+        self.kernel = S4DKernel(
+            d_model, N=d_state, dt_min=dt_min, dt_max=dt_max, lr=lr
+        )
 
         self.activation = nn.GELU()
         self.dropout = DropoutNd(dropout) if dropout > 0.0 else nn.Identity()
@@ -182,8 +192,12 @@ class S4Model(nn.Module):
                 for _ in range(n_layers)
             ]
         )
-        self.norms = nn.ModuleList([nn.LayerNorm(d_model) for _ in range(n_layers)])
-        self.dropouts = nn.ModuleList([DropoutNd(dropout) for _ in range(n_layers)])
+        self.norms = nn.ModuleList(
+            [nn.LayerNorm(d_model) for _ in range(n_layers)]
+        )
+        self.dropouts = nn.ModuleList(
+            [DropoutNd(dropout) for _ in range(n_layers)]
+        )
 
         self.decoder = nn.Linear(d_model, d_output)
 
