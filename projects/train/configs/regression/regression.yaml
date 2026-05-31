@@ -37,8 +37,8 @@ model:
 data:
   class_path: train.data.supervised.TimeDomainSupervisedAframeDataset
   init_args:
-    background_dir: /home/barmstrong/aframe_new/data/bns/background_data
-    waveforms_dir: /home/barmstrong/aframe_new/data/bns/aframe_train/
+    background_dir: data/bns/background_data
+    waveforms_dir: data/bns/aframe_train/
     ifos: [H1, L1]
     sample_rate: 2048
 
@@ -71,10 +71,10 @@ data:
     snr_sampler:
       class_path: train.augmentations.SnrSampler
       init_args:
-        max_min_snr: 12.0
+        alpha: -3
+        max_min_snr: 8.0
         min_min_snr: 4.0
         max_snr: 100.0
-        alpha: 1.0
         decay_steps: 10000
         # distribution_type: uniform
 
@@ -86,8 +86,8 @@ data:
       init_args:
         ifos: [H1, L1]
         sample_rate: 2048
-        val_waveform_file: /home/barmstrong/aframe_new/data/bns/aframe_train/val_waveforms.hdf5
-        training_waveform_path: /home/barmstrong/aframe_new/data/bns/uniform_chirp_mass_waveforms/training_waveforms.hdf5
+        val_waveform_file: data/bns/aframe_train/val_waveforms.hdf5
+        training_waveform_path: data/bns/uniform_chirp_mass_waveforms/training_waveforms.hdf5
 
     dec:
       class_path: ml4gw.distributions.Cosine
@@ -108,7 +108,7 @@ trainer:
   logger:
     - class_path: train.callbacks.AframeWandbLogger
       init_args:
-        name: "aframe_multitask"
+        name: "aframe_regression"
         save_dir: outputs
         project: "aframe"
 
