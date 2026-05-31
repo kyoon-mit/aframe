@@ -37,7 +37,7 @@ class AframeBase(pl.LightningModule):
         self.model = arch
         self.verbose = verbose
         self._logger = self.init_logging(verbose)
-        self.save_hyperparameters(ignore=["arch"])
+        self.save_hyperparameters(ignore=["arch", "metric"])
 
     def init_logging(self, verbose):
         log_format = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
