@@ -53,7 +53,6 @@ class ModelCheckpoint(pl.callbacks.ModelCheckpoint):
             [X] = next(iter(trainer.train_dataloader))
             X = X.to(device)
             waveforms, params = trainer.datamodule.waveform_sampler.sample(X)
-            waveforms = trainer.datamodule.slice_waveforms(waveforms)
         X, y, _ = trainer.datamodule.inject(X, waveforms, params)
         if isinstance(X, tuple):
             X = tuple(i.cpu() for i in X)
@@ -96,7 +95,6 @@ class SaveAugmentedBatch(Callback):
                 waveforms, params = trainer.datamodule.waveform_sampler.sample(
                     X
                 )
-                waveforms = trainer.datamodule.slice_waveforms(waveforms)
             X, y, _ = trainer.datamodule.inject(X, waveforms, params)
             # If X is not a tuple, make it one for consistency
             # of format for saving to file below

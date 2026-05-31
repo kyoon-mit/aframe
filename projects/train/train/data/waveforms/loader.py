@@ -90,7 +90,7 @@ class Hdf5WaveformLoader(torch.utils.data.IterableDataset):
         batch_size: int,
         batches_per_epoch: int,
         chunk_size: int = 1000,
-        path: Optional[Path] = None,
+        path: Optional[Path | str] = None,
     ):
         self.fnames = fnames
         self.channels = channels
@@ -99,7 +99,7 @@ class Hdf5WaveformLoader(torch.utils.data.IterableDataset):
         self.chunk_size = chunk_size
 
         if path is not None:
-            self.path = path.parts
+            self.path = Path(path).parts
         else:
             self.path = None
 
@@ -112,6 +112,7 @@ class Hdf5WaveformLoader(torch.utils.data.IterableDataset):
         # of interest in a dictionary so we
         # can access them at will without needing
         # to reopen the files each time
+        self.param_keys = None
         for fname in self.fnames:
             f, g = self.open(fname)
             self.mmap_files[fname] = f
@@ -120,7 +121,14 @@ class Hdf5WaveformLoader(torch.utils.data.IterableDataset):
             }
 
             pm_grp = f["parameters"]
-            self.param_keys = list(pm_grp.keys())
+            keys = list(pm_grp.keys())
+            if self.param_keys is None:
+                self.param_keys = keys
+            elif set(keys) != set(self.param_keys):
+                raise ValueError(
+                    f"Parameter keys in {fname} ({keys}) do not match "
+                    f"those in the first file ({self.param_keys})"
+                )
             self.param_datasets[fname] = {
                 k: pm_grp[k] for k in self.param_keys
             }
