@@ -585,6 +585,7 @@ class BaseAframeDataset(pl.LightningDataModule):
             else:
                 [X] = batch
                 waveforms, params = self.waveform_sampler.sample(X)
+                waveforms = self.slice_waveforms(waveforms)
                 batch = self.inject(X=X, waveforms=waveforms, params=params)
         elif self.trainer.validating or self.trainer.sanity_checking:
             # If we're in validation mode but we're not validating
