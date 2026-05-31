@@ -45,14 +45,16 @@ class ModelCheckpoint(pl.callbacks.ModelCheckpoint):
         device = pl_module.device
         # Handle the case of loading training waveforms from disk
         if trainer.datamodule.waveforms_from_disk:
-            [X], waveforms = next(iter(trainer.train_dataloader))
+            [X], (waveforms, params) = next(iter(trainer.train_dataloader))
             X = X.to(device)
             waveforms = waveforms.to(device)
-            X, y = trainer.datamodule.inject(X, waveforms)
+            params = {k: v.to(device) for k, v in params.items()}
         else:
             [X] = next(iter(trainer.train_dataloader))
             X = X.to(device)
-            X, y = trainer.datamodule.inject(X)
+            waveforms, params = trainer.datamodule.waveform_sampler.sample(X)
+            waveforms = trainer.datamodule.slice_waveforms(waveforms)
+        X, y, _ = trainer.datamodule.inject(X, waveforms, params)
         if isinstance(X, tuple):
             X = tuple(i.cpu() for i in X)
         else:
@@ -84,27 +86,32 @@ class SaveAugmentedBatch(Callback):
             # build training batch by hand
             # Handle the case of loading training waveforms from disk
             if trainer.datamodule.waveforms_from_disk:
-                [X], waveforms = next(iter(trainer.train_dataloader))
+                [X], (waveforms, params) = next(iter(trainer.train_dataloader))
                 X = X.to(device)
                 waveforms = waveforms.to(device)
-                X, y = trainer.datamodule.inject(X, waveforms)
+                params = {k: v.to(device) for k, v in params.items()}
             else:
                 [X] = next(iter(trainer.train_dataloader))
                 X = X.to(device)
-                X, y = trainer.datamodule.inject(X)
+                waveforms, params = trainer.datamodule.waveform_sampler.sample(
+                    X
+                )
+                waveforms = trainer.datamodule.slice_waveforms(waveforms)
+            X, y, _ = trainer.datamodule.inject(X, waveforms, params)
             # If X is not a tuple, make it one for consistency
             # of format for saving to file below
             if not isinstance(X, tuple):
                 X = (X,)
 
             # build val batch by hand
-            [background, _, _], [signals] = next(
+            [background, _, _], [signals, params] = next(
                 iter(trainer.datamodule.val_dataloader())
             )
             background = background.to(device)
             signals = signals.to(device)
-            X_bg, X_inj = trainer.datamodule.build_val_batches(
-                background, signals
+            params = {k: v.to(device) for k, v in params.items()}
+            X_bg, X_inj, _ = trainer.datamodule.build_val_batches(
+                background, signals, params
             )
             # Make background and injected validation data into
             # tuples for consistency if necessary
