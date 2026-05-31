@@ -1,10 +1,6 @@
-"""
-Copied from https://github.com/chreissel/s4/blob/main/models/s4/s4d.py
-and https://github.com/chreissel/s4/blob/main/src/models/nn/dropout.py
-
-Minimal version of S4D with extra options and features stripped out,
-for pedagogical purposes.
-"""
+# Adapted with modifications from https://github.com/state-spaces/s4
+# (models/s4/s4d.py and src/models/nn/dropout.py), licensed under Apache-2.0.
+# Full license text: third_party/s4-LICENSE
 
 import math
 from typing import Optional
