@@ -1,0 +1,213 @@
+model:
+  class_path: train.model.regression_kevin.RegressionAframeS4D
+  init_args:
+    arch:
+      class_path: architectures.networks.s4d.S4Model
+      init_args:
+        d_input: 2 # H1, L1
+        d_output: 2 # chirp_mass mean + log-var
+        d_model: 64
+        d_state: 64
+        n_layers: 4
+        dropout: 0.2
+        dt_min: 1.0e-3
+        dt_max: 5.0
+        lr: 1.0e-3 # SSM parameter learning rate
+    d_output: 2 # must match arch d_output
+    normalize_input: true
+    y_mean: [1.2] # centre of BNS chirp_mass prior [0.87, 2.22]
+    y_std: [0.35] # approx std of uniform [0.87, 2.22]
+    base_lr: 1e-4
+    weight_decay: 0.01
+    warmup_steps: 1000
+    beta_nll: 0.3
+    lambda_spread: 0.3
+    metric:
+      class_path: train.metrics.TimeSlideAUROC
+      init_args:
+        max_fpr: 1e-3
+        pool_length: 8
+
+data:
+  class_path: train.data.supervised.TimeDomainSupervisedAframeDataset
+  init_args:
+    background_dir: data/bns/background_data
+    waveforms_dir: data/bns/aframe_train/
+    ifos: [H1, L1]
+    sample_rate: 2048
+
+    kernel_length: 1.0
+    left_pad: 0.5
+    right_pad: 0
+    model_input_sample_rate: 512
+
+    batch_size: 128
+    batches_per_epoch: 1000
+    chunk_size: 10000
+    chunks_per_epoch: 10
+    num_files_per_batch: 4
+
+    fduration: 2.0
+    fftlength: 2.0
+    psd_length: 20
+    highpass: 20
+    lowpass: 1024
+
+    # Inject into every sample so the regression loss is never sparse.
+    waveform_prob: 1.0
+    swap_prob: 0.0
+    mute_prob: 0.0
+    max_num_workers: 16
+
+    valid_stride: 0.5
+    num_valid_views: 5
+    valid_livetime: 57600
+
+    snr_sampler:
+      class_path: train.augmentations.SnrSampler
+      init_args:
+        distribution: torch.distributions.Uniform
+        constant_params:
+          high: 50
+        start_params:
+          low: 30
+        end_params:
+          low: 4
+        decay_steps: 100000
+
+    param_transforms:
+      - class_path: train.transforms.ChirpMass
+
+    waveform_sampler:
+      class_path: train.data.waveforms.generator.cbc.CBCGenerator
+      init_args:
+        ifos: [H1, L1]
+        sample_rate: 512
+        val_waveform_file: data/bns/aframe_train/val_waveforms.hdf5
+
+        approximant:
+          class_path: ml4gw.waveforms.IMRPhenomPv2
+        duration: 64.0 # total waveform; (default right_pad for validation set is 3.0s when generated through aframe) -> colecence at 61s
+        f_min: 20.0
+        f_ref: 50.0
+        training_prior:
+          class_path: train.prior.AframePrior
+          init_args:
+            conversion_function: train.conversion.precessing_to_lalsimulation_parameters
+            priors:
+              chirp_mass:
+                class_path: torch.distributions.Uniform
+                init_args:
+                  low: 0.87
+                  high: 2.22
+                  validate_args: false
+              mass_ratio:
+                class_path: torch.distributions.Uniform
+                init_args:
+                  low: 0.4
+                  high: 1.0
+                  validate_args: false
+              a_1:
+                class_path: torch.distributions.Uniform
+                init_args:
+                  low: 0.0
+                  high: 0.4
+                  validate_args: false
+              a_2:
+                class_path: torch.distributions.Uniform
+                init_args:
+                  low: 0.0
+                  high: 0.4
+                  validate_args: false
+              tilt_1:
+                class_path: ml4gw.distributions.Sine
+                init_args:
+                  low: 0.0
+                  high: 3.14159
+                  validate_args: false
+              tilt_2:
+                class_path: ml4gw.distributions.Sine
+                init_args:
+                  low: 0.0
+                  high: 3.14159
+                  validate_args: false
+              phi_12:
+                class_path: torch.distributions.Uniform
+                init_args:
+                  low: 0.0
+                  high: 6.28318
+                  validate_args: false
+              phi_jl:
+                class_path: torch.distributions.Uniform
+                init_args:
+                  low: 0.0
+                  high: 6.28318
+                  validate_args: false
+              inclination:
+                class_path: ml4gw.distributions.Sine
+                init_args:
+                  low: 0.0
+                  high: 3.14159
+                  validate_args: false
+              phic:
+                class_path: torch.distributions.Uniform
+                init_args:
+                  low: 0.0
+                  high: 6.28318
+                  validate_args: false
+              distance:
+                class_path: ml4gw.distributions.UniformComovingVolume
+                init_args:
+                  minimum: 10
+                  maximum: 500
+                  distance_type: luminosity_distance
+                  validate_args: false
+    dec:
+      class_path: ml4gw.distributions.Cosine
+    psi:
+      class_path: torch.distributions.Uniform
+      init_args:
+        low: 0.0
+        high: 3.14159
+        validate_args: false
+    phi:
+      class_path: torch.distributions.Uniform
+      init_args:
+        low: 0.0
+        high: 6.28318
+        validate_args: false
+
+trainer:
+  logger:
+    - class_path: train.callbacks.AframeWandbLogger
+      init_args:
+        name: "aframe_regression_kevin_test"
+        save_dir: outputs
+        project: "aframe"
+
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.EarlyStopping
+      init_args:
+        # Monitor the first param's MAE; adjust to taste.
+        monitor: "validation/mae_chirp_mass"
+        mode: "min"
+        patience: 50
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        monitor: "validation/mae_chirp_mass"
+        mode: "min"
+        save_top_k: 1
+        save_last: true
+        auto_insert_metric_name: false
+    - class_path: train.callbacks.SaveAugmentedBatch
+
+  strategy: auto
+  devices: auto
+  num_nodes: 1
+  precision: null
+
+  max_epochs: 3000
+  min_epochs: 60
+  check_val_every_n_epoch: 1
+  log_every_n_steps: 10
+  enable_progress_bar: true
