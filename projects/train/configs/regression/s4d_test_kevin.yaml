@@ -36,9 +36,10 @@ data:
     ifos: [H1, L1]
     sample_rate: 2048
 
-    kernel_length: 1.0
-    left_pad: 0.5
-    right_pad: 0
+    windowing:
+      kernel_length: 1.0
+      window_lead_min: -3.5
+      window_lead_max: -3
     model_input_sample_rate: 512
 
     batch_size: 128
