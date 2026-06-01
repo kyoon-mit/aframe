@@ -122,6 +122,7 @@ class Hdf5WaveformLoader(torch.utils.data.IterableDataset):
             }
 
             pm_grp = f["parameters"]
+
             keys = list(pm_grp.keys())
             if self.param_keys is None:
                 self.param_keys = keys
