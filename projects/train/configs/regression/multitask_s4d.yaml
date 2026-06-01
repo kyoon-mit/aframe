@@ -1,11 +1,11 @@
 model:
-  class_path: train.model.regression_kevin.RegressionAframeS4D
+  class_path: train.model.MultiTaskAframeS4D
   init_args:
     arch:
-      class_path: architectures.networks.s4d.S4Model
+      class_path: architectures.networks.s4d.MultiTaskS4Model
       init_args:
         d_input: 2 # H1, L1
-        d_output: 2 # chirp_mass mean + log-var
+        num_params: 1 # chirp_mass
         d_model: 64
         d_state: 64
         n_layers: 4
@@ -13,15 +13,13 @@ model:
         dt_min: 1.0e-3
         dt_max: 5.0
         lr: 1.0e-3 # SSM parameter learning rate
-    d_output: 2 # must match arch d_output
+    param_names:
+      - chirp_mass
+    regression_weight: 1.0
     normalize_input: true
-    y_mean: [1.2] # centre of BNS chirp_mass prior [0.87, 2.22]
-    y_std: [0.35] # approx std of uniform [0.87, 2.22]
     base_lr: 1e-4
     weight_decay: 0.01
     warmup_steps: 1000
-    beta_nll: 0.3
-    lambda_spread: 0.3
     metric:
       class_path: train.metrics.TimeSlideAUROC
       init_args:
@@ -54,10 +52,11 @@ data:
     highpass: 20
     lowpass: 1024
 
-    # Inject into every sample so the regression loss is never sparse.
-    waveform_prob: 1.0
-    swap_prob: 0.0
-    mute_prob: 0.0
+    # Background-only samples drive the classification task;
+    # injected samples drive both tasks.
+    waveform_prob: 0.5
+    swap_prob: 0.014
+    mute_prob: 0.055
     max_num_workers: 16
 
     valid_stride: 0.5
@@ -74,7 +73,7 @@ data:
           low: 30
         end_params:
           low: 4
-        decay_steps: 10000
+        decay_steps: 100000
 
     param_transforms:
       - class_path: train.transforms.ChirpMass
@@ -88,7 +87,7 @@ data:
 
         approximant:
           class_path: ml4gw.waveforms.IMRPhenomPv2
-        duration: 64.0 # total waveform; (default right_pad for validation set is 3.0s when generated through aframe) -> colecence at 61s
+        duration: 64.0
         f_min: 20.0
         f_ref: 50.0
         training_prior:
@@ -182,21 +181,20 @@ trainer:
   logger:
     - class_path: train.callbacks.AframeWandbLogger
       init_args:
-        name: "aframe_regression_kevin_test"
+        name: "aframe_multitask_s4d"
         save_dir: outputs
         project: "aframe"
 
   callbacks:
     - class_path: lightning.pytorch.callbacks.EarlyStopping
       init_args:
-        # Monitor the first param's MAE; adjust to taste.
         monitor: "validation/TimeSlideAUROC_epoch"
-        mode: "min"
+        mode: "max"
         patience: 50
     - class_path: lightning.pytorch.callbacks.ModelCheckpoint
       init_args:
         monitor: "validation/TimeSlideAUROC_epoch"
-        mode: "min"
+        mode: "max"
         save_top_k: 1
         save_last: true
         auto_insert_metric_name: false

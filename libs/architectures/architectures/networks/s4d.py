@@ -8,6 +8,8 @@ import torch
 import torch.nn as nn
 from einops import rearrange, repeat
 
+from architectures.regression import MultiTaskArchitecture
+
 
 class DropoutNd(nn.Module):
     """N-dimensional dropout that ties the mask across sequence positions."""
@@ -223,3 +225,88 @@ class S4Model(nn.Module):
         x = x.transpose(-1, -2)  # (B, L, d_model)
         x = x.mean(dim=1)  # (B, d_model) — pool over sequence
         return self.decoder(x)  # (B, d_output)
+
+    def _encode(self, x: torch.Tensor) -> torch.Tensor:
+        """Run encoder + S4D layers and
+        return pooled embedding (B, d_model)."""
+        x = x.transpose(-1, -2)
+        x = self.encoder(x)
+        x = x.transpose(-1, -2)
+        for layer, norm, dropout in zip(
+            self.s4_layers, self.norms, self.dropouts, strict=True
+        ):
+            z, _ = layer(x)
+            z = dropout(z)
+            x = norm((z + x).transpose(-1, -2)).transpose(-1, -2)
+        x = x.transpose(-1, -2)
+        return x.mean(dim=1)
+
+
+class MultiTaskS4Model(MultiTaskArchitecture):
+    """S4D backbone with separate classification and regression heads.
+
+    Input:  (B, d_input, L)
+    Output: (logits, param_estimates) where logits has shape (B, 1)
+            and param_estimates has shape (B, num_params).
+    """
+
+    def __init__(
+        self,
+        d_input: int,
+        num_params: int,
+        d_model: int = 256,
+        d_state: int = 64,
+        n_layers: int = 4,
+        dropout: float = 0.2,
+        dt_min: float = 0.001,
+        dt_max: float = 0.1,
+        lr: float | None = None,
+    ):
+        super().__init__()
+
+        self.encoder = nn.Linear(d_input, d_model)
+        self.s4_layers = nn.ModuleList(
+            [
+                S4D(
+                    d_model,
+                    d_state=d_state,
+                    dropout=dropout,
+                    transposed=True,
+                    dt_min=dt_min,
+                    dt_max=dt_max,
+                    lr=lr,
+                )
+                for _ in range(n_layers)
+            ]
+        )
+        self.norms = nn.ModuleList(
+            [nn.LayerNorm(d_model) for _ in range(n_layers)]
+        )
+        self.dropouts = nn.ModuleList(
+            [DropoutNd(dropout) for _ in range(n_layers)]
+        )
+        self.clf_head = nn.Linear(d_model, 1)
+        self.reg_head = nn.Linear(d_model, num_params)
+
+    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """
+        Args:
+            x: (B, d_input, L)
+
+        Returns:
+            logits: (B, 1), param_estimates: (B, num_params)
+        """
+        x = x.transpose(-1, -2)  # (B, L, d_input)
+        x = self.encoder(x)  # (B, L, d_model)
+        x = x.transpose(-1, -2)  # (B, d_model, L)
+
+        for layer, norm, dropout in zip(
+            self.s4_layers, self.norms, self.dropouts, strict=True
+        ):
+            z, _ = layer(x)
+            z = dropout(z)
+            x = norm((z + x).transpose(-1, -2)).transpose(-1, -2)
+
+        x = x.transpose(-1, -2)  # (B, L, d_model)
+        x = x.mean(dim=1)  # (B, d_model)
+        return self.clf_head(x), self.reg_head(x)
