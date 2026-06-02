@@ -41,10 +41,6 @@ class DeployInferLocal(InferBase):
                     return addr.address
         raise ValueError("No valid IP address found")
 
-    @property
-    def model_repo_dir(self):
-        return self.input()["model_repository"].path
-
     def htcondor_workflow_run_context(self):
         """
         Law hook that provides a context manager
@@ -61,12 +57,17 @@ class DeployInferLocal(InferBase):
         ip = self.get_ip_address()
         os.environ["AFRAME_TRITON_IP"] = ip
         server_log = self.output_dir / "server.log"
+        model_repo = (
+            Path(self.model_repo_dir)
+            if self.model_repo_dir
+            else self.input()["model_repository"].path
+        )
 
         # TODO: figure out why serves
         # `gpus` variable does not expose
         # proper GPU ids to triton
         serve_context = serve(
-            self.model_repo_dir,
+            model_repo,
             self.triton_image,
             log_file=server_log,
             wait=True,

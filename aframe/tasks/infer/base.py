@@ -38,6 +38,11 @@ class InferParameters(law.Task):
     return_timeseries = luigi.BoolParameter(default="false")
     output_dir = PathParameter(default=paths().results_dir)
     train_task = luigi.TaskParameter()
+    model_repo_dir = luigi.OptionalParameter(
+        default=None,
+        description="Path to the model repository. If set, the Export task "
+        "is skipped and this directory is used directly.",
+    )
 
 
 @inherits(InferParameters)
@@ -125,7 +130,8 @@ class InferBase(
 
     def workflow_requires(self):
         reqs = {}
-        reqs["model_repository"] = ExportLocal.req(self)
+        if not self.model_repo_dir:
+            reqs["model_repository"] = ExportLocal.req(self)
         testing_waveforms = TestingWaveforms.req(self)
         fetch = testing_waveforms.requires().workflow_requires()[
             "test_segments"
