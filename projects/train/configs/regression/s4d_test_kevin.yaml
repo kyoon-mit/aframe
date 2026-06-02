@@ -17,11 +17,19 @@ model:
     normalize_input: true
     y_mean: [1.2] # centre of BNS chirp_mass prior [0.87, 2.22]
     y_std: [0.35] # approx std of uniform [0.87, 2.22]
-    base_lr: 1e-4
+    base_lr: 5.0e-5
     weight_decay: 0.01
-    warmup_steps: 1000
     beta_nll: 0.3
-    lambda_spread: 0.3
+    lambda_spread: 0.0
+    lr_scheduler:
+      class_path: train.model.regression_kevin.WarmupCosineAnnealingWarmRestarts
+      init_args:
+        warmup_epochs: 5
+        T_0: 10
+        T_mult: 2
+        eta_min: 1.0e-7
+        warmup_start_factor: 1.0e-2
+    lr_scheduler_interval: epoch
     metric:
       class_path: train.metrics.TimeSlideAUROC
       init_args:
@@ -52,12 +60,9 @@ data:
     fftlength: 2.0
     psd_length: 20
     highpass: 20
-    lowpass: 1024
 
     # Inject into every sample so the regression loss is never sparse.
     waveform_prob: 1.0
-    swap_prob: 0.0
-    mute_prob: 0.0
     max_num_workers: 16
 
     valid_stride: 0.5
@@ -201,6 +206,9 @@ trainer:
         save_last: true
         auto_insert_metric_name: false
     - class_path: train.callbacks.SaveAugmentedBatch
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: epoch
 
   strategy: auto
   devices: auto
