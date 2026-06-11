@@ -146,9 +146,11 @@ class SnrSampler:
     its parameters from `start_params` to `end_params` over `decay_steps`.
     Parameters in `constant_params` remain fixed throughout training.
 
-    The default astrophysical prior of the SNR distribution is a power law of
-    index -3 (see `aframe.priors.end_o3_ratesandpops`). To use this with
-    curriculum learning on SNR, set `distribution=ml4gw.distributions.PowerLaw`
+    Drawing parameters from the astrophysical BBH prior
+    (`aframe.priors.end_o3_ratesandpops`) or BNS prior
+    (`aframe.priors.end_o3_ratesandpops_bns`) yields an SNR distribution
+    approximated by a power law of index -3. To use this with curriculum
+    learning on the SNR, set `distribution=ml4gw.distributions.PowerLaw`
     and fix `"index"` and `"maximum"` in `constant_params`, then sweep the
     lower bound by giving `"minimum"` in both `start_params` (its high initial
     value) and `end_params` (its low final value).
