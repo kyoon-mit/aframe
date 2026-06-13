@@ -19,14 +19,14 @@ class TimeDomainSupervisedAframeDataset(SupervisedAframeDataset):
             X_fg.append(inj)
 
         X_fg = torch.stack(X_fg)
-        if self.resampler is not None:
+        if hasattr(self, "resampler") and self.resampler is not None:
             X_bg = self.resampler(X_bg.contiguous())
             X_fg = self.resampler(X_fg.contiguous())
         return X_bg, X_fg, params_out
 
     def apply_transforms(self, X, psds):
         X = self.whitener(X, psds)
-        if self.resampler is not None:
+        if hasattr(self, "resampler") and self.resampler is not None:
             X = self.resampler(X.contiguous())
         return X
 
