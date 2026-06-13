@@ -81,9 +81,14 @@ class S4DKernel(nn.Module):
         )  # (H, N//2)
 
         dtA = A * dt.unsqueeze(-1)  # (H, N//2)
-        K = dtA.unsqueeze(-1) * torch.arange(
-            L, device=A.device
-        )  # (H, N//2, L)
+        # Device-agnostic [0, 1, ..., L-1]. Built via ``new_ones`` (whose
+        # device defaults to the source tensor's, resolved at runtime) rather
+        # than ``arange(..., device=A.device)``: factory ops bake their device
+        # as a constant under torch.jit.trace, which would pin the traced graph
+        # to the device it was traced on. ``new_*`` ops inherit the device, so
+        # the traced graph follows the module's device.
+        steps = torch.cumsum(dt.new_ones(L), dim=0) - 1.0  # (L,)
+        K = dtA.unsqueeze(-1) * steps  # (H, N//2, L)
 
         C = C * (torch.exp(dtA) - 1.0) / A
         K = 2 * torch.einsum("hn, hnl -> hl", C, torch.exp(K)).real  # (H, L)
