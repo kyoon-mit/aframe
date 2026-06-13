@@ -1,0 +1,38 @@
+# 1-WEEK MERGER control RE-RUN with the two pipeline fixes:
+#   integration_window_length: 0  -> no boxcar smearing of the sharp confidence spike
+#   recovery_mode: window         -> recover each injection with the MAX detstat within
+#                                    recovery_window s of injection_time (not closest-in-time)
+# Positive control: expect SV > 0 if these capture the model's confident response.
+# Geometry matches training ai4gw/chirp_mass_4s_d64_s64_l4_merger.yaml.
+
+checkpoint: /n/holystore01/LABS/iaifi_lab/Lab/kyoon/aframe_linoss/projects/train/logs/BNS-PUBLICATION/chirp_mass_snr_4_50_merger_4s_d64_s64_l4_aframe_kyoon_dev_1/checkpoints/s4d_chirp_mass_mse_1959.ckpt
+model_class: LitS4DGaussianNLL
+
+background_dir: /n/holystore01/LABS/iaifi_lab/Lab/kyoon/DATA/O3a_H1_L1_4096Hz
+injection_set_fname: /n/holystore01/LABS/iaifi_lab/Lab/kyoon/aframe_linoss/runs/regression_sv/bns_injections/waveforms.hdf5
+
+ifos: [H1, L1]
+shifts:
+  - [0, 1]
+  - [0, 2]
+  - [0, 3]
+  - [0, 4]
+
+sample_rate: 2048
+raw_sample_rate: 4096
+kernel_length: 4.0
+fduration: 1.0
+psd_length: 20.0
+fftlength: 2.0
+highpass: 20.0
+
+inference_sampling_rate: 8.0
+integration_window_length: 0.0     # FIX 1: no integration
+cluster_window_length: 0.5
+window_offset: 24.5                 # detection_time = window START = T - (psd+fd+ker) (empirically verified)
+recovery_mode: window              # FIX 2: max detstat within a window
+recovery_window: 5.0               # generous: covers the confident plateau + offset slack
+
+batch_size: 128
+device: cuda
+outdir: /n/holystore01/LABS/iaifi_lab/Lab/kyoon/aframe_linoss/runs/regression_sv/merger_4s_1wk_fix/

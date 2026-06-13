@@ -1,4 +1,4 @@
-from concurrent.futures import Executor, as_completed
+from concurrent.futures import Executor
 from dataclasses import dataclass, make_dataclass
 
 import h5py
@@ -644,11 +644,7 @@ class WaveformPolarizationSet(InjectionMetadata, BilbyParameterSet):
                 for key, value in polars.items():
                     polarizations[key][i] = value
         else:
-            futures = ex.map(waveform_generator, param_list)
-            idx_map = dict(zip(futures, len(futures), strict=True))
-            for f in as_completed(futures):
-                i = idx_map.pop(f)
-                polars = f.result()
+            for i, polars in enumerate(ex.map(waveform_generator, param_list)):
                 for key, value in polars.items():
                     polarizations[key][i] = value
 

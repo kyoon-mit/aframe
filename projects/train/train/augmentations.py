@@ -184,14 +184,30 @@ class SnrSampler:
 
     def step(self):
         self._step += 1
-        if self._step > self.decay_steps:
-            return
+        self._update_dist()
 
-        frac = self._step / self.decay_steps
+    def _update_dist(self):
+        """Set ``self.dist`` to match the curriculum position ``self._step``.
+
+        Computed directly from ``_step`` (frac clamped to 1.0) so it is correct
+        when called on restore at any step, not only while monotonically
+        stepping from 0.
+        """
+        frac = min(self._step / self.decay_steps, 1.0)
         diff = self.max_min_snr - self.min_min_snr
         new = self.max_min_snr - frac * diff
 
         self.dist = PowerLaw(new, self.max_snr, self.alpha)
+
+    def state_dict(self) -> dict:
+        # The curriculum counter must be checkpointed; otherwise a resumed run
+        # restarts the SNR curriculum from scratch (min_snr jumps back to
+        # max_min_snr), shifting the data distribution and corrupting metrics.
+        return {"_step": self._step}
+
+    def load_state_dict(self, state_dict: dict) -> None:
+        self._step = state_dict["_step"]
+        self._update_dist()
 
 
 class WaveformProjector(torch.nn.Module):

@@ -1,0 +1,63 @@
+# Regression inference config for:
+#   aframe_linoss run  chirp_mass_snr_4_50_59-60s_d64_s64_l4_id11
+#   checkpoint         s4d_chirp_mass_mse_927.ckpt
+#
+# Model geometry (must match training config chirp_mass_1s_d64_s64_l4.yaml):
+#   1 s kernel, 256 Hz, 20 s PSD, pre-merger window ~3 s before coalescence.
+#   Architecture (d_model/d_state/n_layers/y_mean/y_std) is read from the
+#   checkpoint by load_from_checkpoint — do NOT respecify it here.
+
+checkpoint: /n/holystore01/LABS/iaifi_lab/Lab/kyoon/aframe_linoss/projects/train/logs/aframe/chirp_mass_snr_4_50_59-60s_d64_s64_l4_id11/checkpoints/s4d_chirp_mass_mse_927.ckpt
+model_class: LitS4DGaussianNLL
+
+background_dir: /n/holystore01/LABS/iaifi_lab/Lab/kyoon/DATA/O3a_H1_L1_4096Hz
+injection_set_fname: /n/holystore01/LABS/iaifi_lab/Lab/kyoon/aframe_linoss/runs/regression_sv/bns_injections/waveforms.hdf5
+
+ifos: [H1, L1]
+
+# 25 time shifts: 1.64 days O3a x 25 slides ~ 41 days background (FAR floor ~9/yr)
+shifts:
+  - [0, 1]
+  - [0, 2]
+  - [0, 3]
+  - [0, 4]
+  - [0, 5]
+  - [0, 6]
+  - [0, 7]
+  - [0, 8]
+  - [0, 9]
+  - [0, 10]
+  - [0, 11]
+  - [0, 12]
+  - [0, 13]
+  - [0, 14]
+  - [0, 15]
+  - [0, 16]
+  - [0, 17]
+  - [0, 18]
+  - [0, 19]
+  - [0, 20]
+  - [0, 21]
+  - [0, 22]
+  - [0, 23]
+  - [0, 24]
+  - [0, 25]
+
+# Signal properties — must match training (chirp_mass_1s_d64_s64_l4.yaml)
+sample_rate: 256          # model rate
+raw_sample_rate: 4096     # background files are 4096 Hz -> resampled to 256
+kernel_length: 1.0
+fduration: 1.0
+psd_length: 20.0
+fftlength: 2.0
+highpass: 20.0
+
+inference_sampling_rate: 8.0
+# NOTE: this is a PRE-MERGER model — the confident (low-sigma) region is brief.
+# A 1.0 s boxcar may dilute it; consider 0.25 if separation is weak.
+integration_window_length: 1.0
+cluster_window_length: 0.5
+
+batch_size: 256
+device: cuda
+outdir: /n/holystore01/LABS/iaifi_lab/Lab/kyoon/aframe_linoss/runs/regression_sv/chirp_mass_1s_d64_s64_l4_id11/

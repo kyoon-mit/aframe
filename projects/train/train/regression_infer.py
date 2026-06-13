@@ -120,7 +120,10 @@ class RegressionSequence:
         # shifts in samples
         self.shifts_samples = [int(s * self.sample_rate) for s in shifts]
 
-        # Load injections that fall in this segment (zero-lag, all shifts)
+        # Load the injections drawn for THIS slide's shifts. Injecting a fresh
+        # population per slide (rather than reusing one zero-lag set) multiplies
+        # the foreground statistics for the efficiency / sensitive-volume
+        # estimate; slides with no injections fall back to background-only.
         cls = waveform_class_factory(
             ifos, InterferometerResponseSet, "ResponseSet"
         )
@@ -128,12 +131,12 @@ class RegressionSequence:
             injection_set_fname,
             start=self.t0,
             end=self.t0 + self.duration,
-            shifts=[0.0] * len(ifos),
+            shifts=shifts,
         )
         self.injection_set = inj if len(inj) > 0 else None
         if self.injection_set is None:
             log.info(
-                f"No injections in {background_fname} for zero-lag — "
+                f"No injections in {background_fname} for shifts {shifts} — "
                 "foreground inference will be skipped."
             )
 
@@ -179,13 +182,15 @@ class RegressionSequence:
         """
         bg = self._load_shifted()     # (n_ifos, n_valid)
 
-        # Build foreground once up front for the whole segment.
+        # Foreground = this slide's injections added on top of the SAME
+        # time-shifted background. The injections are coherent (H1/L1 aligned
+        # at injection_time) while the background noise is incoherent (shifted),
+        # which is exactly the signal-in-noise sample the efficiency needs.
         fg = None
         if self.injection_set is not None:
-            unshifted = self._load_unshifted()
-            # inject() takes (n_ifos, N) and GPS start time
-            injected = self.injection_set.inject(unshifted.copy(), self.t0)
-            # Trim to the same valid length as bg (max-shift window)
+            # inject() takes (n_ifos, N) and the GPS start time of that array
+            injected = self.injection_set.inject(bg.copy(), self.t0)
+            # inject() may pad at the edges; trim back to bg's valid length
             fg = injected[:, : bg.shape[1]]
 
         W = self.sample_length_samples
@@ -219,7 +224,15 @@ class RegressionSequence:
 # ────────────────────────────────────────────────────────────────────────────#
 
 def _integrate(y: np.ndarray, window_size: int) -> np.ndarray:
-    """Boxcar integration matching ``Postprocessor.integrate``."""
+    """Boxcar integration matching ``Postprocessor.integrate``.
+
+    ``window_size <= 1`` (e.g. integration_window_length=0) means NO integration —
+    return ``y`` unchanged. The regression detection statistic is a sharp confidence
+    spike, not a matched-filter SNR transient, so boxcar-averaging it just smears the
+    spike into the surrounding noise; you almost always want no integration here.
+    """
+    if window_size <= 1:
+        return y
     window = np.ones(window_size) / window_size
     integrated = np.convolve(y, window, mode="full")
     return integrated[: -window_size + 1]
@@ -236,6 +249,14 @@ def _cluster(
     """Sliding-window local-max clustering matching ``Postprocessor.cluster``."""
     y = y[psd_offset:]
     half = cluster_window_size // 2
+    if len(y) == 0:
+        # Segment too short after PSD trim → no events from this (segment, shift).
+        # Return an empty EventSet instead of crashing on argmax of an empty array.
+        empty = np.array([], dtype=np.float64)
+        return EventSet(
+            empty, empty.copy(),
+            np.empty((0, len(shifts)), dtype=np.float64), 0.0,
+        )
     i = int(np.argmax(y[:half]))
 
     events, times = [], []
@@ -278,6 +299,56 @@ def _postprocess(
     return _cluster(y, t0_out, shifts, isr, cluster_window_size, psd_offset)
 
 
+def _recover_max_in_window(
+    events: EventSet,
+    injections: InterferometerResponseSet,
+    window: float,
+) -> RecoveredInjectionSet:
+    """Recover each injection with the MOST CONFIDENT nearby event.
+
+    ``RecoveredInjectionSet.recover`` matches the event *closest in time* to the
+    injection. But clustering emits an event every ~cluster_window/2 s, so the closest
+    one is usually a noise sample sitting next to the real (confident) trigger. Here we
+    instead take the event with the highest detection statistic whose detection_time is
+    within ``window`` seconds of the injection time. Injections with no event in the
+    window are marked missed (-inf statistic). Mirrors the per-shift bookkeeping of
+    ``RecoveredInjectionSet.recover``.
+    """
+    obj = RecoveredInjectionSet()
+    for shift in np.unique(events.shift, axis=0):
+        evs = events.get_shift(shift)
+        injs = injections.get_shift(shift)
+
+        order = np.argsort(evs.detection_time)
+        et = evs.detection_time[order]
+        es = evs.detection_statistic[order]
+
+        n = len(injs)
+        sel_stat = np.full(n, -1e30, dtype=np.float64)   # finite "missed" sentinel
+        sel_time = injs.injection_time.astype(np.float64).copy()
+        for i, t in enumerate(injs.injection_time):
+            lo = np.searchsorted(et, t - window, side="left")
+            hi = np.searchsorted(et, t + window, side="right")
+            if hi > lo:
+                j = int(np.argmax(es[lo:hi]))
+                sel_stat[i] = es[lo:hi][j]
+                sel_time[i] = et[lo + j]
+
+        fields = set(RecoveredInjectionSet.__dataclass_fields__)
+        fields &= set(injs.__dataclass_fields__)
+        kwargs = {k: getattr(injs, k) for k in fields}
+        kwargs["num_injections"] = len(injs)
+        obj.append(
+            RecoveredInjectionSet(
+                detection_statistic=sel_stat,
+                detection_time=sel_time,
+                **kwargs,
+            )
+        )
+    obj.Tb = events.Tb
+    return obj
+
+
 # ────────────────────────────────────────────────────────────────────────── #
 # Inference                                                                   #
 # ────────────────────────────────────────────────────────────────────────────#
@@ -311,9 +382,12 @@ def score_sequence(
         out = model(x)                      # (B, 2*n_vars) in normalized output space
         var = softplus(out[:, n_vars:])     # (B, n_vars) — normalized variance
         sigma = torch.sqrt(var[:, 0])       # (B,)  chirp_mass sigma (normalized)
-        # sigma is scaled by y_std but ranking is preserved — no un-normalization needed
-        # for the detection statistic. Physical sigma = sigma * model.y_std[0].
-        return sigma.cpu().numpy()
+        # Negate so the convention is "higher = more confident" BEFORE clustering.
+        # _cluster() keeps local MAXIMA; a real signal has LOW sigma, so without this
+        # negation clustering throws away the confident signal dip and the recovered
+        # injections look like noise (sensitive volume collapses to 0). Because the
+        # statistic is already "higher = better" here, do NOT negate the output files.
+        return -sigma.cpu().numpy()
 
     bg_parts, fg_parts = [], []
     has_fg = False
@@ -358,6 +432,9 @@ def main(
     device: str = "cuda",
     verbose: bool = False,
     raw_sample_rate: Optional[float] = None,
+    window_offset: float = 0.0,
+    recovery_mode: str = "closest",
+    recovery_window: float = 1.0,
 ) -> None:
     """Aggregate inference over all background segments and all shift combinations.
 
@@ -371,6 +448,11 @@ def main(
     )
     outdir = Path(outdir)
     outdir.mkdir(parents=True, exist_ok=True)
+    if window_offset:
+        log.info(
+            f"Pre-merger recovery enabled: shifting foreground detection times "
+            f"+{window_offset}s (predicted merger time) before matching to injections."
+        )
 
     # ── load model ────────────────────────────────────────────────────── #
     log.info(f"Loading {model_class} from {checkpoint}")
@@ -498,7 +580,21 @@ def main(
                     integration_window_length=integration_window_length,
                     cluster_window_length=cluster_window_length,
                 )
-                recovered = seq.recover(fg_events)
+                # Pre-merger models fire ``window_offset`` seconds BEFORE coalescence,
+                # so the confident trigger lands at detection_time ~= coal - window_offset.
+                # Shift foreground detection times forward by window_offset (= report the
+                # predicted merger time) so recover(), which matches the event closest to
+                # injection_time (= coalescence), picks the confident pre-merger trigger
+                # rather than the untrained at-merger window. window_offset=0 (a merger
+                # model) leaves this unchanged.
+                if window_offset:
+                    fg_events.detection_time = fg_events.detection_time + window_offset
+                if recovery_mode == "window":
+                    recovered = _recover_max_in_window(
+                        fg_events, seq.injection_set, recovery_window
+                    )
+                else:
+                    recovered = seq.recover(fg_events)
                 all_fg.append(recovered)
 
             # checkpoint: persist after every pair so restarts skip done work

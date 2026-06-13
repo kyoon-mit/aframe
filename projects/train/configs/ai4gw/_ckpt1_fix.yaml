@@ -1,0 +1,11 @@
+# Resume override: same epoch=111 ckpt as chirp_mass_1s_d64_s64_l4.yaml, but with
+# the SNR-curriculum-persistence + fixed-validation-SNR fix in the code. Only the
+# wandb run name/id change, so it does not collide with the in-flight _ckpt1 run.
+trainer:
+  logger:
+    - class_path: train.callbacks.AframeWandbLogger
+      init_args:
+        name: chirp_mass_snr_4_50_59-60s_d64_s64_l4_id10_ckpt1_fix
+        id:   chirp_mass_snr_4_50_59-60s_d64_s64_l4_id10_ckpt1_fix
+        save_dir: logs
+        project: aframe

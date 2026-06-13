@@ -1,0 +1,25 @@
+# Pre-merger SV pipeline — 57-58s (1 s kernel, ~6s before coalescence).
+# Winning config: -sigma (in code) + integration ON + window_offset (detection_time=window-start
+# convention: psd+fd+ker+iwl+window_offset_training-jitter) + max-in-window recovery.
+checkpoint: /n/holystore01/LABS/iaifi_lab/Lab/kyoon/aframe_linoss/projects/train/logs/aframe/chirp_mass_snr_4_50_57-58s_d64_s64_l4/checkpoints/s4d_chirp_mass_mse_14.ckpt
+model_class: LitS4DGaussianNLL
+background_dir: /n/holystore01/LABS/iaifi_lab/Lab/kyoon/DATA/O3a_H1_L1_4096Hz
+injection_set_fname: /n/holystore01/LABS/iaifi_lab/Lab/kyoon/aframe_linoss/runs/regression_sv/bns_injections/waveforms.hdf5
+ifos: [H1, L1]
+shifts: [[0,1],[0,2],[0,3],[0,4]]
+sample_rate: 256
+raw_sample_rate: 4096
+kernel_length: 1.0
+fduration: 1.0
+psd_length: 20.0
+fftlength: 2.0
+highpass: 20.0
+inference_sampling_rate: 8.0
+integration_window_length: 1.0
+cluster_window_length: 0.5
+window_offset: 27.5
+recovery_mode: window
+recovery_window: 5.0
+batch_size: 256
+device: cuda
+outdir: /n/holystore01/LABS/iaifi_lab/Lab/kyoon/aframe_linoss/runs/regression_sv/premerger_57-58s_1wk/

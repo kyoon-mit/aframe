@@ -1,0 +1,39 @@
+# 1-WEEK SV control run — MERGER model (positive control).
+#   ckpt: chirp_mass_snr_4_50_merger_4s_d64_s64_l4_aframe_kyoon_dev_1 / s4d_chirp_mass_mse_1959.ckpt
+# Merger model (window_offset=0): the model fires at coalescence, so standard
+# recovery (match at injection_time) applies. With the clustering-polarity fix this
+# is the positive control — expect SV > 0.
+# Geometry matches training config ai4gw/chirp_mass_4s_d64_s64_l4_merger.yaml.
+
+checkpoint: /n/holystore01/LABS/iaifi_lab/Lab/kyoon/aframe_linoss/projects/train/logs/BNS-PUBLICATION/chirp_mass_snr_4_50_merger_4s_d64_s64_l4_aframe_kyoon_dev_1/checkpoints/s4d_chirp_mass_mse_1959.ckpt
+model_class: LitS4DGaussianNLL
+
+background_dir: /n/holystore01/LABS/iaifi_lab/Lab/kyoon/DATA/O3a_H1_L1_4096Hz
+injection_set_fname: /n/holystore01/LABS/iaifi_lab/Lab/kyoon/aframe_linoss/runs/regression_sv/bns_injections/waveforms.hdf5
+
+ifos: [H1, L1]
+
+# 4 shifts x 1.64 days = ~6.6 days background (FAR floor ~55/yr) — trial only
+shifts:
+  - [0, 1]
+  - [0, 2]
+  - [0, 3]
+  - [0, 4]
+
+# Signal properties — must match training (chirp_mass_4s_d64_s64_l4_merger.yaml)
+sample_rate: 2048         # model rate
+raw_sample_rate: 4096     # background files are 4096 Hz -> resampled to 2048
+kernel_length: 4.0
+fduration: 1.0
+psd_length: 20.0
+fftlength: 2.0
+highpass: 20.0
+
+inference_sampling_rate: 8.0
+integration_window_length: 1.0
+cluster_window_length: 0.5
+window_offset: 0.0        # merger model: trigger at coalescence -> standard recovery
+
+batch_size: 128
+device: cuda
+outdir: /n/holystore01/LABS/iaifi_lab/Lab/kyoon/aframe_linoss/runs/regression_sv/merger_4s_1wk/

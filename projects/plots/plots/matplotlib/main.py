@@ -202,7 +202,7 @@ def main(
 
     logging.info("Computing data likelihood under source prior")
     source, _ = source_prior(DEFAULT_COSMOLOGY)
-    source_probs = get_prob(source, foreground)
+    source_probs = get_prob(source, foreground_events)
     source_rejected_probs = get_prob(source, rejected_params_set)
 
     logging.info("Computing maximum astrophysical volume")
@@ -303,7 +303,7 @@ def main(
         )  # make aframe lines transparent in all but first plot
         plot_err_bands(ax, fars, aframe_sv[i], aframe_err[i], color=color)
 
-        for pipeline, color in zip(gwtc3_sv.keys(), PALETTE[1:], strict=True):
+        for pipeline, color in zip(gwtc3_sv.keys(), PALETTE[1:]):
             m1, m2 = mass_combos[i]
             mass_key = f"{m1}-{m2}"
             sv = gwtc3_sv[pipeline][mass_key]

@@ -1,0 +1,62 @@
+# snr5_50 (BNSReg) 40-day RE-RUN with pipeline fixes.
+#   model: chirp_mass_ft_FIX_snr_5_50_59-63s_d64_s64_l4 (256 Hz, 4 s kernel [59,63])
+#   kernel ends at coalescence (coal=63) -> merger-aligned -> window_offset = 0.
+# Fixes vs the original snr5_50_40d run:
+#   integration_window_length: 0  (no boxcar smearing of the sharp confidence spike)
+#   recovery_mode: window         (recover by MAX detstat near injection, not closest-in-time)
+
+checkpoint: /n/holystore01/LABS/iaifi_lab/Lab/kyoon/BNSReg/00_AI4GW_TALK/mass_merger/chirp_mass_ft_FIX_snr_5_50_59-63s_d64_s64_l4/checkpoints/s4d_gaussnll_var0mse_ckpt_epoch=1177_AFRAME.ckpt
+model_class: LitS4DGaussianNLL
+
+background_dir: /n/holystore01/LABS/iaifi_lab/Lab/kyoon/DATA/O3a_H1_L1_4096Hz
+injection_set_fname: /n/holystore01/LABS/iaifi_lab/Lab/kyoon/aframe_linoss/runs/regression_sv/bns_injections/waveforms.hdf5
+
+ifos: [H1, L1]
+
+# 25 shifts x 1.64 days ≈ 41 days background (FAR floor ~9/yr)
+shifts:
+  - [0, 1]
+  - [0, 2]
+  - [0, 3]
+  - [0, 4]
+  - [0, 5]
+  - [0, 6]
+  - [0, 7]
+  - [0, 8]
+  - [0, 9]
+  - [0, 10]
+  - [0, 11]
+  - [0, 12]
+  - [0, 13]
+  - [0, 14]
+  - [0, 15]
+  - [0, 16]
+  - [0, 17]
+  - [0, 18]
+  - [0, 19]
+  - [0, 20]
+  - [0, 21]
+  - [0, 22]
+  - [0, 23]
+  - [0, 24]
+  - [0, 25]
+
+# Signal properties — must match BNSReg training data
+sample_rate: 256
+raw_sample_rate: 4096
+kernel_length: 4.0
+fduration: 1.0
+psd_length: 64.0
+fftlength: 2.0
+highpass: 20.0
+
+inference_sampling_rate: 8.0
+integration_window_length: 0.0     # FIX 1: no integration
+cluster_window_length: 0.5
+window_offset: 68.5                 # detection_time = window START = T - (psd+fd+ker) = T - (64+1+4) - jitter; merger-aligned
+recovery_mode: window              # FIX 2: max detstat within a window
+recovery_window: 5.0               # generous: covers the confident plateau + offset slack
+
+batch_size: 256
+device: cuda
+outdir: /n/holystore01/LABS/iaifi_lab/Lab/kyoon/aframe_linoss/runs/regression_sv/snr5_50_40d_fix/

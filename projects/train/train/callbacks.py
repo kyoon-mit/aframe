@@ -14,6 +14,7 @@ from lightning.pytorch.callbacks import Callback
 from lightning.pytorch.loggers import WandbLogger
 from lightning.pytorch.cli import SaveConfigCallback
 from lightning.pytorch.callbacks import ModelCheckpoint as PLModelCheckpoint
+from lightning.pytorch.callbacks import EarlyStopping as PLEarlyStopping
 from lightning.pytorch.utilities import grad_norm
 from typing import Literal, Union
 from pathlib import Path
@@ -314,3 +315,23 @@ class GradientTracker(Callback):
         norms = grad_norm(pl_module, norm_type=self.norm_type)
         total_norm = norms[f"grad_{float(self.norm_type)}_norm_total"]
         self.log(f"grad_norm_{self.norm_type}", total_norm)
+
+
+class EarlyStopping(PLEarlyStopping):
+    """Early stopping that honors the current config when resuming a run.
+
+    Lightning saves early stopping's own state into the checkpoint — its
+    patience, how long it has gone without improvement, and the best score seen
+    so far — and restores all of it on resume. The surprising consequence is
+    that the patience set in the config is silently ignored on any resumed run:
+    the old patience and the old wait counter come back and training can stop
+    almost immediately. That is not what early stopping is meant to do. This
+    version reads its settings from the config every time and starts its counter
+    and best score fresh, while leaving the rest of the resume (weights,
+    optimizer, epoch) untouched.
+    """
+
+    def load_state_dict(self, state_dict):
+        # Skip restoring patience / wait_count / best_score so the values built
+        # from the current config are kept instead of the checkpoint's stale ones.
+        pass

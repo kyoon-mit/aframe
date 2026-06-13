@@ -1,0 +1,22 @@
+# THROWAWAY verification override for the checkpoint-resume SNR-curriculum fix.
+# Layered on top of chirp_mass_1s_d64_s64_l4.yaml (which sets ckpt_path to the
+# pre-fix epoch=111 checkpoint). Short epochs + validate-every-epoch so we can
+# confirm validation metrics are flat (no easy->hard drift) after resume.
+#
+# callbacks emptied on purpose: with check_val_every_n_epoch=1 Lightning makes
+# EarlyStopping check at train-epoch-end, which crashes here because the ckpt
+# was saved mid-epoch so the resumed partial epoch has no validation metric yet.
+# That interaction is irrelevant to the fix; production uses n=4.
+trainer:
+  max_epochs: 115            # resume mid-epoch 111 -> run ~112,113,114
+  check_val_every_n_epoch: 1
+  enable_progress_bar: false
+  callbacks: []
+  logger:
+    - class_path: lightning.pytorch.loggers.CSVLogger
+      init_args:
+        save_dir: /n/holystore01/LABS/iaifi_lab/Lab/kyoon/aframe_linoss/runs/ckpt_fixtest/csv
+        name: ckpt_fixtest
+data:
+  init_args:
+    batches_per_epoch: 60    # short epochs for a fast end-to-end check
