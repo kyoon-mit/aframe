@@ -361,6 +361,7 @@ class RegressionAframeS4D(RegressionAframe):
         y_std: list[float] | None = None,
         normalize_input: bool = False,
         log_gradients: bool = False,
+        weights: str | None = None,
     ) -> None:
         super().__init__(
             arch,
@@ -377,7 +378,22 @@ class RegressionAframeS4D(RegressionAframe):
         )
         self._lr_scheduler_factory = lr_scheduler
         self.log_gradients = log_gradients
+        if weights is not None:
+            self.load_arch_weights(weights)
         self.save_hyperparameters(ignore=["arch", "lr_scheduler", "metric"])
+
+    def load_arch_weights(self, weights: str) -> None:
+        """Initialize ``self.model`` from a saved architecture state dict.
+
+        ``weights`` points at a ``.pt`` file holding the bare ``S4Model``
+        state dict (e.g. ``merger_1s_model.pt`` extracted from a checkpoint),
+        i.e. keys like ``encoder.weight``/``s4_layers.0.*`` without a
+        ``model.`` prefix. Used to warm-start training from a pretrained
+        architecture.
+        """
+        state_dict = torch.load(weights, map_location="cpu", weights_only=True)
+        self.model.load_state_dict(state_dict)
+        self._logger.info(f"Loaded architecture weights from {weights}")
 
     def on_after_backward(self) -> None:
         if self.log_gradients:
