@@ -1,0 +1,181 @@
+model:
+  class_path: train.model.cascade.CascadeAframeS4D
+  init_args:
+    arch:
+      class_path: architectures.networks.heterodyne_cascade.HeterodyneCascade
+      init_args:
+        # Stage 1: raw strain -> chirp_mass (mean + log-var).
+        mass_model:
+          class_path: architectures.networks.s4d.S4Model
+          init_args:
+            d_input: 2 # H1, L1
+            d_output: 2 # chirp_mass mean + log-var
+            d_model: 64
+            d_state: 64
+            n_layers: 4
+            dropout: 0.2
+            dt_min: 1.0e-3
+            dt_max: 5.0
+            lr: 1.0e-3
+        # Stage 2: heterodyned strain -> chirp_mass (mean + log-var).
+        # Its predicted variance is the detection statistic.
+        detector_model:
+          class_path: architectures.regression.RegressionTimeDomainResNet
+          init_args:
+            num_ifos: 2 # heterodyne preserves channel count (H1, L1)
+            sample_rate: 2048
+            kernel_length: 8.0 # full input length (unused by ResNet1D)
+            num_params: 2 # chirp_mass mean + pre-var
+            layers: [3, 4, 6, 3]
+            kernel_size: 7
+            norm_layer:
+              class_path: ml4gw.nn.norm.GroupNorm1DGetter
+              init_args:
+                groups: 16
+        sample_rate: 2048
+        kernel_length: 8.0 # full input; must match data.windowing.kernel_length
+        # Mass model sees only the trailing 1s (merger sits at kernel end),
+        # matching the merger_1s estimator; detector + heterodyne use all 8s.
+        mass_kernel_length: 1.0
+        # De-normalize the mass model's output to a physical chirp mass for
+        # the heterodyne (merger_1s checkpoint conventions).
+        y_mean: 1.2
+        y_std: 0.39
+        min_chirp_mass: 0.5
+        # Warm-start stage 1 from the pretrained merger_1s estimator.
+        mass_weights: /fast/barmstrong/kevin_ckpts/merger_1s_model.pt
+        # --- Frozen estimator (default) ---
+        freeze_mass_model: true
+        detach_chirp_mass: true
+        # --- Joint fine-tuning: set the two flags above to false and
+        #     lambda_aux_mass below > 0 to let detector gradients flow into
+        #     the mass model while keeping its own regression loss. ---
+    d_output: 2 # detector d_output; first half mean, second half pre-var
+    normalize_input: true
+    y_mean: [1.2] # target normalization (chirp_mass)
+    y_std: [0.39]
+    lambda_aux_mass: 0.0 # 0 detector-only. >0 train mass model too
+    base_lr: 5.0e-5
+    weight_decay: 0.01
+    beta_nll: 0.3
+    lambda_spread: 0.3
+    lr_scheduler:
+      class_path: train.model.regression_kevin.WarmupCosineAnnealingWarmRestarts
+      init_args:
+        warmup_epochs: 8
+        T_0: 10
+        T_mult: 2
+        eta_min: 1.0e-7
+        warmup_start_factor: 1.0e-2
+    lr_scheduler_interval: epoch
+    metric:
+      class_path: train.metrics.TimeSlideAUROC
+      init_args:
+        max_fpr: 1e-3
+        pool_length: 8
+
+data:
+  class_path: train.data.supervised.TimeDomainSupervisedAframeDataset
+  init_args:
+    background_dir: data/bns/background_data
+    waveforms_dir: data/bns/aframe_train/
+    ifos: [H1, L1]
+    sample_rate: 2048
+
+    windowing:
+      kernel_length: 8.0
+      window_lead_min: 0
+      window_lead_max: 0.5
+
+    batch_size: 128
+    batches_per_epoch: 1000
+    chunk_size: 10000
+    chunks_per_epoch: 10
+    num_files_per_batch: 4
+
+    fduration: 1.0
+    psd_length: 20
+    fftlength: 2.0
+    highpass: 20
+
+    waveform_prob: 1.0
+    max_num_workers: 16
+
+    valid_stride: 0.5
+    num_valid_views: 5
+    valid_livetime: 57600
+
+    snr_sampler:
+      class_path: train.augmentations.SnrSampler
+      init_args:
+        distribution: torch.distributions.Uniform
+        constant_params:
+          high: 50
+        start_params:
+          low: 4
+        end_params:
+          low: 4
+        decay_steps: 10000
+
+    param_transforms:
+      - class_path: train.transforms.ChirpMass
+
+    waveform_sampler:
+      class_path: train.data.waveforms.WaveformLoader
+      init_args:
+        ifos: [H1, L1]
+        sample_rate: 2048
+        val_waveform_file: data/bns/aframe_train/val_waveforms.hdf5
+        training_waveform_path: data/bns/uniform_chirp_mass_waveforms/training_waveforms.hdf5
+
+    dec:
+      class_path: ml4gw.distributions.Cosine
+    psi:
+      class_path: torch.distributions.Uniform
+      init_args:
+        low: 0.0
+        high: 3.14159
+        validate_args: false
+    phi:
+      class_path: torch.distributions.Uniform
+      init_args:
+        low: 0.0
+        high: 6.28318
+        validate_args: false
+
+trainer:
+  logger:
+    - class_path: train.callbacks.AframeWandbLogger
+      init_args:
+        name: "aframe_heterodyne_cascade"
+        save_dir: outputs
+        project: "aframe"
+
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.EarlyStopping
+      init_args:
+        monitor: "validation/TimeSlideAUROC_epoch"
+        mode: "min"
+        patience: 50
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        monitor: "validation/TimeSlideAUROC_epoch"
+        mode: "min"
+        save_top_k: 1
+        save_last: true
+        auto_insert_metric_name: false
+    - class_path: train.callbacks.SaveAugmentedBatch
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: epoch
+
+  strategy: auto
+  devices: auto
+  num_nodes: 1
+  precision: null
+
+  max_epochs: 3000
+  min_epochs: 60
+  check_val_every_n_epoch: 1
+  log_every_n_steps: 10
+  enable_progress_bar: true
