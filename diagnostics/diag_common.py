@@ -230,11 +230,49 @@ class Segment:
     injection_set: object                 # InterferometerResponseSet for this segment
 
 
-def load_segment(cfg: dict, background_fname: str) -> Segment:
+def rescale_injection_snr(inj, ifos, pmin: float, pmax: float, alpha: float, seed: int) -> None:
+    """Rescale every injection in ``inj`` (an InterferometerResponseSet) to a fresh
+    SNR drawn from ``PowerLaw(pmin, pmax, alpha)``, in place.
+
+    The stored set carries an astrophysical SNR distribution; training/test instead
+    used a powerlaw SNR prior. Network SNR is linear in signal amplitude (fixed
+    noise), so scaling each per-IFO response by ``target/stored`` rescales its SNR
+    to the target. Seeded by segment so the two diagnostics see identical SNRs.
+    """
+    import torch
+    from ml4gw.distributions import PowerLaw
+
+    n = len(inj)
+    if n == 0:
+        return
+    # PowerLaw.sample() uses the global torch RNG and takes no generator; seed it
+    # deterministically (per segment) and restore the previous state afterward.
+    rng_state = torch.random.get_rng_state()
+    torch.manual_seed(int(seed) & 0x7FFFFFFF)
+    target = PowerLaw(pmin, pmax, alpha).sample((n,)).cpu().numpy()
+    torch.random.set_rng_state(rng_state)
+    stored = np.asarray(inj.snr, dtype=np.float64)
+    scale = (target / np.clip(stored, 1e-12, None)).astype(np.float32)
+    for ifo in (i.lower() for i in ifos):
+        setattr(inj, ifo, getattr(inj, ifo) * scale[:, None])
+    inj._waveforms = None  # invalidate the cached stacked-waveform array
+    inj.snr = target.astype(stored.dtype)
+    if getattr(inj, "ifo_snrs", None) is not None and np.size(inj.ifo_snrs):
+        inj.ifo_snrs = inj.ifo_snrs * scale[:, None]
+
+
+def load_segment(
+    cfg: dict,
+    background_fname: str,
+    snr_powerlaw: Optional[tuple[float, float, float]] = None,
+) -> Segment:
     """Load one segment at zero time-shift and add the injection population.
 
     Zero shift means the foreground injections sit at their true coalescence
     times -- which is what both diagnostics want (no slide, signals intact).
+
+    ``snr_powerlaw = (min, max, alpha)`` rescales the injections to a powerlaw SNR
+    prior (matching training) before they are added to the background.
     """
     n_ifos = len(cfg["ifos"])
     seq = RegressionSequence(
@@ -246,6 +284,10 @@ def load_segment(cfg: dict, background_fname: str) -> Segment:
         inference_sampling_rate=cfg["inference_sampling_rate"],
         batch_size=cfg.get("batch_size", 256),
     )
+    if seq.injection_set is not None and snr_powerlaw is not None:
+        rescale_injection_snr(
+            seq.injection_set, cfg["ifos"], *snr_powerlaw, seed=round(seq.t0)
+        )
     background = seq._load_shifted()  # (n_ifos, n) -- zero shift => full segment
     foreground = None
     if seq.injection_set is not None:

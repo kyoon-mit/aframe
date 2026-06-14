@@ -56,11 +56,17 @@ def main():
     ap.add_argument("--max-injections", type=int, default=0,
                     help="stop after this many scored injections (0 = all)")
     ap.add_argument("--batch-size", type=int, default=256)
+    ap.add_argument("--snr-powerlaw", nargs=3, type=float, metavar=("MIN", "MAX", "ALPHA"),
+                    default=[4.0, 50.0, -3.0],
+                    help="rescale injection SNR to PowerLaw(min,max,alpha) (training prior)")
+    ap.add_argument("--no-snr-rescale", action="store_true",
+                    help="use the injection set's native SNRs instead of the powerlaw")
     args = ap.parse_args()
 
     cfg = load_infer_config(args.config)
     scorer = Scorer(cfg, device=cfg.get("device", "cuda"))
     geom = scorer.geom
+    snr_pl = None if args.no_snr_rescale else tuple(args.snr_powerlaw)
     if args.fix_e is not None:
         e_values = np.array([args.fix_e])
     else:
@@ -70,7 +76,7 @@ def main():
     for bg_fname in list_background_files(cfg):
         if args.max_injections and len(rows) >= args.max_injections:
             break
-        seg = load_segment(cfg, bg_fname)
+        seg = load_segment(cfg, bg_fname, snr_powerlaw=snr_pl)
         if seg.foreground is None:
             continue
         inj = seg.injection_set

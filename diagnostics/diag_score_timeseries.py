@@ -49,12 +49,18 @@ def main():
                     help="only show injections at least this loud")
     ap.add_argument("--batch-size", type=int, default=256)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--snr-powerlaw", nargs=3, type=float, metavar=("MIN", "MAX", "ALPHA"),
+                    default=[4.0, 50.0, -3.0],
+                    help="rescale injection SNR to PowerLaw(min,max,alpha) (training prior)")
+    ap.add_argument("--no-snr-rescale", action="store_true",
+                    help="use the injection set's native SNRs instead of the powerlaw")
     args = ap.parse_args()
 
     cfg = load_infer_config(args.config)
     scorer = Scorer(cfg, device=cfg.get("device", "cuda"))
     geom = scorer.geom
     rng = np.random.default_rng(args.seed)
+    snr_pl = None if args.no_snr_rescale else tuple(args.snr_powerlaw)
 
     # kernel-edge alignments to scan, at the inference cadence
     e_values = np.arange(-args.e_before, args.e_after + 1e-9, 1.0 / geom.inference_sampling_rate)
@@ -67,7 +73,7 @@ def main():
     for bg_fname in list_background_files(cfg):
         if n_sig >= args.n_signal and n_bg >= args.n_background:
             break
-        seg = load_segment(cfg, bg_fname)
+        seg = load_segment(cfg, bg_fname, snr_powerlaw=snr_pl)
         if seg.foreground is None:
             continue
         inj = seg.injection_set

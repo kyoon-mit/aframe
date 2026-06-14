@@ -1,0 +1,37 @@
+# 1-WEEK SV / diagnostics run — MERGER 1s model.
+#   ckpt: chirp_mass_snr_4_50_63-64s_d64_s64_l4_id1_ckpt1_ft / s4d_chirp_mass_mse_415.ckpt
+# Merger model (window_offset=0): kernel right-edge sits at coalescence; the model
+# sees the last 1s up to merger. Geometry matches training config
+# merger/chirp_mass_63-64s_d64_s64_l4_ft.yaml (sample_rate 2048, kernel 1s).
+
+checkpoint: /n/holystore01/LABS/iaifi_lab/Lab/kyoon/aframe_linoss/projects/train/logs/BNS-PUBLICATION/chirp_mass_snr_4_50_63-64s_d64_s64_l4_id1_ckpt1_ft/checkpoints/s4d_chirp_mass_mse_415.ckpt
+model_class: LitS4DGaussianNLL
+
+background_dir: /n/holystore01/LABS/iaifi_lab/Lab/kyoon/DATA/O3a_H1_L1_4096Hz
+injection_set_fname: /n/holystore01/LABS/iaifi_lab/Lab/kyoon/aframe_linoss/runs/regression_sv/bns_injections/waveforms.hdf5
+
+ifos: [H1, L1]
+
+shifts:
+  - [0, 1]
+  - [0, 2]
+  - [0, 3]
+  - [0, 4]
+
+# Signal properties — must match training (merger/chirp_mass_63-64s_d64_s64_l4_ft.yaml)
+sample_rate: 2048         # model rate
+raw_sample_rate: 4096     # background files are 4096 Hz -> resampled to 2048
+kernel_length: 1.0
+fduration: 1.0
+psd_length: 20.0
+fftlength: 2.0
+highpass: 20.0
+
+inference_sampling_rate: 8.0
+integration_window_length: 1.0
+cluster_window_length: 0.5
+window_offset: 0.0        # merger model: trigger at coalescence -> standard recovery
+
+batch_size: 256
+device: cuda
+outdir: /n/holystore01/LABS/iaifi_lab/Lab/kyoon/aframe_linoss/runs/regression_sv/merger_1s_1wk/

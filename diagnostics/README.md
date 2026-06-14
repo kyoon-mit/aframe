@@ -6,12 +6,34 @@ plus a **plotting notebook** (no GPU). They share `diag_common.py`, which loads 
 model and preprocessing exactly as `regression_infer.py` does, so the numbers match
 the SV pipeline.
 
-| diagnostic | script → notebook | answers |
+| diagnostic | script | answers |
 |---|---|---|
-| **1. Score vs kernel alignment** | `diag_score_timeseries.py` → `diag_score_timeseries.ipynb` | *Does the model localize the signal in time, and does the statistic separate signal from noise?* |
-| **2. Offline "test step"** | `diag_test_step.py` → `diag_test_step.ipynb` | *At the trained placement, how accurate is the chirp mass, how well-calibrated is σ, does signal separate from noise?* |
+| **1. Score vs kernel alignment** | `diag_score_timeseries.py` | *Does the model localize the signal in time, and does the statistic separate signal from noise?* |
+| **2. Offline "test step"** | `diag_test_step.py` | *At the trained placement, how accurate is the chirp mass, how well-calibrated is σ, does signal separate from noise?* |
+
+The `.py` scripts are **generic** (driven entirely by a config + flags). The
+**notebooks are per-model** (each hard-codes its CSV path and `TRAINED_E`):
+
+| model | config | diagnostic 1 notebook | diagnostic 2 notebook |
+|---|---|---|---|
+| pre-merger 1 s (59-60s, id11) | `regression_infer_diag_premerger_59-60s_ft.yaml` | `diag_score_timeseries_premerger_59-60s.ipynb` | `diag_test_step_premerger_59-60s.ipynb` |
+| merger 4 s (60-64s) | `regression_infer_diag_merger_60-64s_ft.yaml` | `diag_score_timeseries_merger_60-64s.ipynb` | — |
+| merger 1 s (63-64s) | `regression_infer_diag_merger_63-64s_ft.yaml` | `diag_score_timeseries_merger_63-64s.ipynb` | — |
+
+All three configs use the **fine-tuned (`_ft`) checkpoints** and copy their geometry
+verbatim from the matching training config in `configs/{premerger,merger}/`.
 
 > Notebooks are git-ignored repo-wide (`**/*.ipynb`); they live here but are not committed.
+
+## Injection SNR: powerlaw, matching training
+
+By default both scripts **rescale every injection's SNR to `PowerLaw(4, 50, α=−3)`**
+(`--snr-powerlaw MIN MAX ALPHA`), the same prior the models were trained/validated on
+(`train.augmentations.SnrSampler`). The stored injection set carries a broad
+astrophysical SNR range (~0.2–73); rescaling makes the diagnostics reflect the
+model's actual operating regime. SNR is linear in signal amplitude (fixed noise), so
+each per-IFO response is scaled by `target/stored`. Pass `--no-snr-rescale` to use the
+set's native SNRs instead.
 
 ---
 
@@ -40,10 +62,10 @@ window_offset)`**.
 
 | model | training `window_offset` | use `--fix-e` |
 |---|---|---|
-| id11 / 59-60s (pre-merger) | 3.0 | **−3.0** |
+| 59-60s / id11 (pre-merger 1 s) | 3.0 | **−3.0** |
 | 58-59s | 4.0 | −4.0 |
 | 57-58s | 5.0 | −5.0 |
-| merger | 0.0 | 0.0 |
+| merger 4 s (60-64s) / merger 1 s (63-64s) | 0.0 | 0.0 |
 
 ### ⚠ Do not pick the most-confident alignment for a pre-merger model
 
@@ -58,26 +80,31 @@ trustworthy at the trained `e`. That is why Diagnostic 2 fixes `e` instead of ta
 
 ## Running
 
-Use the project venv on a GPU node (gpu_test, 40 GB is plenty). `CFG` is any
-`regression_infer` YAML; `RUN/diag/` is where the notebooks expect the CSVs.
+Use the project venv on a GPU node (gpu_test, 40 GB is plenty). Outputs go under
+`runs/regression_sv/diag/<model>/`, which is where the notebooks read their CSVs.
+SNR is rescaled to the powerlaw prior by default. The committed launcher
+`runs/regression_sv/diag/regen_all.sbatch` runs all of the below in one job.
 
 ```bash
 cd /n/holystore01/LABS/iaifi_lab/Lab/kyoon/aframe_linoss/projects/train
 PY=.venv/bin/python
 D=/n/holystore01/LABS/iaifi_lab/Lab/kyoon/aframe_linoss/diagnostics
-CFG=configs/regression_infer_premerger_1s_id11_1wk_intg.yaml
-RUN=/n/holystore01/LABS/iaifi_lab/Lab/kyoon/aframe_linoss/runs/regression_sv/premerger_1s_id11_1wk_intg
+C=configs ; O=/n/holystore01/LABS/iaifi_lab/Lab/kyoon/aframe_linoss/runs/regression_sv/diag
 
-# 1. score vs alignment (scan e), loud injections + background spots
-$PY $D/diag_score_timeseries.py --config $CFG --output $RUN/diag/score_timeseries.csv \
-    --n-signal 20 --n-background 20 --e-before 8 --e-after 2 --snr-min 12
+# pre-merger 1 s (59-60s): scan + test step at the trained alignment e = -3
+$PY $D/diag_score_timeseries.py --config $C/regression_infer_diag_premerger_59-60s_ft.yaml \
+    --output $O/premerger_59-60s_ft/score_timeseries.csv --e-before 8 --e-after 2 --snr-min 12
+$PY $D/diag_test_step.py --config $C/regression_infer_diag_premerger_59-60s_ft.yaml \
+    --output $O/premerger_59-60s_ft/test_step.csv --fix-e -3.0 --max-injections 2000
 
-# 2. offline test step at the TRAINED alignment (id11 -> e = -3)
-$PY $D/diag_test_step.py --config $CFG --output $RUN/diag/test_step.csv \
-    --fix-e -3.0 --max-injections 2000
+# merger 4 s (60-64s) and merger 1 s (63-64s): scan around e = 0
+$PY $D/diag_score_timeseries.py --config $C/regression_infer_diag_merger_60-64s_ft.yaml \
+    --output $O/merger_60-64s_ft/score_timeseries.csv --e-before 5 --e-after 4 --snr-min 12
+$PY $D/diag_score_timeseries.py --config $C/regression_infer_diag_merger_63-64s_ft.yaml \
+    --output $O/merger_63-64s_ft/score_timeseries.csv --e-before 5 --e-after 4 --snr-min 12
 ```
 
-Then open the matching notebook and point its `CSV =` (and `TRAINED_E`) at the run.
+Then open the matching notebook (its `CSV =` and `TRAINED_E` already point at the run).
 
 ---
 
