@@ -57,6 +57,36 @@ log = logging.getLogger(__name__)
 SECONDS_PER_YEAR = 31_556_952
 
 
+def rescale_injection_snr(inj, ifos, pmin, pmax, alpha, seed):
+    """Rescale every injection in an ``InterferometerResponseSet`` to a fresh SNR
+    drawn from ``PowerLaw(pmin, pmax, alpha)``, in place.
+
+    The stored injection set carries an astrophysical SNR distribution; training/
+    test used a powerlaw SNR prior instead. Network SNR is linear in signal
+    amplitude (fixed noise), so scaling each per-IFO response by ``target/stored``
+    rescales its SNR to the target. Seeded so a given segment is reproducible.
+    """
+    from ml4gw.distributions import PowerLaw
+
+    n = len(inj)
+    if n == 0:
+        return
+    # PowerLaw.sample() uses the global torch RNG and takes no generator; seed it
+    # deterministically and restore the previous state afterward.
+    rng_state = torch.random.get_rng_state()
+    torch.manual_seed(int(seed) & 0x7FFFFFFF)
+    target = PowerLaw(pmin, pmax, alpha).sample((n,)).cpu().numpy()
+    torch.random.set_rng_state(rng_state)
+    stored = np.asarray(inj.snr, dtype=np.float64)
+    scale = (target / np.clip(stored, 1e-12, None)).astype(np.float32)
+    for ifo in (i.lower() for i in ifos):
+        setattr(inj, ifo, getattr(inj, ifo) * scale[:, None])
+    inj._waveforms = None  # invalidate the cached stacked-waveform array
+    inj.snr = target.astype(stored.dtype)
+    if getattr(inj, "ifo_snrs", None) is not None and np.size(inj.ifo_snrs):
+        inj.ifo_snrs = inj.ifo_snrs * scale[:, None]
+
+
 # ────────────────────────────────────────────────────────────────────────── #
 # Data iterator                                                               #
 # ────────────────────────────────────────────────────────────────────────────#
@@ -102,6 +132,7 @@ class RegressionSequence:
         sample_length: float,
         inference_sampling_rate: float,
         batch_size: int,
+        snr_powerlaw: Optional[list[float]] = None,
     ) -> None:
         self.background_fname = background_fname
         self.ifos = ifos
@@ -138,6 +169,10 @@ class RegressionSequence:
             log.info(
                 f"No injections in {background_fname} for shifts {shifts} — "
                 "foreground inference will be skipped."
+            )
+        elif snr_powerlaw is not None:
+            rescale_injection_snr(
+                self.injection_set, ifos, *snr_powerlaw, seed=round(self.t0)
             )
 
     # ------------------------------------------------------------------ #
@@ -435,6 +470,7 @@ def main(
     window_offset: float = 0.0,
     recovery_mode: str = "closest",
     recovery_window: float = 1.0,
+    snr_powerlaw: Optional[list[float]] = None,
 ) -> None:
     """Aggregate inference over all background segments and all shift combinations.
 
@@ -540,6 +576,7 @@ def main(
                 sample_length=sample_length,
                 inference_sampling_rate=inference_sampling_rate,
                 batch_size=batch_size,
+                snr_powerlaw=snr_powerlaw,
             )
 
             if seq.n_steps == 0:

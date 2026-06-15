@@ -10,6 +10,9 @@ the SV pipeline.
 |---|---|---|
 | **1. Score vs kernel alignment** | `diag_score_timeseries.py` | *Does the model localize the signal in time, and does the statistic separate signal from noise?* |
 | **2. Offline "test step"** | `diag_test_step.py` | *At the trained placement, how accurate is the chirp mass, how well-calibrated is σ, does signal separate from noise?* |
+| **3. ROC: pipeline vs oracle** | `make_roc.py` | *How does the real time-shift + clustering pipeline compare to the model applied exactly at its trained alignment?* |
+
+Pre-rendered PNGs live in each model folder (`make_plots.py` for 1 & 2, `make_roc.py` for 3).
 
 The `.py` scripts are **generic** (driven entirely by a config + flags). The
 **notebooks are per-model** (each hard-codes its CSV path and `TRAINED_E`):
@@ -107,6 +110,35 @@ $PY $D/diag_score_timeseries.py --config $C/regression_infer_diag_merger_63-64s_
 Then open the matching notebook (its `CSV =` and `TRAINED_E` already point at the run).
 
 ---
+
+## Diagnostic 3: ROC — time-shift + clustering pipeline vs oracle
+
+Two ROC curves per model (`<folder>/roc_pipeline_vs_oracle.png`), both using the
+detection statistic −σ and the powerlaw(4,50) injection population:
+
+- **slide + cluster pipeline** — the *real* `regression_infer` run on time-shifted
+  background (`regression_infer_diag_<model>_ft_sv.yaml`). Signal = recovered
+  injections (`foreground.hdf5`, misses count as undetected); background = the
+  clustered time-slide events (`background.hdf5`). The algorithm does **not** know
+  where the signal is: it slides, integrates, clusters, and recovers the loudest
+  event in a ±5 s window. *(Injections are zero-lag, so the SV config must include a
+  `[0,0]` shift for the foreground, plus non-zero shifts for the background.)*
+- **oracle: fixed at trained e** — `diag_test_step` at the trained alignment
+  (single window, no search). Signal vs identical signal-free noise.
+
+**Result (all three models): the pipeline ROC sits well above the oracle**
+(AUC ≈ 0.89 vs ≈ 0.53). The recovered statistic correlates with SNR (≈0.49) and
+TPR@1%FAR is ~0.8 for loud vs ~0.1 for faint, so the curve is genuinely
+signal-driven. The pipeline wins because it **searches over alignment and takes the
+cluster max**, recovering faint signals a single fixed window misses; the oracle is
+limited by the steep powerlaw population (≈75 % at SNR<8, undetectable in one
+window). The flip side — shown by Diagnostic 1 & 2 — is that the most-*confident*
+window is near the merger, so for the pre-merger model the pipeline's detection gain
+comes with **biased chirp mass** there; accurate parameters need the trained `e`.
+
+To regenerate the pipeline side: run the three `regression_infer_diag_*_ft_sv.yaml`
+SV configs (committed; short — full O3a, shifts `[0,0],[0,1],[0,2]`), then
+`python diagnostics/make_roc.py`.
 
 ## What "good" looks like (id11, verified)
 

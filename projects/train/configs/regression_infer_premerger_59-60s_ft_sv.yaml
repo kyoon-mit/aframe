@@ -1,0 +1,28 @@
+# Short SV (slide+cluster) run for ROC comparison — premerger 1s 59-60s _ft.
+# shift [0,0] => zero-lag foreground (injections are zero-lag); [0,1],[0,2] => background.
+checkpoint: /n/holystore01/LABS/iaifi_lab/Lab/kyoon/aframe_linoss/projects/train/logs/BNS-PUBLICATION/chirp_mass_snr_4_50_59-60s_d64_s64_l4_id11_ckpt1_ft/checkpoints/s4d_chirp_mass_mse_1859.ckpt
+model_class: LitS4DGaussianNLL
+sample_rate: 256
+kernel_length: 1.0
+window_offset: 25.5
+batch_size: 256
+outdir: /n/holystore01/LABS/iaifi_lab/Lab/kyoon/aframe_linoss/runs/regression_sv/diag/premerger_59-60s_ft_sv/
+background_dir: /n/holystore01/LABS/iaifi_lab/Lab/kyoon/DATA/O3a_H1_L1_4096Hz
+injection_set_fname: /n/holystore01/LABS/iaifi_lab/Lab/kyoon/aframe_linoss/runs/regression_sv/bns_injections/waveforms.hdf5
+ifos: [H1, L1]
+shifts:
+  - [0, 0]
+  - [0, 1]
+  - [0, 2]
+raw_sample_rate: 4096
+fduration: 1.0
+psd_length: 20.0
+fftlength: 2.0
+highpass: 20.0
+inference_sampling_rate: 8.0
+integration_window_length: 1.0
+cluster_window_length: 0.5
+recovery_mode: window
+recovery_window: 5.0
+snr_powerlaw: [4.0, 50.0, -3.0]
+device: cuda

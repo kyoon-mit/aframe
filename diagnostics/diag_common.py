@@ -26,7 +26,7 @@ import torch
 import torch.nn as nn
 from ml4gw.transforms import Whiten
 
-from train.regression_infer import RegressionSequence
+from train.regression_infer import RegressionSequence, rescale_injection_snr
 from utils.preprocessing import PsdEstimator
 
 
@@ -228,37 +228,6 @@ class Segment:
     foreground: Optional[np.ndarray]      # same, + injections; None if no injections
     t0: float                             # GPS start of the array
     injection_set: object                 # InterferometerResponseSet for this segment
-
-
-def rescale_injection_snr(inj, ifos, pmin: float, pmax: float, alpha: float, seed: int) -> None:
-    """Rescale every injection in ``inj`` (an InterferometerResponseSet) to a fresh
-    SNR drawn from ``PowerLaw(pmin, pmax, alpha)``, in place.
-
-    The stored set carries an astrophysical SNR distribution; training/test instead
-    used a powerlaw SNR prior. Network SNR is linear in signal amplitude (fixed
-    noise), so scaling each per-IFO response by ``target/stored`` rescales its SNR
-    to the target. Seeded by segment so the two diagnostics see identical SNRs.
-    """
-    import torch
-    from ml4gw.distributions import PowerLaw
-
-    n = len(inj)
-    if n == 0:
-        return
-    # PowerLaw.sample() uses the global torch RNG and takes no generator; seed it
-    # deterministically (per segment) and restore the previous state afterward.
-    rng_state = torch.random.get_rng_state()
-    torch.manual_seed(int(seed) & 0x7FFFFFFF)
-    target = PowerLaw(pmin, pmax, alpha).sample((n,)).cpu().numpy()
-    torch.random.set_rng_state(rng_state)
-    stored = np.asarray(inj.snr, dtype=np.float64)
-    scale = (target / np.clip(stored, 1e-12, None)).astype(np.float32)
-    for ifo in (i.lower() for i in ifos):
-        setattr(inj, ifo, getattr(inj, ifo) * scale[:, None])
-    inj._waveforms = None  # invalidate the cached stacked-waveform array
-    inj.snr = target.astype(stored.dtype)
-    if getattr(inj, "ifo_snrs", None) is not None and np.size(inj.ifo_snrs):
-        inj.ifo_snrs = inj.ifo_snrs * scale[:, None]
 
 
 def load_segment(
