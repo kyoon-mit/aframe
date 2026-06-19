@@ -87,7 +87,7 @@ data:
       init_args:
         distribution: torch.distributions.Uniform
         constant_params:
-          high: 50
+          high: 100
         start_params:
           low: 4
         end_params:

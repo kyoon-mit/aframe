@@ -45,6 +45,7 @@ data:
     waveforms_dir: data/bns/aframe_train/
     ifos: [H1, L1]
     sample_rate: 2048
+    model_input_sample_rate: 256
 
     windowing:
       kernel_length: 1.0

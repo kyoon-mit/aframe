@@ -14,12 +14,12 @@ model:
         dropout: 0.2
         dt_min: 1.0e-3
         dt_max: 5.0
-        lr: 1.0e-3 # SSM parameter learning rate
+        lr: 2.0e-4 # SSM parameter learning rate
     d_output: 2 # must match arch d_output
     normalize_input: true
     y_mean: [1.2] # centre of BNS chirp_mass prior [0.87, 2.22]
     y_std: [0.39] # from merger_1s checkpoint
-    base_lr: 5.0e-5
+    base_lr: 1.0e-5
     weight_decay: 0.01
     beta_nll: 0.3
     lambda_spread: 0.3
@@ -47,11 +47,11 @@ data:
     sample_rate: 2048
 
     windowing:
-      kernel_length: 1.0
+      kernel_length: 4.0
       window_lead_min: 0
       window_lead_max: 0.5
 
-    batch_size: 128
+    batch_size: 256
     batches_per_epoch: 1000
     chunk_size: 10000
     chunks_per_epoch: 10
@@ -75,7 +75,7 @@ data:
       init_args:
         distribution: torch.distributions.Uniform
         constant_params:
-          high: 50
+          high: 100
         start_params:
           low: 4
         end_params:
