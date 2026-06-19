@@ -2,7 +2,7 @@ model:
   class_path: train.model.regression_kevin.RegressionAframeS4D
   init_args:
     # Warm-start the architecture from the pretrained merger_1s weights.
-    weights: /fast/barmstrong/kevin_ckpts/merger_1s_model.pt
+    weights: /fast/barmstrong/kevin_ckpts/merger_4s_model.pt
     arch:
       class_path: architectures.networks.s4d.S4Model
       init_args:
@@ -197,7 +197,7 @@ trainer:
   logger:
     - class_path: train.callbacks.AframeWandbLogger
       init_args:
-        name: "aframe_regression_merger_1s_finetune"
+        name: "s4d_merger_4s_finetune"
         save_dir: outputs
         project: "aframe"
 

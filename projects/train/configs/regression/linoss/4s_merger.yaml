@@ -149,6 +149,8 @@ trainer:
 
     - class_path: train.metric.plotting.SnrVsScoreScatterCallback
 
+    - class_path: train.metric.plotting.ChirpMassErrorVsSnrCallback
+
   strategy: auto
   devices: auto
 
