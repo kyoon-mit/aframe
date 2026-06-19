@@ -43,23 +43,13 @@ class AframeCLI(LightningCLI):
             "model.init_args.metric.init_args.stride",
         )
 
-        # TODO: This is a workaround for optional extra metrics. Revisit
-        # if metric handling becomes more complex or widespread.
-        try:
-            parser.link_arguments(
-                "data.init_args.valid_stride",
-                "model.init_args.metric_X.init_args.stride",
-            )
-        except Exception:
-            pass
-
-        try:
-            parser.link_arguments(
-                "data.init_args.valid_stride",
-                "model.init_args.metric_X_spec.init_args.stride",
-            )
-        except Exception:
-            pass
+        # NOTE: metric_X / metric_X_spec are optional extra metrics that only
+        # exist on some models (e.g. the time+spectrogram supervised model).
+        # We can't link their stride here: link_arguments registers the link
+        # successfully (the source exists), but jsonargparse then fails to
+        # validate any model class that lacks these params (a bare
+        # StopIteration when it can't find the target action). Configs that
+        # use these metrics set stride explicitly instead.
 
         # TODO: This is a workaround for linking num_chirp_masses between
         # the model and the architecture for in_channels.

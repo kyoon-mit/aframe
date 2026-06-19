@@ -34,11 +34,13 @@ model:
       class_path: train.metrics.TimeSlideAUROC
       init_args:
         max_fpr: 1e-3
+        stride: 0.5 # must match data.init_args.valid_stride
         pool_length: 8
     metric_X_spec:
       class_path: train.metrics.TimeSlideAUROC
       init_args:
         max_fpr: 1e-3
+        stride: 0.5 # must match data.init_args.valid_stride
         pool_length: 8
     metric:
       class_path: train.metrics.TimeSlideAUROC

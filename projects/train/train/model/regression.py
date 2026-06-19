@@ -83,3 +83,10 @@ class SupervisedRegressionAframe(AframeBase):
                 on_epoch=True,
                 sync_dist=True,
             )
+            self.log(
+                f"validation/rel_mae_{name}",
+                mae / targets.abs().mean(),
+                on_step=False,
+                on_epoch=True,
+                sync_dist=True,
+            )

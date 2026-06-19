@@ -4,6 +4,7 @@ from .regression import (
     MultiTaskTimeDomainResNet,
     RegressionArchitecture,
     RegressionTimeDomainResNet,
+    RegressionTimeDomainLinOSS,
 )
 from .supervised import (
     SupervisedArchitecture,

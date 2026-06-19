@@ -7,14 +7,15 @@ authors = [
     { name = "Alec Gunny", email = "alecg@mit.edu" },
     { name = "Will Benoit", email = "benoit090@umn.edu" },
 ]
-requires-python = ">=3.10,<3.13"
+requires-python = ">=3.12,<3.13"
 readme = "README.md"
 license = "MIT"
 dependencies = [
-    "torchmetrics>=0.11,<0.12",
-    "torch==2.5.0",
-    "lightning==2.2.1",
-    "jsonargparse[signatures]~=4.29",
+    "torchmetrics>=1.0,<2",
+    "torch>=2.8.0,<2.9",
+    "torchaudio>=2.8.0,<2.9",
+    "lightning~=2.6.1",
+    "jsonargparse[signatures]~=4.48",
     "wandb>=0.15",
     "bokeh~=3.0",
     "ray[default, tune]>=2.8.0,<3",
@@ -30,17 +31,17 @@ dependencies = [
     "bayesian-optimization>=1.4.3,<2",
     "filelock>=3.13.1,<4",
     "s3fs>=2024,<2025",
-    "lightray>=0.2.3",
+    "omegaconf>=2.3.1",
 ]
 
 [project.scripts]
 train = "train.cli:main"
 
 [dependency-groups]
-dev = [
-    "pytest~=7.3",
-    "jupyter>=1.0.0",    
-]
+dev = ["pytest~=7.3", "jupyter>=1.0.0"]
+
+[project.optional-dependencies]
+jax = ["equinox>=0.13.1", "jax[cuda12]>=0.9.0", "optax>=0.2.8"]
 
 [tool.uv]
 
