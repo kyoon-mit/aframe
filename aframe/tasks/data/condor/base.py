@@ -14,17 +14,25 @@ class LDGCondorWorkflow(htcondor.HTCondorWorkflow):
     """
 
     condor_directory = PathParameter()
-    accounting_group_user = luigi.Parameter(default=os.getenv("LIGO_USERNAME"))
-    accounting_group = luigi.Parameter(default=os.getenv("LIGO_GROUP"))
+    accounting_group_user = luigi.OptionalParameter(
+        default=os.getenv("LIGO_USERNAME")
+    )
+    accounting_group = luigi.OptionalParameter(default=os.getenv("LIGO_GROUP"))
     request_disk = luigi.Parameter(default="1024 Kb")
     request_memory = luigi.Parameter(default="3267 Mb")
     request_cpus = luigi.IntParameter(default=1)
+    condor_submit_file = luigi.OptionalParameter(
+        default=None,
+        description="Path to an HTCondor submit file whose key=value options "
+        "are appended to the job config, overriding any defaults.",
+    )
 
     exclude_params_req = {
         "request_memory",
         "request_disk",
         "request_cpus",
         "condor_directory",
+        "condor_submit_file",
         "workflow",
     }
 
@@ -111,23 +119,39 @@ class LDGCondorWorkflow(htcondor.HTCondorWorkflow):
                 )
             )
 
+    def _parse_submit_file(self):
+        """Read key=value pairs from an HTCondor submit file."""
+        options = []
+        with open(self.condor_submit_file) as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                if "=" in line:
+                    key, _, value = line.partition("=")
+                    options.append((key.strip(), value.strip()))
+        return options
+
     def htcondor_job_config(self, config, job_num, branches):
         # build environment, and close the string
         environment = self.build_environment()
         environment += '"'
 
-        config.custom_content.append(("use_oauth_services", "scitokens"))
         config.custom_content.append(("environment", environment))
         config.custom_content.append(("stream_error", "True"))
         config.custom_content.append(("stream_output", "True"))
-        config.custom_content.append(
-            ("accounting_group", self.accounting_group)
-        )
-        config.custom_content.append(
-            ("accounting_group_user", self.accounting_group_user)
-        )
+        if self.accounting_group:
+            config.custom_content.append(
+                ("accounting_group", self.accounting_group)
+            )
+        if self.accounting_group_user:
+            config.custom_content.append(
+                ("accounting_group_user", self.accounting_group_user)
+            )
         config.custom_content.append(("request_disk", self.request_disk))
         config.custom_content.append(("request_cpus", self.request_cpus))
         self.append_memory(config)
         self.append_logs(config)
+        if self.condor_submit_file:
+            config.custom_content.extend(self._parse_submit_file())
         return config
