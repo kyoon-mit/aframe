@@ -224,6 +224,7 @@ class InferBase(
             shifts=shifts,
             background_fname=fname,
             injection_set_fname=self.injection_set_fname,
+            triton_address=f"{ip}:8001",
         )
 
         postprocessor = Postprocessor(

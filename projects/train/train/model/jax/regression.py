@@ -147,6 +147,15 @@ class JaxRegressionAframe(RegressionAframe):
 
         return jax_array_to_tensor(outputs)
 
+    def score(self, X: torch.Tensor) -> torch.Tensor:
+        """Detection score: negative mean predicted variance.
+
+        Lower uncertainty → higher score.
+        """
+        outputs = self(self._prepare_input(X))
+        _, var_pre = outputs.chunk(2, dim=-1)
+        return -self.var_activation(var_pre).mean(dim=-1)
+
     def training_step(self, batch):
         X, _, params = batch
 

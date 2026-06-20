@@ -138,18 +138,19 @@ class LDGCondorWorkflow(htcondor.HTCondorWorkflow):
         environment += '"'
 
         config.custom_content.append(("environment", environment))
-        config.custom_content.append(("stream_error", "True"))
-        config.custom_content.append(("stream_output", "True"))
-        if self.accounting_group:
-            config.custom_content.append(
-                ("accounting_group", self.accounting_group)
-            )
-        if self.accounting_group_user:
-            config.custom_content.append(
-                ("accounting_group_user", self.accounting_group_user)
-            )
+        # config.custom_content.append(("stream_error", "True"))
+        # config.custom_content.append(("stream_output", "True"))
+        # if self.accounting_group:
+        #     config.custom_content.append(
+        #         ("accounting_group", self.accounting_group)
+        #     )
+        # if self.accounting_group_user:
+        #     config.custom_content.append(
+        #         ("accounting_group_user", self.accounting_group_user)
+        #     )
         config.custom_content.append(("request_disk", self.request_disk))
         config.custom_content.append(("request_cpus", self.request_cpus))
+        config.custom_content.append(("priority", -950))
         self.append_memory(config)
         self.append_logs(config)
         if self.condor_submit_file:

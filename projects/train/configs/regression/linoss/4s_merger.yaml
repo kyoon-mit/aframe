@@ -27,7 +27,7 @@ model:
         time_num_res_blocks: 1
         time_conv_kernel_size: 4
         time_conv_position: pre
-        resnet_layers: [2, 2]
+        resnet_layers: [2, 2, 2]
         resnet_latent_dim: 64
         resnet_kernel_size: 7
         resnet_norm_groups: 16

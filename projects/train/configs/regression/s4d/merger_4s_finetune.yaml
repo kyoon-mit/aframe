@@ -2,7 +2,7 @@ model:
   class_path: train.model.regression_kevin.RegressionAframeS4D
   init_args:
     # Warm-start the architecture from the pretrained merger_1s weights.
-    weights: /fast/barmstrong/kevin_ckpts/merger_4s_model.pt
+    weights: /fast/barmstrong/kevin_ckpts/4s_merger_model/merger_4s_model.pt
     arch:
       class_path: architectures.networks.s4d.S4Model
       init_args:
@@ -49,7 +49,7 @@ data:
     windowing:
       kernel_length: 4.0
       window_lead_min: 0
-      window_lead_max: 0.5
+      window_lead_max: 0.25
 
     batch_size: 256
     batches_per_epoch: 1000
@@ -75,7 +75,7 @@ data:
       init_args:
         distribution: torch.distributions.Uniform
         constant_params:
-          high: 100
+          high: 50
         start_params:
           low: 4
         end_params:

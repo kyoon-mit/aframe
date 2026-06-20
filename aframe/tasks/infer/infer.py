@@ -10,7 +10,6 @@ import h5py
 import law
 import luigi
 import numpy as np
-import psutil
 from hermes.aeriel.monitor import ServerMonitor
 from hermes.aeriel.serve import serve
 from luigi.util import inherits
@@ -30,16 +29,15 @@ class DeployInferLocal(InferBase):
     @staticmethod
     def get_ip_address() -> str:
         """
-        Get the local nodes cluster-internal IP address
+        Get the cluster-internal hostname of the node serving Triton.
+
+        Returns the fully-qualified domain name (e.g.
+        "g145.internal.cluster.is.localnet") rather than a raw IP, so
+        that worker nodes resolve it via cluster DNS. Picking a raw IP
+        from the interface list is unreliable since it can return a
+        non-routable bridge/docker address.
         """
-        for _, addrs in psutil.net_if_addrs().items():
-            for addr in addrs:
-                if (
-                    addr.family == socket.AF_INET
-                    and not addr.address.startswith("127.")
-                ):
-                    return addr.address
-        raise ValueError("No valid IP address found")
+        return socket.getfqdn()
 
     def htcondor_workflow_run_context(self):
         """
