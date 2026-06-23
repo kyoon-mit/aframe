@@ -11,10 +11,22 @@ LitLinOSSGaussianNLL or LitS4DGaussianNLL).
 import torch
 from lightning.pytorch.cli import LightningCLI
 
+from projects.train.train.callbacks import PlotParamEstCallback
+
+
+class RegressionCLI(LightningCLI):
+    def before_test(self):
+        # This hook runs automatically ONLY during the `test` subcommand,
+        # after classes are instantiated but before the test routine starts.
+        self.trainer.callbacks.append(PlotParamEstCallback())
+
 
 def main():
     torch.set_float32_matmul_precision("high")
-    LightningCLI(save_config_callback=None)
+
+    # By letting `run=True` (default), subcommands like fit/test are enabled.
+    # LightningCLI automatically executes the appropriate stage after parsing.
+    RegressionCLI(save_config_callback=None)
 
 
 if __name__ == "__main__":

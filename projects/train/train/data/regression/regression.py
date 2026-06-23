@@ -9,6 +9,8 @@ Architecture:
                           → whitening → (X_whitened, params, empty_z)
     Validation: same pipeline over held-out background + validation waveforms,
                 paired with their chirp_mass labels.
+    Testing: same pipeline over testing background + testing waveforms,
+                paired with their target parameter labels.
 
 Batch format throughout: (X, y_params, z_empty)
     X          : (B, n_ifos, L) whitened strain, channels-first
@@ -235,6 +237,7 @@ class RegressionTimeDomainDataset(BaseAframeDataset):
         *args,
         target_parameters: tuple[str, ...] = ("chirp_mass",),
         n_val_waveforms: int = 4096,
+        n_test_waveforms: int = 4096,
         val_batches_fraction: float = 0.1,
         waveforms_dir: str = ".",
         num_files_per_batch: int = 1,
@@ -242,12 +245,9 @@ class RegressionTimeDomainDataset(BaseAframeDataset):
         persistent_workers: bool = True,
         train_waveform_file: str | None = None,
         val_waveform_file: str | None = None,
+        test_waveform_file: str | None = None,
         **kwargs,
     ) -> None:
-        # base class requires waveforms_dir/num_files_per_batch; defaults are
-        # harmless placeholders when using on-the-fly waveform generation.
-        # Defaults must be non-None so Lightning's save_hyperparameters() never
-        # captures None, which would crash base.py's get_data_dir call.
         super().__init__(
             *args,
             waveforms_dir=waveforms_dir,
@@ -256,23 +256,19 @@ class RegressionTimeDomainDataset(BaseAframeDataset):
         )
         self.target_parameters = target_parameters
         self.n_val_waveforms = n_val_waveforms
+        self.n_test_waveforms = n_test_waveforms
         self.prefetch_factor = prefetch_factor
         self.persistent_workers = persistent_workers
 
-        # Disk-waveform mode: read pre-generated cross/plus polarizations (and
-        # their masses) lazily from these HDF5 files instead of generating
-        # on the fly. We deliberately do NOT use WaveformLoader here because its
-        # __init__ eagerly reads the whole file via the ledger, which OOMs on
-        # multi-100GB sets. The generator stays as ``waveform_sampler`` purely
-        # for slice geometry (right_pad/window_offset) and CLI arg-linking.
         self.train_waveform_file = train_waveform_file
         self.val_waveform_file = val_waveform_file
+        self.test_waveform_file = test_waveform_file
         self._wf_resampler = None
         if train_waveform_file is not None:
             self.waveforms_from_disk = True
 
     # ------------------------------------------------------------------ #
-    # Setup                                                                #
+    # Setup                                                              #
     # ------------------------------------------------------------------ #
 
     def train_val_split(self):
@@ -281,15 +277,12 @@ class RegressionTimeDomainDataset(BaseAframeDataset):
         import glob as _glob
         from pathlib import Path as _Path
 
-        # Try the standard aframe layout first ({background_dir}/background/*.hdf5)
         fnames = _glob.glob(f"{self.background_dir}/background/*.hdf5")
         if not fnames:
-            # Fall back to flat directory (files directly in background_dir)
             fnames = _glob.glob(f"{self.background_dir}/*.hdf5")
         fnames = sorted([_Path(f) for f in fnames])
         durations = [int(f.stem.split("-")[-1]) for f in fnames]
 
-        # Drop files too short to fit even one kernel
         min_dur = self.sample_length  # seconds
         kept = [(f, d) for f, d in zip(fnames, durations) if d >= min_dur]
         n_dropped = len(fnames) - len(kept)
@@ -316,10 +309,6 @@ class RegressionTimeDomainDataset(BaseAframeDataset):
         return train_fnames, valid_fnames
 
     def slice_waveforms(self, waveforms: torch.Tensor) -> torch.Tensor:
-        # If the waveform sampler has a window_offset attribute (e.g. CBCGenerator),
-        # shift signal_idx backwards by that many seconds so the model window ends
-        # window_offset seconds before physical coalescence.
-        # This avoids touching base.py.
         window_offset = getattr(self.waveform_sampler, "window_offset", 0.0)
         if window_offset == 0.0:
             return super().slice_waveforms(waveforms)
@@ -363,43 +352,51 @@ class RegressionTimeDomainDataset(BaseAframeDataset):
         self.build_transforms()
         self.transforms_to_device()
 
-        # Build the fixed validation waveform set. In disk mode this is loaded
-        # (lazily) from val_waveform_file; otherwise it is sampled once from the
-        # generator's training prior with a fixed seed, so validation waveforms
-        # are consistent across epochs and across a resume.
+        # Build fixed validation and testing waveform sets.
         if self.waveforms_from_disk:
             self._setup_disk_val(world_size, rank)
+            if self.test_waveform_file is not None:
+                self._setup_disk_test(world_size, rank)
         else:
             rng_state = torch.get_rng_state()
+            
+            # Validation Prior Setup
             torch.manual_seed(42 + rank)
-            n = self.n_val_waveforms // world_size
+            n_val = self.n_val_waveforms // world_size
             self._val_prior_params = self.waveform_sampler.training_prior(
-                n, device="cpu"
+                n_val, device="cpu"
             )
             self.val_params = _compute_target_params_tensor(
                 self._val_prior_params, self.target_parameters
             )
+            
+            # Testing Prior Setup
+            torch.manual_seed(1042 + rank)
+            n_test = self.n_test_waveforms // world_size
+            self._test_prior_params = self.waveform_sampler.training_prior(
+                n_test, device="cpu"
+            )
+            self.test_params = _compute_target_params_tensor(
+                self._test_prior_params, self.target_parameters
+            )
+            
             torch.set_rng_state(rng_state)
 
-        # Fixed validation SNR distribution, decoupled from the training SNR
-        # curriculum. Using the curriculum's converged end-state (min SNR =
-        # min_min_snr) keeps the validation difficulty constant across epochs
-        # and across a resume, so val metrics are a stable benchmark. (The
-        # training curriculum would otherwise make val signals easy->hard as it
-        # walks min_snr from max_min_snr down to min_min_snr.)
         snr = self.snr_sampler
         if snr is not None:
             from ml4gw.distributions import PowerLaw
             self._val_snr_dist = PowerLaw(snr.min_min_snr, snr.max_snr, snr.alpha)
+            # Test set SNR range (floor 8 -> matches where the model performs;
+            # note the SV pipeline injects down to ~4, so revert to 4.0 for
+            # apples-to-apples with sensitive volume).
+            self._test_snr_dist = PowerLaw(8.0, snr.max_snr, snr.alpha)
         else:
             self._val_snr_dist = None
+            self._test_snr_dist = None
 
     def _setup_disk_val(self, world_size: int, rank: int) -> None:
         """Load a fixed validation set (polarizations + target params) from
-        ``val_waveform_file`` using lazy h5py slicing (never reads the whole
-        file), and build a waveform resampler when the file's sample rate
-        differs from the working ``sample_rate`` (e.g. premerger 2048 -> 256).
-        The same resampler is reused for the streamed training waveforms.
+        ``val_waveform_file`` using lazy h5py slicing.
         """
         import torchaudio
 
@@ -437,16 +434,52 @@ class RegressionTimeDomainDataset(BaseAframeDataset):
             f"{'yes' if self._wf_resampler is not None else 'no'})"
         )
 
+    def _setup_disk_test(self, world_size: int, rank: int) -> None:
+        """Load a fixed test set (polarizations + target params) from
+        ``test_waveform_file`` using lazy h5py slicing.
+        """
+        import torchaudio
+
+        if self.test_waveform_file is None:
+            raise ValueError(
+                "Disk waveform mode requires test_waveform_file to be set."
+            )
+        target_rate = int(self.hparams.sample_rate)
+        with h5py.File(self.test_waveform_file, "r") as f:
+            wf_rate = int(f.attrs["sample_rate"])
+            n_total = f["waveforms/cross"].shape[0]
+            n = min(self.n_test_waveforms // max(world_size, 1), n_total)
+            rng = np.random.default_rng(42 + rank)
+            idx = np.sort(rng.choice(n_total, size=n, replace=False))
+            cross = f["waveforms/cross"][idx]
+            plus = f["waveforms/plus"][idx]
+            m1 = f["parameters/mass_1"][idx]
+            m2 = f["parameters/mass_2"][idx]
+
+        test_resampler = (
+            torchaudio.transforms.Resample(wf_rate, target_rate)
+            if wf_rate != target_rate
+            else None
+        )
+        waveforms = torch.from_numpy(np.stack([cross, plus], axis=1)).float()
+        if test_resampler is not None:
+            waveforms = test_resampler(waveforms)
+        self._test_waveforms = waveforms  # (n, 2, L) at working sample_rate
+        self.test_params = torch.from_numpy(
+            _compute_target_params(m1, m2, self.target_parameters)
+        ).float()
+        self._logger.info(
+            f"Loaded {n} disk test waveforms from {self.test_waveform_file} "
+            f"(resample {wf_rate} Hz -> {target_rate} Hz: "
+            f"{'yes' if test_resampler is not None else 'no'})"
+        )
+
     # ------------------------------------------------------------------ #
-    # Batch transfer hooks                                                 #
+    # Batch transfer hooks                                               #
     # ------------------------------------------------------------------ #
 
     def on_before_batch_transfer(self, batch, _):
         if self.trainer.training and self.waveforms_from_disk:
-            # Unpack (pol, params) tuple before device transfer; resample the
-            # disk polarizations to the working sample_rate if needed (e.g.
-            # premerger 2048 -> 256), then slice so only the kernel-sized
-            # window is transferred to the device.
             X, (polarizations, params) = batch
             if self._wf_resampler is not None:
                 polarizations = self._wf_resampler(polarizations.float())
@@ -465,20 +498,16 @@ class RegressionTimeDomainDataset(BaseAframeDataset):
         elif self.trainer.validating or self.trainer.sanity_checking:
             [X] = batch
             batch = self._inject_fixed_val(X)
+        elif self.trainer.testing:
+            [X] = batch
+            batch = self._inject_fixed_test(X)
         return batch
 
     # ------------------------------------------------------------------ #
-    # Injection                                                            #
+    # Injection                                                          #
     # ------------------------------------------------------------------ #
 
-    def _project_inject_whiten(self, X, waveforms, psds, params, snrs=None):
-        """Shared projection + injection + whitening; returns regression batch.
-
-        ``snrs`` may be passed pre-sampled (validation path, fixed distribution).
-        When ``None`` it is drawn from the training SNR curriculum sampler, which
-        advances the curriculum step — so it must only be left ``None`` for
-        training batches, never validation.
-        """
+    def _project_inject_whiten(self, X, waveforms, psds, params, snrs=None, return_bg=False):
         B = X.shape[0]
         dec, psi, phi = self.sample_extrinsic(X)
         if snrs is None:
@@ -492,9 +521,19 @@ class RegressionTimeDomainDataset(BaseAframeDataset):
             cross=waveforms[:, 0], plus=waveforms[:, 1],
         )
         kernels = sample_kernels(responses, kernel_size=X.size(-1), coincident=True)
+        # Whitened background (no injection) for the test detection plots.
+        X_bg = self.whitener(X, psds) if return_bg else None
         X = self.whitener(X + kernels, psds)
-        empty_z = torch.empty(B, 0, device=X.device)
-        return X, params, empty_z
+        # Expose the per-sample SNR as the 3rd batch element so the test step can
+        # plot against it. Train/val ignore this element (they unpack `X, y, _`).
+        z = (
+            snrs.reshape(B, 1).float()
+            if snrs is not None
+            else torch.empty(B, 0, device=X.device)
+        )
+        if return_bg:
+            return X, params, z, X_bg
+        return X, params, z
 
     def _resample(self, X: torch.Tensor) -> torch.Tensor:
         if self.resampler is not None:
@@ -502,11 +541,6 @@ class RegressionTimeDomainDataset(BaseAframeDataset):
         return X
 
     def _maybe_sync_curriculum_step(self):
-        """Fast-forward the SNR curriculum when resuming a checkpoint saved
-        before the curriculum step was persisted (`_step` still 0 but training
-        has already advanced). Without this, such a resume restarts the
-        curriculum from scratch. Runs once; harmless for fresh runs (global_step
-        == 0) and for post-fix checkpoints (`_step` already restored > 0)."""
         if getattr(self, "_curriculum_synced", False):
             return
         self._curriculum_synced = True
@@ -520,7 +554,6 @@ class RegressionTimeDomainDataset(BaseAframeDataset):
 
     @torch.no_grad()
     def inject(self, X, waveforms, params):
-        """Disk path: waveforms and params already loaded; inject all samples."""
         self._maybe_sync_curriculum_step()
         X = self._resample(X)
         X, psds = self.psd_estimator(X)
@@ -535,7 +568,6 @@ class RegressionTimeDomainDataset(BaseAframeDataset):
 
     @torch.no_grad()
     def _inject_from_generator(self, X):
-        """On-the-fly path: sample prior, generate waveforms, extract params."""
         self._maybe_sync_curriculum_step()
         X = self._resample(X)
         X, psds = self.psd_estimator(X)
@@ -545,33 +577,20 @@ class RegressionTimeDomainDataset(BaseAframeDataset):
         B = X.shape[0]
         prior_params = self.waveform_sampler.training_prior(B, device=X.device)
         hc, hp = self.waveform_sampler(**prior_params)
-        waveforms = torch.stack([hc, hp], dim=1).float()  # (B, 2, L_wf)
+        waveforms = torch.stack([hc, hp], dim=1).float()
 
-        # Slice to kernel length (generator produces full-duration waveforms)
         waveforms = self.slice_waveforms(waveforms)
         params = _compute_target_params_tensor(prior_params, self.target_parameters)
         return self._project_inject_whiten(X, waveforms, psds, params)
 
     @torch.no_grad()
     def _inject_fixed_val(self, X):
-        """Validation: inject fixed waveforms (reproducible across epochs).
-
-        All random draws here (waveform selection, extrinsic angles, SNR) are
-        seeded deterministically with a per-batch counter that resets at the
-        start of each validation epoch, so the validation set is identical every
-        epoch and across a resume. SNRs come from the fixed ``_val_snr_dist``,
-        never the training curriculum sampler.
-        """
         if self.waveforms_from_disk:
             return self._inject_fixed_val_disk(X)
         X = self._resample(X)
         X, psds = self.psd_estimator(X)
-        # No random augmentation (inverter/reverser) during validation
 
         B = X.shape[0]
-
-        # Reset the per-batch seed counter whenever global_step has advanced
-        # (i.e. a new validation epoch), so each epoch replays the same val set.
         gstep = self.trainer.global_step
         if gstep != getattr(self, "_val_seed_gstep", None):
             self._val_seed_gstep = gstep
@@ -599,14 +618,6 @@ class RegressionTimeDomainDataset(BaseAframeDataset):
 
     @torch.no_grad()
     def _inject_fixed_val_disk(self, X):
-        """Validation with the fixed disk waveform set loaded in setup.
-
-        Mirrors ``_inject_fixed_val`` but draws waveforms/params from the
-        pre-loaded ``_val_waveforms``/``val_params`` (already at the working
-        sample rate) instead of generating them. Same deterministic per-batch
-        seeding and fixed SNR distribution, and returns the same
-        ``(X, params, empty_z)`` batch the model's validation step expects.
-        """
         X = self._resample(X)
         X, psds = self.psd_estimator(X)
 
@@ -632,8 +643,74 @@ class RegressionTimeDomainDataset(BaseAframeDataset):
         torch.set_rng_state(rng_state)
         return out
 
+    @torch.no_grad()
+    def _inject_fixed_test(self, X):
+        """Testing: inject fixed waveforms (reproducible across test execution)."""
+        if self.waveforms_from_disk:
+            return self._inject_fixed_test_disk(X)
+        X = self._resample(X)
+        X, psds = self.psd_estimator(X)
+
+        B = X.shape[0]
+        gstep = self.trainer.global_step
+        if gstep != getattr(self, "_test_seed_gstep", None):
+            self._test_seed_gstep = gstep
+            self._test_batch_idx = 0
+        rng_state = torch.get_rng_state()
+        torch.manual_seed(5678 + self._test_batch_idx)  # Decoupled seed for test routing
+        self._test_batch_idx += 1
+
+        idx = torch.randperm(len(self.test_params))[:B]
+        prior_params = {
+            k: v[idx].to(X.device) for k, v in self._test_prior_params.items()
+        }
+        hc, hp = self.waveform_sampler(**prior_params)
+        waveforms = torch.stack([hc, hp], dim=1).float()
+        waveforms = self.slice_waveforms(waveforms)
+        params = self.test_params[idx].to(X.device)
+        snrs = (
+            self._test_snr_dist.sample((B,)).to(X.device)
+            if self._test_snr_dist is not None
+            else None
+        )
+        out = self._project_inject_whiten(
+            X, waveforms, psds, params, snrs=snrs, return_bg=True
+        )
+        torch.set_rng_state(rng_state)
+        return out
+
+    @torch.no_grad()
+    def _inject_fixed_test_disk(self, X):
+        """Testing with the fixed disk waveform set loaded in setup."""
+        X = self._resample(X)
+        X, psds = self.psd_estimator(X)
+
+        B = X.shape[0]
+        gstep = self.trainer.global_step
+        if gstep != getattr(self, "_test_seed_gstep", None):
+            self._test_seed_gstep = gstep
+            self._test_batch_idx = 0
+        rng_state = torch.get_rng_state()
+        torch.manual_seed(5678 + self._test_batch_idx)
+        self._test_batch_idx += 1
+
+        idx = torch.randperm(len(self.test_params))[:B]
+        waveforms = self._test_waveforms[idx].to(X.device).float()
+        waveforms = self.slice_waveforms(waveforms)
+        params = self.test_params[idx].to(X.device)
+        snrs = (
+            self._test_snr_dist.sample((B,)).to(X.device)
+            if self._test_snr_dist is not None
+            else None
+        )
+        out = self._project_inject_whiten(
+            X, waveforms, psds, params, snrs=snrs, return_bg=True
+        )
+        torch.set_rng_state(rng_state)
+        return out
+
     # ------------------------------------------------------------------ #
-    # Checkpoint state (curriculum must survive resume)                    #
+    # Checkpoint state (curriculum must survive resume)                  #
     # ------------------------------------------------------------------ #
 
     def state_dict(self) -> dict:
@@ -649,13 +726,12 @@ class RegressionTimeDomainDataset(BaseAframeDataset):
             snr.load_state_dict(state_dict["snr_sampler"])
 
     # ------------------------------------------------------------------ #
-    # Dataloaders                                                          #
+    # Dataloaders                                                        #
     # ------------------------------------------------------------------ #
 
     def train_dataloader(self) -> ZippedDataset:
         from ml4gw.dataloading import Hdf5TimeSeriesDataset
 
-        # kernel_size uses raw (pre-resample) rate; resampling happens per batch
         raw_kernel = int(self._raw_sample_rate * self.sample_length)
         bg_dataset = Hdf5TimeSeriesDataset(
             self.train_fnames,
@@ -678,7 +754,6 @@ class RegressionTimeDomainDataset(BaseAframeDataset):
         )
 
         if not self.waveforms_from_disk:
-            # Generator path: background only; waveforms produced in inject().
             return bg_loader
 
         waveform_loader = _WaveformParamLoader(
@@ -723,6 +798,31 @@ class RegressionTimeDomainDataset(BaseAframeDataset):
         )
         return torch.utils.data.DataLoader(
             val_dataset,
+            num_workers=self.num_workers,
+            pin_memory=pin_memory,
+            prefetch_factor=self.prefetch_factor if self.num_workers > 0 else None,
+            persistent_workers=self.persistent_workers if self.num_workers > 0 else False,
+        )
+
+    def test_dataloader(self):
+        from ml4gw.dataloading import Hdf5TimeSeriesDataset
+
+        # Use many more batches at test time so high-SNR bins are well populated.
+        test_batches = max(1, int(self.batches_per_epoch) * 8)
+        test_dataset = Hdf5TimeSeriesDataset(
+            self.valid_fnames,
+            channels=self.hparams.ifos,
+            kernel_size=int(self._raw_sample_rate * self.sample_length),
+            batch_size=self.hparams.batch_size,
+            batches_per_epoch=test_batches,
+            coincident=False,
+            num_files_per_batch=max(1, len(self.valid_fnames) // 4),
+        )
+        pin_memory = isinstance(
+            self.trainer.accelerator, pl.accelerators.CUDAAccelerator
+        )
+        return torch.utils.data.DataLoader(
+            test_dataset,
             num_workers=self.num_workers,
             pin_memory=pin_memory,
             prefetch_factor=self.prefetch_factor if self.num_workers > 0 else None,

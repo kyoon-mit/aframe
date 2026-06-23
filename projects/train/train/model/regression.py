@@ -1,5 +1,8 @@
 import math
 
+import os
+import glob
+import numpy as np
 import torch
 import torch.nn as nn
 
@@ -105,6 +108,7 @@ class _RegressionBase(pl.LightningModule):
         y_mean: list[float] | None = None,
         y_std: list[float] | None = None,
         normalize_input: bool = False,
+        merge_test_csv: bool = True,
     ) -> None:
         super().__init__()
         if d_output % 2 != 0:
@@ -117,6 +121,9 @@ class _RegressionBase(pl.LightningModule):
         self.normalize_input = normalize_input
         self.criterion = BetaNLLLoss(beta=beta_nll)
         self.var_activation = nn.Softplus()
+
+        # Control whether test_epoch_end merges per-rank CSVs and computes final metrics
+        self.merge_test_csv = merge_test_csv
 
         # Output normalization buffers — saved in checkpoint, auto-moved to device.
         # Model trains in normalized space; inference un-normalizes for physical outputs.
@@ -174,16 +181,32 @@ class _RegressionBase(pl.LightningModule):
         return loss
 
     def test_step(self, batch, batch_idx):
-        X_sequence, y_target, _ = batch
-        outputs = self(self._prepare_input(X_sequence))
-        mean_norm = outputs[:, :self.n_vars]
-        sigma_norm = torch.sqrt(self.var_activation(outputs[:, self.n_vars:]))
-        mean_phys, sigma_phys = self._unnormalize_output(mean_norm, sigma_norm)
-        return {
+        X_sequence, y_target, snr, X_bg = batch
+
+        def _predict(x):
+            o = self(self._prepare_input(x))
+            mn = o[:, :self.n_vars]
+            sn = torch.sqrt(self.var_activation(o[:, self.n_vars:]))
+            return self._unnormalize_output(mn, sn)  # (mean_phys, sigma_phys)
+
+        mean_s, sigma_s = _predict(X_sequence)
+        # Return CPU tensors only; CSV + plotting are handled by PlotParamEstCallback.
+        out = {
             'y_true': y_target.detach().cpu(),
-            'y_pred': mean_phys.detach().cpu(),
-            'y_sigma': sigma_phys.detach().cpu(),
+            'y_pred': mean_s.detach().cpu(),
+            'y_sigma': sigma_s.detach().cpu(),
         }
+        if snr is not None and snr.numel() > 0:
+            out['snr'] = snr.reshape(-1).detach().cpu()
+        if X_bg is not None:
+            mean_b, sigma_b = _predict(X_bg)
+            out['y_pred_bg'] = mean_b.detach().cpu()
+            out['y_sigma_bg'] = sigma_b.detach().cpu()
+        return out
+
+    # Test predictions, metrics, and plots are produced by PlotParamEstCallback
+    # (writes param_est_results.csv + figures); the model no longer writes a
+    # separate, redundant test_predictions.csv.
 
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(
