@@ -528,7 +528,7 @@ requires-dist = [
     { name = "boto3", specifier = "~=1.30" },
     { name = "fsspec", extras = ["s3"], specifier = ">=2024,<2025" },
     { name = "jsonargparse", specifier = ">=4.27.1,<5" },
-    { name = "ml4gw", specifier = ">=0.8.0" },
+    { name = "ml4gw", specifier = ">=0.8.3" },
     { name = "ml4gw-hermes", extras = ["torch"], specifier = ">=0.2.1" },
     { name = "nvidia-cudnn-cu11", specifier = "==8.9.6.50" },
     { name = "tensorrt", specifier = "==8.5.2.2" },
@@ -1980,7 +1980,7 @@ dependencies = [
 requires-dist = [
     { name = "astropy", specifier = ">=6.0.1" },
     { name = "h5py", specifier = "~=3.6" },
-    { name = "ml4gw", specifier = ">=0.8.0" },
+    { name = "ml4gw", specifier = ">=0.8.3" },
     { name = "numpy", specifier = ">=1.26.4,<2" },
     { name = "s3fs", specifier = ">=2024,<2025" },
 ]

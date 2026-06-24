@@ -26,7 +26,7 @@ dev = [
 requires-dist = [
     { name = "einops", specifier = ">=0.8,<0.9" },
     { name = "h5py", specifier = ">=3.9.0,<4" },
-    { name = "ml4gw", specifier = ">=0.7.2" },
+    { name = "ml4gw", specifier = ">=0.8.3" },
     { name = "numpy", specifier = "~=1.26" },
 ]
 
