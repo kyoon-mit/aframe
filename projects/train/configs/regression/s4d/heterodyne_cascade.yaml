@@ -168,6 +168,8 @@ trainer:
     - class_path: lightning.pytorch.callbacks.LearningRateMonitor
       init_args:
         logging_interval: epoch
+    - class_path: train.metric.plotting.ChirpMassErrorVsSnrCallback
+    - class_path: train.metric.plotting.TrueVsPredictedScatterCallback
 
   strategy: auto
   devices: auto

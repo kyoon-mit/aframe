@@ -30,6 +30,14 @@ class InferParameters(law.Task):
     sequence_id = luigi.IntParameter()
     model_name = luigi.Parameter()
     model_version = luigi.IntParameter()
+    triton_port = luigi.IntParameter(
+        default=8001,
+        description="Triton gRPC port. The HTTP port is derived as "
+        "triton_port - 1 and the metrics port as triton_port + 1 "
+        "(so the default 8001 keeps the standard 8000/8001/8002). "
+        "Use a distinct port (e.g. 8011) to run a second server on the "
+        "same node without colliding on the default ports.",
+    )
     streams_per_gpu = luigi.IntParameter()
     rate_per_gpu = luigi.FloatParameter(
         default=100.0, description="Inferences per second per gpu"
@@ -216,6 +224,9 @@ class InferBase(
         ip = os.getenv("AFRAME_TRITON_IP")
         self.tmp_dir.mkdir(exist_ok=True, parents=True)
         fname, shifts = self.branch_data
+        # HTTP/gRPC/metrics ports are grouped around the gRPC port
+        # (default 8000/8001/8002); see `triton_port` in InferParameters.
+        metrics_port = self.triton_port + 1
         sequence = Sequence(
             ifos=self.ifos,
             batch_size=self.batch_size,
@@ -224,7 +235,8 @@ class InferBase(
             shifts=shifts,
             background_fname=fname,
             injection_set_fname=self.injection_set_fname,
-            triton_address=f"{ip}:8001",
+            triton_address=f"{ip}:{self.triton_port}",
+            metrics_port=metrics_port,
         )
 
         postprocessor = Postprocessor(
@@ -238,7 +250,7 @@ class InferBase(
         )
 
         client = InferenceClient(
-            address=f"{ip}:8001",
+            address=f"{ip}:{self.triton_port}",
             model_name=self.model_name,
             model_version=self.model_version,
             callback=sequence,

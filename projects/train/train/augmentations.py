@@ -83,12 +83,18 @@ class SnrRescaler(torch.nn.Module):
         self.highpass = highpass
         self.lowpass = lowpass
 
-    def forward(
+    def compute_snr(
         self,
         responses: gw.WaveformTensor,
         psds: torch.Tensor,
-        target_snrs: Union[BatchTensor, float, None],
-    ) -> gw.WaveformTensor:
+    ) -> torch.Tensor:
+        """
+        Compute the network SNR of ``responses`` relative to ``psds``,
+        interpolating the PSDs to the frequency resolution implied by the
+        length of ``responses``. This makes it possible to compute the SNR of
+        an arbitrary slice (e.g. the windowed kernel actually injected) rather
+        than the full waveform.
+        """
         # we can either specify one PSD for all batch
         # elements, or a PSD for each batch element
         if psds.ndim > 2 and len(psds) != len(responses):
@@ -114,14 +120,22 @@ class SnrRescaler(torch.nn.Module):
             if reshape:
                 psds = psds.view(-1, num_freqs)
 
-        # compute the SNRs of the existing signals
-        snrs = gw.compute_network_snr(
+        return gw.compute_network_snr(
             responses,
             psds,
             self.sample_rate,
             self.highpass,
             self.lowpass,
         )
+
+    def forward(
+        self,
+        responses: gw.WaveformTensor,
+        psds: torch.Tensor,
+        target_snrs: Union[BatchTensor, float, None],
+    ) -> gw.WaveformTensor:
+        # compute the SNRs of the existing signals
+        snrs = self.compute_snr(responses, psds)
 
         if target_snrs is None:
             # if we didn't specify any target SNRs, then shuffle

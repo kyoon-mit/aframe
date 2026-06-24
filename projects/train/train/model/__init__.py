@@ -10,3 +10,4 @@ from .supervised import (
     SupervisedMultiModalAframe,
     SupervisedTimeSpectrogramAframe,
 )
+from .true_heterodyne_model import TrueHeterodyneAframe

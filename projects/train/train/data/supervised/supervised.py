@@ -87,6 +87,13 @@ class SupervisedAframeDataset(BaseAframeDataset):
             responses, kernel_size=X.size(-1), coincident=True
         )
 
+        # compute the SNR of only the portion of the signal that
+        # actually lands inside the injected window, so it reflects
+        # what the model sees rather than the full-waveform SNR
+        params["window_snr"] = self.projector.rescaler.compute_snr(
+            kernels, psds[mask]
+        )
+
         # perform augmentations on the responses themselves,
         # keep track of which indices have been augmented
         swap_indices = mute_indices = []

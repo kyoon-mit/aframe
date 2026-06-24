@@ -1,17 +1,21 @@
-# LinOSS (JAX/Equinox) chirp-mass regression config.
+# LinOSS (JAX/Equinox) window-SNR regression config.
 #
-# Same objective as configs/regression/regression.yaml (predict chirp_mass
-# from whitened strain) but using the JAX LinOSS architecture with a
-# GaussianNLL (BetaNLL) + spread objective via JaxRegressionAframe.
+# Identical architecture/data setup to configs/regression/linoss/4s_merger.yaml
+# but the regression target is `window_snr` (the SNR of only the portion of the
+# signal that lands inside the injected kernel) instead of chirp mass.
 #
-# Key points (mirroring regression.yaml):
+# The training target (`window_snr`) is computed per-batch in
+# `SupervisedAframeDataset.inject`. It is *not* computed on the validation path,
+# so validation falls back to the full-waveform `snr` via `val_target_param`.
+#
+# Key points:
 #   - waveform_prob: 1.0  (every sample is injected)
-#   - ChirpMass param transform supplies the regression target
-#   - d_output: 2  (chirp_mass mean + pre-Softplus log-variance)
+#   - target_param: window_snr  (training regression target)
+#   - val_target_param: snr     (validation proxy target)
+#   - d_output: 2  (window_snr mean + pre-Softplus log-variance)
 model:
   class_path: train.model.jax.JaxRegressionAframe
   init_args:
-    load_from_checkpoint: "/home/barmstrong/aframe_official/projects/train/outputs/aframe/emu9766a/checkpoints/checkpoint_step_26000_metric_0.2578853935969125.eqx"
     arch:
       class_path: architectures.regression.RegressionTimeDomainLinOSS
       init_args:
@@ -32,14 +36,16 @@ model:
         resnet_latent_dim: 64
         resnet_kernel_size: 7
         resnet_norm_groups: 16
-        mlp_width: 64
+        mlp_width: 128
         mlp_depth: 2
-        d_output: 2 # chirp_mass mean + pre-Softplus log-var
+        d_output: 2 # window_snr mean + pre-Softplus log-var
         seed: 0
-    d_output: 2 # chirp_mass mean + pre-Softplus log-var
+    d_output: 2 # window_snr mean + pre-Softplus log-var
     normalize_input: true
-    y_mean: [1.2] # centre of BNS chirp_mass prior [0.87, 2.22]
-    y_std: [0.35] # approx std of uniform [0.87, 2.22]
+    target_param: window_snr # training regression target
+    val_target_param: snr # validation proxy (window_snr not on val path)
+    y_mean: [50.0] # centre of SNR prior Uniform(4, 100)
+    y_std: [28.0] # approx std of uniform(4, 100): (100-4)/sqrt(12)
     learning_rate: 1e-4
     weight_decay: 0.01
     warmup_steps: 1000
@@ -63,8 +69,8 @@ data:
 
     sample_rate: 2048
     windowing:
-      kernel_length: 4.0
-      window_lead_min: 0
+      kernel_length: 2.0
+      window_lead_min: -3
       window_lead_max: 0.25
 
     batch_size: 256
@@ -90,15 +96,12 @@ data:
         constant_params:
           maximum: 50
         start_params:
-          minimum: 20
+          minimum: 15
           index: -1
         end_params:
           minimum: 8
           index: -3
         decay_steps: 10000
-
-    param_transforms:
-      - class_path: train.transforms.ChirpMass
 
     waveform_sampler:
       class_path: train.data.waveforms.WaveformLoader
@@ -127,24 +130,28 @@ trainer:
   logger:
     - class_path: train.callbacks.AframeWandbLogger
       init_args:
-        name: "aframe_linoss_regression_4s_merger"
+        name: "aframe_linoss_regression_4s_window_snr"
         save_dir: outputs
         project: "aframe"
   callbacks:
     - class_path: lightning.pytorch.callbacks.EarlyStopping
       init_args:
         # GaussianNLL validation objective; lower is better.
-        monitor: "validation/TimeSlideAUROC_epoch"
-        mode: "max"
-        patience: 100
+        monitor: "validation/gaussnll"
+        mode: "min"
+        patience: 50
     # equinox-aware checkpointer; the default ModelCheckpoint cannot
     # serialise the JAX/equinox model living on the LightningModule.
     - class_path: train.utils.jax.save_model.JAXCheckpointManager
       init_args:
-        monitor: "validation/TimeSlideAUROC_epoch"
-        mode: "max"
-        save_top_k: 5
+        monitor: "validation/gaussnll"
+        mode: "min"
+        save_top_k: 3
         warmup_steps: 1000
+
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: epoch
 
     - class_path: train.metric.plotting.SnrVsScoreScatterCallback
 

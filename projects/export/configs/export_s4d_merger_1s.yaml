@@ -1,0 +1,33 @@
+# Export config for the S4D 1s-merger SV base repository.
+#
+# No-compile export: the aframe model is served via the Triton python backend
+# copied from `aframe_model_dir` (see runs/sv_template/aframe), so no weights /
+# batch_file / TensorRT compile is needed. Only the snapshotter + preprocessor
+# are (re)built, here for the 1s geometry (kernel_length=1 -> X is 2x2048).
+#
+# Preprocessor params mirror the 1s training config
+# (projects/train/configs/regression/s4d/merger_1s_finetune.yaml):
+# fduration=2, fftlength=2, highpass=20, sample_rate=2048.
+
+num_ifos: 2
+kernel_length: 1.0
+inference_sampling_rate: 16
+sample_rate: 2048
+batch_size: 128
+fduration: 2
+psd_length: 64
+preprocessor:
+  class_path: utils.preprocessing.BatchWhitener
+  init_args:
+    kernel_length: 1.0
+    sample_rate: 2048
+    inference_sampling_rate: 16
+    batch_size: 128
+    fduration: 2
+    fftlength: 2
+    highpass: 20
+streams_per_gpu: 6
+preproc_instances: 3
+num_outputs: 1
+clean: true
+verbose: true

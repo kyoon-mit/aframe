@@ -1,37 +1,31 @@
 model:
-  class_path: train.model.regression_kevin.RegressionAframeS4D
+  class_path: train.model.TrueHeterodyneAframe
   init_args:
-    # Warm-start the architecture from the pretrained merger_1s weights.
-    weights: /fast/barmstrong/kevin_ckpts/1s_merger_model/merger_1s_model.pt
     arch:
-      class_path: architectures.networks.s4d.S4Model
+      class_path: architectures.supervised.SupervisedTimeDomainResNet
       init_args:
-        d_input: 2 # H1, L1
-        d_output: 2 # chirp_mass mean + log-var
-        d_model: 64
-        d_state: 64
-        n_layers: 4
-        dropout: 0.2
-        dt_min: 1.0e-3
-        dt_max: 5.0
-        lr: 2.0e-4 # SSM parameter learning rate
-    d_output: 2 # must match arch d_output
-    normalize_input: true
-    y_mean: [1.2] # centre of BNS chirp_mass prior [0.87, 2.22]
-    y_std: [0.39] # from merger_1s checkpoint
-    base_lr: 1.0e-5
-    weight_decay: 0.01
-    beta_nll: 0.3
-    lambda_spread: 0.0
-    lr_scheduler:
-      class_path: train.model.regression_kevin.WarmupCosineAnnealingWarmRestarts
-      init_args:
-        warmup_epochs: 8
-        T_0: 10
-        T_mult: 2
-        eta_min: 1.0e-7
-        warmup_start_factor: 1.0e-2
-    lr_scheduler_interval: epoch
+        num_ifos: 2 # H1, L1
+        sample_rate: 2048
+        kernel_length: 4.0
+        layers: [3, 4, 6, 3]
+        kernel_size: 21
+        norm_layer:
+          class_path: ml4gw.nn.norm.GroupNorm1DGetter
+          init_args:
+            groups: 16
+
+    # heterodyne args: must match the data sample_rate / kernel_length
+    sample_rate: 2048
+    kernel_length: 4.0
+    # pool of chirp masses sampled for background segments (no true mass)
+    background_chirp_mass_file: data/bns/uniform_chirp_mass_waveforms/training_waveforms.hdf5
+    min_chirp_mass: 0.1
+
+    # optimization params
+    learning_rate: 4e-4
+    pct_lr_ramp: 0.115
+    weight_decay: 3e-5
+
     metric:
       class_path: train.metrics.TimeSlideAUROC
       init_args:
@@ -44,10 +38,10 @@ data:
     background_dir: data/bns/background_data
     waveforms_dir: data/bns/aframe_train/
     ifos: [H1, L1]
-    sample_rate: 2048
 
+    sample_rate: 2048
     windowing:
-      kernel_length: 1.0
+      kernel_length: 4.0
       window_lead_min: 0
       window_lead_max: 0.25
 
@@ -61,11 +55,8 @@ data:
     fftlength: 2.0
     psd_length: 20
     highpass: 20
-
-    # Inject into every sample so the regression loss is never sparse.
-    waveform_prob: 1.0
+    waveform_prob: 0.277
     max_num_workers: 16
-
     valid_stride: 0.5
     num_valid_views: 5
     valid_livetime: 57600
@@ -77,12 +68,12 @@ data:
         constant_params:
           maximum: 50
         start_params:
-          minimum: 20
-          index: -1
+          minimum: 10
+          index: -2
         end_params:
-          minimum: 8
+          minimum: 4
           index: -3
-        decay_steps: 10000
+        decay_steps: 5000
 
     param_transforms:
       - class_path: train.transforms.ChirpMass
@@ -94,6 +85,7 @@ data:
         sample_rate: 2048
         val_waveform_file: data/bns/aframe_train/val_waveforms.hdf5
         training_waveform_path: data/bns/uniform_chirp_mass_waveforms/training_waveforms.hdf5
+
     dec:
       class_path: ml4gw.distributions.Cosine
     psi:
@@ -113,38 +105,35 @@ trainer:
   logger:
     - class_path: train.callbacks.AframeWandbLogger
       init_args:
-        name: "s4d_merger_1s_finetune"
+        name: "aframe_resnet_true_heterodyne_4s_merger"
         save_dir: outputs
         project: "aframe"
-
   callbacks:
     - class_path: lightning.pytorch.callbacks.EarlyStopping
       init_args:
-        # Monitor the first param's MAE; adjust to taste.
+        # TimeSlideAUROC is higher-is-better.
         monitor: "validation/TimeSlideAUROC_epoch"
-        mode: "min"
+        mode: "max"
         patience: 50
-    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+    - class_path: train.callbacks.ModelCheckpoint
       init_args:
         monitor: "validation/TimeSlideAUROC_epoch"
-        mode: "min"
-        save_top_k: 1
+        mode: "max"
+        save_top_k: 3
         save_last: true
         auto_insert_metric_name: false
-    - class_path: train.callbacks.SaveAugmentedBatch
+
     - class_path: lightning.pytorch.callbacks.LearningRateMonitor
       init_args:
         logging_interval: epoch
-    - class_path: train.metric.plotting.ChirpMassErrorVsSnrCallback
-    - class_path: train.metric.plotting.TrueVsPredictedScatterCallback
+
+    - class_path: train.metric.plotting.SnrVsScoreScatterCallback
 
   strategy: auto
   devices: auto
-  num_nodes: 1
-  precision: null
 
   max_epochs: 3000
   min_epochs: 60
   check_val_every_n_epoch: 1
-  log_every_n_steps: 10
+  log_every_n_steps: 25
   enable_progress_bar: true

@@ -54,6 +54,8 @@ class JaxRegressionAframe(RegressionAframe):
         y_mean: list[float] | None = None,
         y_std: list[float] | None = None,
         normalize_input: bool = False,
+        target_param: str | None = None,
+        val_target_param: str | None = None,
         seed: int = 42,
         load_from_checkpoint: str | None = None,
         reset_optimizer_on_load: bool = True,
@@ -70,6 +72,8 @@ class JaxRegressionAframe(RegressionAframe):
             y_mean=y_mean,
             y_std=y_std,
             normalize_input=normalize_input,
+            target_param=target_param,
+            val_target_param=val_target_param,
         )
         self.automatic_optimization = False
         # Kept as plain floats for the (jit-traced) JAX loss function.
@@ -159,10 +163,8 @@ class JaxRegressionAframe(RegressionAframe):
     def training_step(self, batch):
         X, _, params = batch
 
-        chirp_mass = self.m1_m2_to_chirp_mass(
-            params["mass_1"], params["mass_2"]
-        )
-        y_norm = self._normalize_target(chirp_mass).reshape(-1, self.n_vars)
+        target = self.resolve_target(params, self.target_param)
+        y_norm = self._normalize_target(target).reshape(-1, self.n_vars)
 
         X = tensor_to_jax_array(self._prepare_input(X))
         y_norm = tensor_to_jax_array(y_norm)

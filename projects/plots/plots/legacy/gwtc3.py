@@ -118,7 +118,7 @@ def logprob_mass2_lognorm(m2, m1, params):
     return np.where(
         m2 < m1,
         stats.lognorm.logpdf(m2, sig_lognorm_m2, scale=m2_mean) + logc,
-        np.NINF,
+        -np.inf,
     )
 
 
@@ -150,7 +150,7 @@ def logprob_spin(sx, sy, sz, params):
     smax = params["smax"]
     s2 = sx**2 + sy**2 + sz**2
     return np.where(
-        s2 < smax**2, -np.log(4 * np.pi) - np.log(smax) - np.log(s2), np.NINF
+        s2 < smax**2, -np.log(4 * np.pi) - np.log(smax) - np.log(s2), -np.inf
     )
 
 

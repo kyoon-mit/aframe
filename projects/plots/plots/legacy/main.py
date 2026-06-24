@@ -42,7 +42,7 @@ GATE_PATHS = {
 }
 
 
-def main(
+def main(  # noqa: C901
     background: Path,
     foreground: Path,
     rejected_params: Path,
@@ -56,6 +56,7 @@ def main(
     sigma: float = 0.1,
     verbose: bool = False,
     vetos: Optional[List[VETO_CATEGORIES]] = None,
+    backend: str = "bokeh",
 ):
     """
     Compute and plot the sensitive volume of an aframe analysis
@@ -85,7 +86,16 @@ def main(
             The width of the log normal mass distribution to use
         verbose:
             If true, log at the debug level
+        backend:
+            Plotting backend to use. ``"bokeh"`` (default) saves an
+            interactive ``sensitive_volume.html``; ``"matplotlib"`` saves a
+            static ``sensitive_volume.png``.
     """
+    if backend not in ("bokeh", "matplotlib"):
+        raise ValueError(
+            f"Unknown plotting backend {backend!r}, "
+            "expected 'bokeh' or 'matplotlib'"
+        )
     configure_logging(log_file, verbose)
     logging.info("Reading in inference outputs")
     background = EventSet.read(background)
@@ -224,6 +234,20 @@ def main(
         detection_thresholds=fars,
         output_dir=output_dir,
     )
+
+    if backend == "matplotlib":
+        from plots.legacy import matplotlib_tools
+
+        matplotlib_tools.plot_sensitive_volume(
+            output_dir / "sensitive_volume.png",
+            mass_combos,
+            fars,
+            aframe_sv,
+            aframe_err,
+            gwtc3_sv,
+            gwtc3_err,
+        )
+        return
 
     plots = tools.make_grid(mass_combos)
     for i, p in enumerate(plots):

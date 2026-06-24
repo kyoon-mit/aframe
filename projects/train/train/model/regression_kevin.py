@@ -113,7 +113,7 @@ class RegressionAframe(AframeBase):
 
     def __init__(
         self,
-        arch,
+        arch: nn.Module,
         d_output: int,
         learning_rate: float,
         weight_decay: float,
@@ -124,6 +124,8 @@ class RegressionAframe(AframeBase):
         y_mean: list[float] | None = None,
         y_std: list[float] | None = None,
         normalize_input: bool = False,
+        target_param: str | None = None,
+        val_target_param: str | None = None,
     ) -> None:
         super().__init__(
             arch=arch,
@@ -132,6 +134,14 @@ class RegressionAframe(AframeBase):
             weight_decay=weight_decay,
         )
         self.metric = metric
+        # Key in ``params`` to use as the regression target. ``None`` keeps
+        # the legacy behaviour of computing chirp mass from mass_1/mass_2.
+        # ``val_target_param`` lets validation fall back to a different key
+        # (e.g. when the training target isn't available on the val path).
+        self.target_param = target_param
+        self.val_target_param = (
+            val_target_param if val_target_param is not None else target_param
+        )
         if d_output % 2 != 0:
             raise ValueError(
                 f"d_output={d_output} must be even "
@@ -189,17 +199,28 @@ class RegressionAframe(AframeBase):
     ) -> torch.Tensor:
         return (m1 * m2) ** (3 / 5) / (m1 + m2) ** (1 / 5)
 
-    def compute_loss(self, batch):
+    def resolve_target(
+        self, params: dict[str, torch.Tensor], key: str | None
+    ) -> torch.Tensor:
+        """Return the regression target tensor for the given param ``key``.
+
+        ``key is None`` reproduces the legacy chirp-mass-from-masses target.
+        """
+        if key is None:
+            return self.m1_m2_to_chirp_mass(params["mass_1"], params["mass_2"])
+        return params[key]
+
+    def compute_loss(self, batch, target_key: str | None = "__train__"):
         X, labels, params = batch
+        if target_key == "__train__":
+            target_key = self.target_param
 
         outputs = self(self._prepare_input(X))
         mean, var = outputs.chunk(2, dim=-1)
         var = self.var_activation(var)
 
-        chirp_mass = self.m1_m2_to_chirp_mass(
-            params["mass_1"], params["mass_2"]
-        )
-        y_norm = self._normalize_target(chirp_mass).reshape(mean.shape)
+        target = self.resolve_target(params, target_key)
+        y_norm = self._normalize_target(target).reshape(mean.shape)
 
         indiv_mse = nn.MSELoss(reduction="none")(mean, y_norm).mean(dim=0)
         nll = self.criterion(mean, y_norm, var)
@@ -233,7 +254,7 @@ class RegressionAframe(AframeBase):
         all_scores_fg = []
         for i in range(n_views):
             loss, nll, spread, indiv_mse, var, mean_norm = self.compute_loss(
-                (X_sig[i], None, params)
+                (X_sig[i], None, params), self.val_target_param
             )
             all_loss.append(loss)
             all_nll.append(nll)
@@ -267,12 +288,10 @@ class RegressionAframe(AframeBase):
             dim=0, correction=0
         )  # (batch, n_vars)
 
-        chirp_mass = self.m1_m2_to_chirp_mass(
-            params["mass_1"], params["mass_2"]
-        )
+        target = self.resolve_target(params, self.val_target_param)
 
         _log_gaussian_nll(self, "validation", nll, indiv_mse, var)
-        _log_within_percentile(self, "validation", mean_norm, chirp_mass)
+        _log_within_percentile(self, "validation", mean_norm, target)
         self.log(
             "validation/spread_penalty", spread, on_step=False, on_epoch=True
         )
@@ -289,7 +308,7 @@ class RegressionAframe(AframeBase):
             mean_norm, torch.sqrt(var)
         )
         return {
-            "targets": chirp_mass.detach().cpu(),
+            "targets": target.detach().cpu(),
             "outputs": mean_phys.detach().cpu(),
             "params": {"snr": params["snr"].detach().cpu()},
             "all_outputs": {"chirp_mass_std": sigma_phys.detach().cpu()},
@@ -347,7 +366,7 @@ class RegressionAframeS4D(RegressionAframe):
 
     def __init__(
         self,
-        arch,
+        arch: nn.Module,
         d_output: int,
         metric: TimeSlideAUROC,
         base_lr: float = 1e-4,

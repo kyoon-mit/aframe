@@ -61,6 +61,18 @@ class DeployInferLocal(InferBase):
             else self.input()["model_repository"].path
         )
 
+        # Group the HTTP/gRPC/metrics ports around the configured gRPC port
+        # (default 8000/8001/8002) so a second server can run on the same
+        # node without colliding on the default ports. See `triton_port`.
+        http_port = self.triton_port - 1
+        grpc_port = self.triton_port
+        metrics_port = self.triton_port + 1
+        server_args = [
+            f"--http-port={http_port}",
+            f"--grpc-port={grpc_port}",
+            f"--metrics-port={metrics_port}",
+        ]
+
         # TODO: figure out why serves
         # `gpus` variable does not expose
         # proper GPU ids to triton
@@ -68,6 +80,7 @@ class DeployInferLocal(InferBase):
             model_repo,
             self.triton_image,
             log_file=server_log,
+            server_args=server_args,
             wait=True,
         )
 
@@ -83,6 +96,17 @@ class DeployInferLocal(InferBase):
             def __enter__(self):
                 os.environ["CUDA_VISIBLE_DEVICES"] = self.obj.gpus
                 self.stack.enter_context(serve_context)
+                # ServerMonitor hardcodes the Triton gRPC port to 8001
+                # internally, so it can only attach to a server on the
+                # default port. Skip the stats monitor when running on an
+                # offset port to avoid attaching to the wrong server.
+                if self.obj.triton_port != 8001:
+                    logging.warning(
+                        "triton_port=%s != 8001; skipping ServerMonitor "
+                        "(it can only poll the default gRPC port 8001).",
+                        self.obj.triton_port,
+                    )
+                    return
                 monitor = ServerMonitor(
                     model_name=self.obj.model_name,
                     ips="localhost",

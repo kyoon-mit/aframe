@@ -124,6 +124,7 @@ class Sequence:
         inference_sampling_rate: float,
         batch_size: int,
         triton_address: str,
+        metrics_port: int = 8002,
         max_pending_requests: int = 5000,
         **kwargs,
     ):
@@ -162,7 +163,7 @@ class Sequence:
         self.background_fname = background_fname
         self.inference_sampling_rate = inference_sampling_rate
         self.batch_size = batch_size
-        self.metrics_url = build_metrics_url(triton_address)
+        self.metrics_url = build_metrics_url(triton_address, port=metrics_port)
         self.max_pending_requests = max_pending_requests
         self.ifos = ifos
 

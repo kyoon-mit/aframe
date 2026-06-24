@@ -1160,6 +1160,143 @@ def chirp_mass_error_vs_snr(
     )
 
 
+def true_vs_predicted_scatter(
+    target: BatchedTarget,
+    pred: BatchedTarget,
+    params: BatchedParams | None = None,
+    **kwargs,
+) -> ImageLog:
+    """Scatter of true vs predicted value, one panel per output dimension.
+
+    Points are drawn with a low alpha so density is visible, and coloured
+    by SNR when ``params['snr']`` is available (colourbar clipped to the
+    5-95th percentile to avoid outlier saturation). A dashed ``y = x`` line
+    marks perfect prediction.
+    """
+    target = np.asarray(target)
+    pred = np.asarray(pred)
+    if target.ndim == 1:
+        target = target[:, None]
+    if pred.ndim == 1:
+        pred = pred[:, None]
+
+    n_dims = pred.shape[-1]
+
+    snr = None
+    if params is not None and "snr" in params and params["snr"] is not None:
+        snr = np.asarray(params["snr"]).flatten()
+
+    cols = min(n_dims, 3)
+    rows = (n_dims + cols - 1) // cols
+    fig, axes = plt.subplots(
+        rows, cols, figsize=(6 * cols, 5 * rows), squeeze=False
+    )
+    axes = axes.flatten()
+
+    scatter = None
+    for i in range(n_dims):
+        ax = axes[i]
+        t = target[:, i].flatten()
+        p = pred[:, i].flatten()
+
+        valid = np.isfinite(t) & np.isfinite(p)
+        c = None
+        if snr is not None and snr.shape[0] == valid.shape[0]:
+            valid &= np.isfinite(snr)
+            c = snr[valid]
+        t = t[valid]
+        p = p[valid]
+
+        if t.size == 0:
+            ax.text(0.5, 0.5, "No valid data", ha="center", va="center")
+            continue
+
+        if c is not None and c.size > 0:
+            vmin, vmax = np.percentile(c, [5, 95])
+            scatter = ax.scatter(
+                t,
+                p,
+                c=c,
+                cmap="viridis",
+                vmin=vmin,
+                vmax=vmax,
+                alpha=0.15,
+                s=6,
+            )
+        else:
+            ax.scatter(t, p, alpha=0.15, s=6, color="steelblue")
+
+        lo = float(min(t.min(), p.min()))
+        hi = float(max(t.max(), p.max()))
+        ax.plot([lo, hi], [lo, hi], "r--", linewidth=1, label="y = x")
+        ax.set_xlim(lo, hi)
+        ax.set_ylim(lo, hi)
+        ax.set_aspect("equal", adjustable="box")
+        suffix = f" (out {i})" if n_dims > 1 else ""
+        ax.set_xlabel(f"True{suffix}")
+        ax.set_ylabel(f"Predicted{suffix}")
+        ax.grid(True, alpha=0.3)
+        ax.legend(loc="upper left")
+
+    for j in range(n_dims, len(axes)):
+        axes[j].axis("off")
+
+    if scatter is not None:
+        cbar = fig.colorbar(scatter, ax=axes[:n_dims].tolist(), pad=0.02)
+        cbar.set_label("SNR")
+        cbar.solids.set(alpha=1.0)
+
+    fig.suptitle("True vs Predicted")
+    image = plt.gcf()
+    plt.close()
+
+    return ImageLog(value=image, caption="True vs Predicted (coloured by SNR)")
+
+
+class TrueVsPredictedScatterCallback(CustomMetric):
+    """Plot true vs predicted values (coloured by SNR) at validation end.
+
+    Expects the model's validation_step to return a dict with:
+    - 'targets': true values
+    - 'outputs': predicted values (physical means)
+    - 'params': dict containing 'snr' (optional)
+
+    Instantiated with no arguments::
+
+        - class_path: train.metric.plotting.TrueVsPredictedScatterCallback
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            metric=true_vs_predicted_scatter,
+            metric_name="true_vs_predicted_scatter",
+            type="Accumulated",
+            stages=("val", "test"),
+        )
+
+    def log_metric(self, trainer, pl_module, outputs, stage):
+        if not isinstance(outputs, dict):
+            return
+        if "targets" not in outputs or "outputs" not in outputs:
+            return
+
+        try:
+            image_log = true_vs_predicted_scatter(
+                target=outputs["targets"],
+                pred=outputs["outputs"],
+                params=outputs.get("params") or {},
+            )
+            image_log.log(
+                trainer,
+                pl_module,
+                f"{stage}/{self.metric_name}",
+                prog_bar=False,
+                batch_size=len(outputs["targets"]),
+            )
+        except Exception as e:
+            print(f"Error logging metric {self.metric_name}: {e}")
+
+
 class ChirpMassErrorVsSnrCallback(CustomMetric):
     """Plot chirp-mass relative error vs SNR at validation epoch end.
 

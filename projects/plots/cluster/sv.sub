@@ -1,0 +1,13 @@
+executable = /home/barmstrong/.local/bin/uv
+error = /fast/barmstrong/outputs/$(Cluster).err
+output = /fast/barmstrong/outputs/$(Cluster).out
+log = /fast/barmstrong/outputs/$(Cluster).log
+request_memory = 32GB
+request_cpus = 1
+request_gpus = 0
+getenv = true
+environment = "HDF5_USE_FILE_LOCKING='FALSE'"
+MaxTime = 200000
+periodic_remove = (JobStatus =?= 2) && ((CurrentTime - JobCurrentStartDate) >= $(MaxTime))
+
+queue

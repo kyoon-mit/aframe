@@ -293,9 +293,9 @@ def test_export_for_shapes(
     )
     with context:
         export(
-            weights,
             str(repo_dir),
-            batch_file,
+            weights=weights,
+            batch_file=batch_file,
             num_ifos=num_ifos,
             inference_sampling_rate=inference_sampling_rate,
             kernel_length=kernel_length,
@@ -352,9 +352,9 @@ def test_export_for_weights(
         )
     )
     export(
-        weights,
         str(repo_dir),
-        batch_file,
+        weights=weights,
+        batch_file=batch_file,
         num_ifos=num_ifos,
         inference_sampling_rate=inference_sampling_rate,
         sample_rate=sample_rate,
@@ -448,9 +448,9 @@ def test_export_for_scaling(
         clean=clean,
     ):
         export(
-            weights,
             str(repo_dir),
-            batch_file,
+            weights=weights,
+            batch_file=batch_file,
             num_ifos=num_ifos,
             inference_sampling_rate=inference_sampling_rate,
             sample_rate=sample_rate,

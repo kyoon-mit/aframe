@@ -1,37 +1,53 @@
+# LinOSS (JAX/Equinox) chirp-mass regression config.
+#
+# Same objective as configs/regression/regression.yaml (predict chirp_mass
+# from whitened strain) but using the JAX LinOSS architecture with a
+# GaussianNLL (BetaNLL) + spread objective via JaxRegressionAframe.
+#
+# Key points (mirroring regression.yaml):
+#   - waveform_prob: 1.0  (every sample is injected)
+#   - ChirpMass param transform supplies the regression target
+#   - d_output: 2  (chirp_mass mean + pre-Softplus log-variance)
 model:
-  class_path: train.model.regression_kevin.RegressionAframeS4D
+  class_path: train.model.jax.JaxRegressionAframe
   init_args:
-    # Warm-start the architecture from the pretrained merger_1s weights.
-    weights: /fast/barmstrong/kevin_ckpts/1s_merger_model/merger_1s_model.pt
+    # load_from_checkpoint: "/home/barmstrong/aframe_official/projects/train/outputs/aframe/emu9766a/checkpoints/checkpoint_step_26000_metric_0.2578853935969125.eqx"
     arch:
-      class_path: architectures.networks.s4d.S4Model
+      class_path: architectures.regression.RegressionTimeDomainLinOSS
       init_args:
-        d_input: 2 # H1, L1
-        d_output: 2 # chirp_mass mean + log-var
-        d_model: 64
-        d_state: 64
-        n_layers: 4
-        dropout: 0.2
-        dt_min: 1.0e-3
-        dt_max: 5.0
-        lr: 2.0e-4 # SSM parameter learning rate
-    d_output: 2 # must match arch d_output
+        num_ifos: 2 # H1, L1
+        sample_rate: 2048
+        kernel_length: 4.0
+        time_in_features: 2 # H1, L1
+        time_hidden_dim: 32
+        time_num_blocks: 3
+        time_dropout_rate: 0.1
+        time_state_dim: 32
+        time_r_min: 0.9
+        time_theta_max: 3.14159265359
+        time_num_res_blocks: 1
+        time_conv_kernel_size: 4
+        time_conv_position: pre
+        resnet_layers: [2, 2, 2]
+        resnet_latent_dim: 64
+        resnet_kernel_size: 7
+        resnet_norm_groups: 16
+        mlp_width: 64
+        mlp_depth: 2
+        d_output: 2 # chirp_mass mean + pre-Softplus log-var
+        seed: 0
+    d_output: 2 # chirp_mass mean + pre-Softplus log-var
     normalize_input: true
     y_mean: [1.2] # centre of BNS chirp_mass prior [0.87, 2.22]
-    y_std: [0.39] # from merger_1s checkpoint
-    base_lr: 1.0e-5
+    y_std: [0.35] # approx std of uniform [0.87, 2.22]
+    learning_rate: 1e-4
     weight_decay: 0.01
+    warmup_steps: 1000
+    max_steps: 3000000
+    clip_grad_norm: 10.0
     beta_nll: 0.3
     lambda_spread: 0.0
-    lr_scheduler:
-      class_path: train.model.regression_kevin.WarmupCosineAnnealingWarmRestarts
-      init_args:
-        warmup_epochs: 8
-        T_0: 10
-        T_mult: 2
-        eta_min: 1.0e-7
-        warmup_start_factor: 1.0e-2
-    lr_scheduler_interval: epoch
+    seed: 42
     metric:
       class_path: train.metrics.TimeSlideAUROC
       init_args:
@@ -44,8 +60,8 @@ data:
     background_dir: data/bns/background_data
     waveforms_dir: data/bns/aframe_train/
     ifos: [H1, L1]
-    sample_rate: 2048
 
+    sample_rate: 2048
     windowing:
       kernel_length: 1.0
       window_lead_min: 0
@@ -61,11 +77,8 @@ data:
     fftlength: 2.0
     psd_length: 20
     highpass: 20
-
-    # Inject into every sample so the regression loss is never sparse.
     waveform_prob: 1.0
     max_num_workers: 16
-
     valid_stride: 0.5
     num_valid_views: 5
     valid_livetime: 57600
@@ -94,6 +107,7 @@ data:
         sample_rate: 2048
         val_waveform_file: data/bns/aframe_train/val_waveforms.hdf5
         training_waveform_path: data/bns/uniform_chirp_mass_waveforms/training_waveforms.hdf5
+
     dec:
       class_path: ml4gw.distributions.Cosine
     psi:
@@ -113,38 +127,34 @@ trainer:
   logger:
     - class_path: train.callbacks.AframeWandbLogger
       init_args:
-        name: "s4d_merger_1s_finetune"
+        name: "linoss_merger_1s"
         save_dir: outputs
         project: "aframe"
-
   callbacks:
     - class_path: lightning.pytorch.callbacks.EarlyStopping
       init_args:
-        # Monitor the first param's MAE; adjust to taste.
+        # GaussianNLL validation objective; lower is better.
         monitor: "validation/TimeSlideAUROC_epoch"
-        mode: "min"
-        patience: 50
-    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+        mode: "max"
+        patience: 100
+    # equinox-aware checkpointer; the default ModelCheckpoint cannot
+    # serialise the JAX/equinox model living on the LightningModule.
+    - class_path: train.utils.jax.save_model.JAXCheckpointManager
       init_args:
         monitor: "validation/TimeSlideAUROC_epoch"
-        mode: "min"
-        save_top_k: 1
-        save_last: true
-        auto_insert_metric_name: false
-    - class_path: train.callbacks.SaveAugmentedBatch
-    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
-      init_args:
-        logging_interval: epoch
+        mode: "max"
+        save_top_k: 5
+        warmup_steps: 1000
+
+    - class_path: train.metric.plotting.SnrVsScoreScatterCallback
     - class_path: train.metric.plotting.ChirpMassErrorVsSnrCallback
     - class_path: train.metric.plotting.TrueVsPredictedScatterCallback
 
   strategy: auto
   devices: auto
-  num_nodes: 1
-  precision: null
 
   max_epochs: 3000
   min_epochs: 60
   check_val_every_n_epoch: 1
-  log_every_n_steps: 10
+  log_every_n_steps: 25
   enable_progress_bar: true

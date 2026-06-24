@@ -1,37 +1,49 @@
 model:
-  class_path: train.model.regression_kevin.RegressionAframeS4D
+  class_path: train.model.jax.JaxClassificationAframe
   init_args:
-    # Warm-start the architecture from the pretrained merger_1s weights.
-    weights: /fast/barmstrong/kevin_ckpts/1s_merger_model/merger_1s_model.pt
     arch:
-      class_path: architectures.networks.s4d.S4Model
+      class_path: architectures.regression.RegressionTimeDomainLinOSS2
       init_args:
-        d_input: 2 # H1, L1
-        d_output: 2 # chirp_mass mean + log-var
-        d_model: 64
-        d_state: 64
-        n_layers: 4
-        dropout: 0.2
-        dt_min: 1.0e-3
-        dt_max: 5.0
-        lr: 2.0e-4 # SSM parameter learning rate
-    d_output: 2 # must match arch d_output
-    normalize_input: true
-    y_mean: [1.2] # centre of BNS chirp_mass prior [0.87, 2.22]
-    y_std: [0.39] # from merger_1s checkpoint
-    base_lr: 1.0e-5
+        time_in_features: 2 # H1, L1
+        time_hidden_dim: 64
+        time_num_blocks: 3
+        time_dropout_rate: 0.1
+        time_state_dim: 64
+        time_r_min: 0.9
+        time_theta_max: 3.14159265359
+        time_num_res_blocks: 1
+        time_conv_kernel_size: 4
+        time_conv_position: pre
+        # LinOSS2 sequence-mixer options
+        time_discretization: IMEX2 # IM | IMEX | IMEX2 | IMEX3 | EX
+        # RT init samples eigenvalues in the (r_min..1, 0..theta_max) annulus,
+        # so time_r_min / time_theta_max above are actually used (AG ignores
+        # them and instead samples A/G uniformly up to A_max / G_max).
+        time_initialization: RT # AG | RT
+        time_damping: true
+        time_stability: oscillatory # oscillatory | stable
+        time_projection_eps: 1e-3 # stability margin inset from Jury boundary
+        time_input_normalization: true # LRU-style init gain; requires damping=true
+        time_num_heads: 4
+        time_use_head_output_projection: true
+        time_A_max: 1.0 # AG init only
+        time_G_max: 1.0 # AG init only
+        dtype: float32
+        resnet_layers: [2, 2]
+        resnet_latent_dim: 64
+        resnet_kernel_size: 7
+        resnet_norm_groups: 16
+        mlp_width: 64
+        mlp_depth: 2
+        d_output: 1 # single classification logit
+        seed: 0
+
+    learning_rate: 1e-4
     weight_decay: 0.01
-    beta_nll: 0.3
-    lambda_spread: 0.0
-    lr_scheduler:
-      class_path: train.model.regression_kevin.WarmupCosineAnnealingWarmRestarts
-      init_args:
-        warmup_epochs: 8
-        T_0: 10
-        T_mult: 2
-        eta_min: 1.0e-7
-        warmup_start_factor: 1.0e-2
-    lr_scheduler_interval: epoch
+    warmup_steps: 1000
+    max_steps: 3000000
+    clip_grad_norm: 10.0
+    seed: 42
     metric:
       class_path: train.metrics.TimeSlideAUROC
       init_args:
@@ -44,14 +56,14 @@ data:
     background_dir: data/bns/background_data
     waveforms_dir: data/bns/aframe_train/
     ifos: [H1, L1]
-    sample_rate: 2048
 
+    sample_rate: 2048
     windowing:
-      kernel_length: 1.0
+      kernel_length: 4.0
       window_lead_min: 0
       window_lead_max: 0.25
 
-    batch_size: 256
+    batch_size: 128
     batches_per_epoch: 1000
     chunk_size: 10000
     chunks_per_epoch: 10
@@ -61,11 +73,8 @@ data:
     fftlength: 2.0
     psd_length: 20
     highpass: 20
-
-    # Inject into every sample so the regression loss is never sparse.
-    waveform_prob: 1.0
+    waveform_prob: 0.277
     max_num_workers: 16
-
     valid_stride: 0.5
     num_valid_views: 5
     valid_livetime: 57600
@@ -94,6 +103,7 @@ data:
         sample_rate: 2048
         val_waveform_file: data/bns/aframe_train/val_waveforms.hdf5
         training_waveform_path: data/bns/uniform_chirp_mass_waveforms/training_waveforms.hdf5
+
     dec:
       class_path: ml4gw.distributions.Cosine
     psi:
@@ -113,38 +123,36 @@ trainer:
   logger:
     - class_path: train.callbacks.AframeWandbLogger
       init_args:
-        name: "s4d_merger_1s_finetune"
+        name: "aframe_linoss2_classification_4s_merger"
         save_dir: outputs
         project: "aframe"
-
   callbacks:
     - class_path: lightning.pytorch.callbacks.EarlyStopping
       init_args:
-        # Monitor the first param's MAE; adjust to taste.
+        # TimeSlideAUROC is higher-is-better.
         monitor: "validation/TimeSlideAUROC_epoch"
-        mode: "min"
+        mode: "max"
         patience: 50
-    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+    # equinox-aware checkpointer; the default ModelCheckpoint cannot
+    # serialise the JAX/equinox model living on the LightningModule.
+    - class_path: train.utils.jax.save_model.JAXCheckpointManager
       init_args:
         monitor: "validation/TimeSlideAUROC_epoch"
-        mode: "min"
-        save_top_k: 1
-        save_last: true
-        auto_insert_metric_name: false
-    - class_path: train.callbacks.SaveAugmentedBatch
+        mode: "max"
+        save_top_k: 3
+        warmup_steps: 1000
+
     - class_path: lightning.pytorch.callbacks.LearningRateMonitor
       init_args:
         logging_interval: epoch
-    - class_path: train.metric.plotting.ChirpMassErrorVsSnrCallback
-    - class_path: train.metric.plotting.TrueVsPredictedScatterCallback
+
+    - class_path: train.metric.plotting.SnrVsScoreScatterCallback
 
   strategy: auto
   devices: auto
-  num_nodes: 1
-  precision: null
 
   max_epochs: 3000
   min_epochs: 60
   check_val_every_n_epoch: 1
-  log_every_n_steps: 10
+  log_every_n_steps: 25
   enable_progress_bar: true
