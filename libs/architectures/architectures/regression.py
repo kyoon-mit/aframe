@@ -24,9 +24,7 @@ class MultiTaskArchitecture(Architecture):
     has shape ``(N, num_params)``.
     """
 
-    def forward(
-        self, X: torch.Tensor
-    ) -> tuple[torch.Tensor, torch.Tensor]:
+    def forward(self, X: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         raise NotImplementedError
 
 
@@ -113,8 +111,6 @@ class MultiTaskTimeDomainResNet(MultiTaskArchitecture):
         self.clf_head = torch.nn.Linear(embedding_dim, 1)
         self.reg_head = torch.nn.Linear(embedding_dim, num_params)
 
-    def forward(
-        self, X: torch.Tensor
-    ) -> tuple[torch.Tensor, torch.Tensor]:
+    def forward(self, X: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         h = self.backbone(X)
         return self.clf_head(h), self.reg_head(h)
