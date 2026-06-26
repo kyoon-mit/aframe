@@ -41,8 +41,8 @@ data:
     # kernel_length:
     psd_length: 8
     # fduration:
-    # highpass: 
-    # lowpass: 
+    # highpass:
+    # lowpass:
     fftlength: null
 
     # augmentation args
@@ -53,28 +53,30 @@ data:
     right_pad: 0.05
     snr_sampler:
       class_path: ml4gw.distributions.PowerLaw
-      init_args: 
+      init_args:
         minimum: 4
         maximum: 100
         index: -3
-      # uncomment below and comment above for 
+      # uncomment below and comment above for
       # snr scheduling
-       
       # class_path: train.augmentations.SnrSampler
       # init_args:
-         # max_min_snr: 12
-         # min_min_snr: 4
-         # max_snr: 100
-         # alpha: -3
-         # decay_steps: 989
+      #   constant_params:
+      #     maximum: 100
+      #     index: -3
+      #   start_params:
+      #     minimum: 12
+      #   end_params:
+      #     minimum: 4
+      #   decay_steps: 989
     # validation args
     valid_stride: 0.5
     num_valid_views: 5
-    valid_livetime: 57600 
+    valid_livetime: 57600
 trainer:
   # by default, use a local CSV logger.
   # note that you can use multiple loggers!
-  # Options in train task for appending 
+  # Options in train task for appending
   # a wandb logger for remote logging.
   logger:
     - class_path: lightning.pytorch.loggers.CSVLogger
@@ -101,9 +103,9 @@ trainer:
     - class_path: train.callbacks.SaveAugmentedBatch
   # uncomment below if you want to profile
   # profiler:
-    # class_path: lightning.pytorch.profilers.PyTorchProfiler
-    # dict_kwargs:
-      # profile_memory: true
+  # class_path: lightning.pytorch.profilers.PyTorchProfiler
+  # dict_kwargs:
+  # profile_memory: true
   # devices:
   # strategy: set to ddp if len(devices) > 1
   #precision: 16-mixed
