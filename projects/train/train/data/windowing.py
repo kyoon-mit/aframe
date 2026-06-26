@@ -1,5 +1,10 @@
 from dataclasses import dataclass
 
+# Character width of the ASCII window-placement diagram in __str__. The bar
+# rows carry a 2-space indent and a trailing label (~27 chars), so the full
+# line is ~width+27; 90 keeps it within a 120-column terminal.
+DIAGRAM_WIDTH = 90
+
 
 @dataclass
 class WindowConfig:
@@ -62,7 +67,7 @@ class WindowConfig:
         return self.window_lead_max - self.window_lead_min
 
     def __str__(self) -> str:
-        width = 60
+        width = DIAGRAM_WIDTH
         # Always include t=0 (merger) in the display range
         t0 = min(self.window_lead_min - self.kernel_length, 0.0)
         t1 = max(self.window_lead_max, 0.0)
