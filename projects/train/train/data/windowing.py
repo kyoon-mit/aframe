@@ -8,9 +8,15 @@ class WindowConfig:
 
     The window's *leading edge* is its right edge — the edge closest to the
     merger in the scanning direction. Times are in seconds relative to the
-    merger (t=0). Negative values mean the leading edge is before the merger
-    (pre-merger / inspiral-only window); values larger than ``kernel_length``
-    mean the window is entirely after the merger (post-merger window).
+    merger (t=0) and are interpreted purely relative to the merger: there is
+    no requirement that the merger fall inside the window. Values in
+    ``[0, kernel_length]`` straddle the merger; ``window_lead_min < 0`` places
+    the leading edge before the merger (pre-merger / inspiral-only window);
+    ``window_lead_max > kernel_length`` places the trailing edge after the
+    merger (post-merger window). Any portion of the window that extends beyond
+    the stored waveform is zero-padded at slicing time, so leads may be set to
+    any value (the datamodule logs a warning when the stored waveforms are too
+    short to fill the requested window).
 
     Args:
         kernel_length:
@@ -18,18 +24,41 @@ class WindowConfig:
             after whitening.
         window_lead_min:
             Earliest (smallest) time of the window leading edge relative to
-            the merger. Equivalent to ``right_pad``. Must satisfy
-            ``window_lead_min >= -fduration / 2`` at runtime so that
-            ``right_pad_size`` remains non-negative.
+            the merger. Equivalent to ``right_pad``. May be negative (window
+            sits before the merger).
         window_lead_max:
             Latest (largest) time of the window leading edge relative to the
             merger. Equivalent to ``kernel_length - left_pad``. Defaults to
-            ``window_lead_min`` (fixed window position, no sliding). Must
-            satisfy ``window_lead_max <= kernel_length + fduration / 2``
-            at runtime so that ``left_pad_size`` remains non-negative.
+            ``window_lead_min`` (fixed window position, no sliding). May exceed
+            ``kernel_length`` (window sits after the merger).
 
     The valid sliding range of the window is
     ``window_lead_max - window_lead_min`` seconds.
+
+    Examples:
+        A fixed window ending exactly at the merger:
+
+        >>> print(WindowConfig(kernel_length=2.0, window_lead_min=0.0))
+        ... # doctest: +ELLIPSIS
+        Window placement relative to merger (t=0):...
+
+        A window sliding across the merger:
+
+        >>> wc = WindowConfig(2.0, window_lead_min=-0.5, window_lead_max=1.0)
+        >>> wc.sliding_range
+        1.5
+
+        A fixed pre-merger window sitting 5 s before the merger:
+
+        >>> wc = WindowConfig(2.0, window_lead_min=-5.0, window_lead_max=-5.0)
+        >>> wc.left_pad, wc.right_pad
+        (7.0, -5.0)
+
+        A post-merger window:
+
+        >>> wc = WindowConfig(2.0, window_lead_min=3.0, window_lead_max=3.0)
+        >>> wc.left_pad
+        -1.0
     """
 
     kernel_length: float

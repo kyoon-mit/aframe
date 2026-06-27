@@ -111,6 +111,12 @@ DEFAULT_METHODS = [
     ("ema_tau1.0s", "ema", 1.0),
     ("median_1.0s", "median", 1.0),
     ("gauss_1.0s", "gauss", 1.0),
+    # short-window family from the held-out scorer sweep (tri:0.25 was the best
+    # single default; the others win on a few specific models).
+    ("mean_0.125s", "mean", 0.125),
+    ("tri_0.25s", "tri", 0.25),
+    ("median_0.1875s", "median", 0.1875),
+    ("max_0.25s", "max", 0.25),
 ]
 
 MASS_COMBOS = [[1.4, 1.4], [1.5, 1.5], [2.0, 2.0], [2.3, 2.3]]
@@ -167,6 +173,13 @@ class Postprocessor:
                 size=self.win_samples,
                 origin=(self.win_samples - 1) // 2,
             )
+        if kind == "tri":
+            # centred triangular (Bartlett) taper of half-width win_samples;
+            # down-weights the window edges relative to a flat boxcar.
+            size = 2 * self.win_samples + 1
+            kernel = np.bartlett(size)
+            kernel /= kernel.sum()
+            return np.convolve(y, kernel, mode="same")
         if kind == "median":
             return median_filter(y, size=self.win_samples, mode="nearest")
         if kind == "ema":
@@ -404,12 +417,14 @@ def plot_all_methods(out_root, methods, mass_combos):
             if name == top:
                 continue
             fars, sv, _ = data[name]
+            linewidth = 2.0 if "default" in name else 1.0
+            alpha = 0.8 if "default" in name else 0.4
             ax.plot(
                 fars,
                 sv[key],
-                linewidth=1.0,
+                linewidth=linewidth,
                 color=colors[name],
-                alpha=0.4,
+                alpha=alpha,
                 zorder=2,
                 label=name if i == 0 else None,
             )
@@ -433,7 +448,7 @@ def plot_all_methods(out_root, methods, mass_combos):
     axes[0].legend(
         [handles[j] for j in order],
         [labels[j] for j in order],
-        loc="upper left",
+        loc="lower right",
         fontsize=7,
         ncol=2,
         handlelength=1.5,

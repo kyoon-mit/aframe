@@ -13,6 +13,7 @@ from ledger.injections import (
     waveform_class_factory,
 )
 
+from train.data.windowing import WindowConfig
 from train.metrics import get_timeslides
 
 # ---------------------------------------------------------------------------
@@ -34,7 +35,8 @@ MIN_VALID_DURATION = 25.0
 BG_DURATION = 30
 BG_SAMPLES = BG_DURATION * SAMPLE_RATE  # 3840
 
-# Derived geometry (left_pad=right_pad=0 in hparams)
+# Derived geometry for the default window (window_lead_min=0,
+# window_lead_max=KERNEL_LENGTH), i.e. left_pad=right_pad=0.
 FILTER_SIZE = int(FDURATION * SAMPLE_RATE)  # 128
 LEFT_PAD_SIZE = FILTER_SIZE // 2  # 64
 RIGHT_PAD_SIZE = FILTER_SIZE // 2  # 64
@@ -163,8 +165,22 @@ def training_waveform_file(data_dir):
 # ---------------------------------------------------------------------------
 
 
-def base_dataset_kwargs(data_dir, waveform_sampler) -> dict:
-    """Common __init__ kwargs for TimeDomainSupervisedAframeDataset."""
+def base_dataset_kwargs(
+    data_dir,
+    waveform_sampler,
+    *,
+    window_lead_min: float = 0.0,
+    window_lead_max: float | None = KERNEL_LENGTH,
+) -> dict:
+    """
+    Common __init__ kwargs for TimeDomainSupervisedAframeDataset.
+
+    The default window (``window_lead_min=0``,
+    ``window_lead_max=kernel_length``) reproduces the old
+    ``left_pad=right_pad=0`` geometry. Pass negative
+    ``window_lead_min`` (or ``window_lead_max > kernel_length``) to place the
+    window before/after the merger.
+    """
     return {
         "background_dir": str(data_dir),
         "waveforms_dir": str(data_dir),
@@ -177,12 +193,14 @@ def base_dataset_kwargs(data_dir, waveform_sampler) -> dict:
         "num_files_per_batch": 1,
         "waveform_sampler": waveform_sampler,
         "batch_size": BATCH_SIZE,
-        "kernel_length": KERNEL_LENGTH,
+        "windowing": WindowConfig(
+            kernel_length=KERNEL_LENGTH,
+            window_lead_min=window_lead_min,
+            window_lead_max=window_lead_max,
+        ),
         "fduration": FDURATION,
         "psd_length": PSD_LENGTH,
         "waveform_prob": 1.0,
-        "left_pad": 0.0,
-        "right_pad": 0.0,
         "snr_sampler": torch.distributions.Uniform(8.0, 20.0),
         "valid_stride": VALID_STRIDE,
         "min_valid_duration": MIN_VALID_DURATION,

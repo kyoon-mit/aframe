@@ -182,6 +182,92 @@ class RegressionTimeDomainLinOSS(JaxArchitecture):
         return self.linoss(X, state, key=key)
 
 
+class RegressionTimeDomainOriginalLinOSS(JaxArchitecture):
+    """JAX/Equinox OriginalLinOSS architecture for BNS parameter regression.
+
+    Wraps the plain ``OriginalLinOSS`` model (faithful port of discretax's
+    ``LinOSS``: linear encoder + stacked LinOSS ``StandardBlock`` blocks + MLP
+    head, with **no** pooling backbone and **no** intermediate ResNet).
+
+    The sequence mixer is the generalized real-pair LinOSS mixer from discretax
+    PR #74, exposing the full feature set: IM/IMEX/IMEX2/IMEX3/EX
+    discretizations, AG/RT initialization, oscillatory/stable stability
+    projection, multi-head mixing with optional output projection, LRU-style
+    input normalization and a configurable compute dtype.
+
+    ``d_output=2`` gives a chirp-mass mean + pre-Softplus log-variance so it
+    can be used with ``JaxRegressionAframe``.
+    """
+
+    linoss: "OriginalLinOSS"  # noqa: F821
+
+    def __init__(
+        self,
+        num_ifos: int,
+        sample_rate: float,
+        kernel_length: float,
+        time_in_features: int,
+        time_hidden_dim: int,
+        time_num_blocks: int,
+        time_dropout_rate: float,
+        time_state_dim: int,
+        time_r_min: float,
+        time_theta_max: float,
+        time_discretization: str = "IMEX",
+        time_initialization: str = "AG",
+        time_damping: bool = True,
+        time_stability: str = "oscillatory",
+        time_projection_eps: float = 0.0,
+        time_input_normalization: bool = False,
+        time_num_heads: int = 1,
+        time_use_head_output_projection: bool = False,
+        time_A_max: float = 1.0,
+        time_G_max: float = 1.0,
+        time_prenorm: bool = True,
+        dtype: str = "float32",
+        mlp_width: int = 64,
+        mlp_depth: int = 2,
+        d_output: int = 2,
+        *,
+        seed: int = 0,
+    ) -> None:
+        import jax.random as jr
+
+        from architectures.networks.original_linoss import OriginalLinOSS
+
+        self.linoss = OriginalLinOSS(
+            time_in_features=time_in_features,
+            time_hidden_dim=time_hidden_dim,
+            time_num_blocks=time_num_blocks,
+            time_dropout_rate=time_dropout_rate,
+            time_state_dim=time_state_dim,
+            time_r_min=time_r_min,
+            time_theta_max=time_theta_max,
+            time_discretization=time_discretization,
+            time_initialization=time_initialization,
+            time_damping=time_damping,
+            time_stability=time_stability,
+            time_projection_eps=time_projection_eps,
+            time_input_normalization=time_input_normalization,
+            time_num_heads=time_num_heads,
+            time_use_head_output_projection=time_use_head_output_projection,
+            time_A_max=time_A_max,
+            time_G_max=time_G_max,
+            time_prenorm=time_prenorm,
+            dtype=dtype,
+            mlp_width=mlp_width,
+            mlp_depth=mlp_depth,
+            d_output=d_output,
+            key=jr.PRNGKey(seed),
+        )
+
+    def __call__(self, X, state, key=None):
+        return self.linoss(X, state, key=key)
+
+    def forward(self, X, state, key=None):
+        return self.linoss(X, state, key=key)
+
+
 class RegressionTimeDomainLinOSS2(JaxArchitecture):
     """JAX/Equinox LinOSS2 architecture for BNS parameter regression.
 

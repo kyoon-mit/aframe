@@ -5,6 +5,7 @@ from .regression import (
     RegressionArchitecture,
     RegressionTimeDomainResNet,
     RegressionTimeDomainLinOSS,
+    RegressionTimeDomainOriginalLinOSS,
 )
 from .supervised import (
     SupervisedArchitecture,
@@ -14,4 +15,5 @@ from .supervised import (
     SupervisedTimeDomainResNet,
     SupervisedTimeSpectrogramResNet,
     SupervisedHeterodyneTimeDomainResNet,
+    SupervisedTimeDomainOriginalLinOSS,
 )

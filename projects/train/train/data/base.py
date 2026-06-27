@@ -366,6 +366,40 @@ class BaseAframeDataset(pl.LightningDataModule):
             + self.filter_size // 2
         )
 
+    def _warn_if_waveform_too_short(self) -> None:
+        """
+        Warn (don't raise) if the stored waveforms don't extend far enough
+        on either side of the merger to fill the requested window. Any
+        shortfall is silently zero-padded by ``_pad_and_slice``, so this is
+        purely informational to flag windows that will contain dead signal.
+        """
+        wc = self.window_config
+        sample_rate = self.hparams.sample_rate
+        half_filter = self.hparams.fduration / 2
+        # seconds of stored signal on either side of the merger
+        duration = self.val_waveforms.shape[-1] / sample_rate
+        right_pad = self.waveform_sampler.right_pad
+        avail_pre = duration - right_pad
+        avail_post = right_pad
+
+        # furthest the window reaches before / after the merger (the extra
+        # half_filter accounts for the whitening crop on the unwhitened kernel)
+        need_pre = wc.kernel_length - wc.window_lead_min + half_filter
+        need_post = wc.window_lead_max + half_filter
+
+        if need_pre > avail_pre:
+            self._logger.warning(
+                f"Window reaches {need_pre:.3f}s before the merger but stored "
+                f"waveforms only provide {avail_pre:.3f}s; the leading "
+                "(earliest) edge will be zero-padded."
+            )
+        if need_post > avail_post:
+            self._logger.warning(
+                f"Window reaches {need_post:.3f}s after the merger but stored "
+                f"waveforms only provide {avail_post:.3f}s; the trailing "
+                "(latest) edge will be zero-padded."
+            )
+
     def train_val_split(self) -> tuple[Sequence[str], Sequence[str]]:
         """
         Split background files into training and validation sets
@@ -412,12 +446,32 @@ class BaseAframeDataset(pl.LightningDataModule):
     # ================================================== #
     # Utilities for initial data loading and preparation #
     # ================================================== #
+    @staticmethod
+    def _pad_and_slice(x: torch.Tensor, start: int, stop: int) -> torch.Tensor:
+        """
+        Extract ``x[..., start:stop]`` for an arbitrary ``[start, stop)``
+        range, zero-padding wherever the requested range falls outside the
+        bounds of ``x``. Unlike raw indexing, this never wraps around for
+        negative ``start`` and never silently truncates for ``stop`` beyond
+        the end, so windows positioned entirely before or after the signal
+        come back zero-filled rather than corrupted.
+        """
+        left = max(-start, 0)
+        right = max(stop - x.shape[-1], 0)
+        if left or right:
+            x = torch.nn.functional.pad(x, [left, right])
+        start += left
+        stop += left
+        return x[..., start:stop]
+
     def slice_waveforms(self, waveforms: torch.Tensor) -> torch.Tensor:
         """
-        Slice/pad waveforms to the correct length depending on
-        requested left and right padding. Waveforms are re-sized
-        such that any `kernel_length` window will contain the
-        merger time between the left and right pads.
+        Slice/pad waveforms to the correct length depending on the
+        requested window placement. Waveforms are re-sized so that any
+        `kernel_length` window sampled from the result lands at the
+        configured position relative to the merger. Windows placed entirely
+        before or after the merger (negative/post-merger leads) are
+        zero-padded wherever they extend beyond the stored waveform.
         """
         # Compute the location of the signal based on the `right_pad`
         # attribute of the waveform sampler
@@ -439,19 +493,9 @@ class BaseAframeDataset(pl.LightningDataModule):
         start_idx = signal_idx - (kernel_size - self.right_pad_size)
         stop_idx = signal_idx + (kernel_size - self.left_pad_size)
 
-        # If start_idx is less than 0, add padding on the left
-        left_pad = -1 * min(start_idx, 0)
-        # If stop_idx is larger than the dataset, add padding on the right
-        right_pad = max(stop_idx - waveforms.shape[-1], 0)
-        # If we're padding on the left, we need to readjust the indices
-        if left_pad > 0:
-            start_idx += left_pad
-            stop_idx += left_pad
-
-        waveforms = torch.nn.functional.pad(waveforms, [left_pad, right_pad])
-        waveforms = waveforms[..., start_idx:stop_idx]
-
-        return waveforms
+        # Zero-pad wherever the requested window falls outside the stored
+        # waveform (e.g. windows positioned entirely before/after the merger)
+        return self._pad_and_slice(waveforms, start_idx, stop_idx)
 
     def load_val_background(self, fnames: list[str]):
         self._logger.info("Loading validation background data")
@@ -559,6 +603,7 @@ class BaseAframeDataset(pl.LightningDataModule):
             self.waveform_sampler.get_train_waveforms(
                 world_size, rank, self.device
             )
+        self._warn_if_waveform_too_short()
         self._logger.info("Initial dataloading complete")
 
         # now define some of the augmentation transforms
@@ -693,10 +738,6 @@ class BaseAframeDataset(pl.LightningDataModule):
             self.waveform_sampler.right_pad * self.hparams.sample_rate
         )
         max_start = int(signal_idx - self.left_pad_size)
-        max_stop = max_start + kernel_size
-        pad = max_stop - signals.size(-1)
-        if pad > 0:
-            signals = torch.nn.functional.pad(signals, [0, pad])
 
         # Prevent division by zero if we want only
         # a single validation view
@@ -710,7 +751,10 @@ class BaseAframeDataset(pl.LightningDataModule):
         for i in range(self.hparams.num_valid_views):
             start = max_start - int(i * step)
             stop = start + kernel_size
-            injected = X + signals[:, :, int(start) : int(stop)]
+            # Zero-pad views whose window falls outside the stored signal
+            # (windows entirely before/after the merger), instead of letting
+            # negative indices wrap around.
+            injected = X + self._pad_and_slice(signals, start, stop)
             X_inj.append(injected)
         X_inj = torch.stack(X_inj)
 
