@@ -17,7 +17,9 @@ from train.utils.jax.convert import tensor_to_jax_array, jax_array_to_tensor
 from train.utils.jax.load_model import load_model
 from train.utils.jax.training import (
     jax_apply_training_step,
+    jax_apply_segment_training_step,
     jax_inference,
+    pool_window_logits,
 )
 
 
@@ -40,6 +42,12 @@ class JaxClassificationAframe(AframeClassification):
         seed: int = 42,
         load_from_checkpoint: str | None = None,
         reset_optimizer_on_load: bool = True,
+        segment_window_length: float | None = None,
+        segment_num_windows: int = 1,
+        segment_pool: str = "logsumexp",
+        segment_pool_temperature: float = 0.1,
+        consistency_weight: float = 0.0,
+        consistency_type: str = "tv",
     ):
         super().__init__(
             arch=Architecture(),
@@ -49,6 +57,27 @@ class JaxClassificationAframe(AframeClassification):
             weight_decay=weight_decay,
         )
         self.automatic_optimization = False
+
+        # Segment-level (sliding-window) training/eval. When
+        # ``segment_window_length`` is set, the model is fed a kernel longer
+        # than its native window, unfolds it into ``segment_num_windows``
+        # overlapping sub-windows, scores each, and integrates/pools the
+        # per-window logits into a single segment logit (see
+        # ``train.utils.jax.training``). ``None`` disables it (single-window
+        # behaviour, fully backward compatible).
+        self.segment_window_length = segment_window_length
+        self.segment_num_windows = segment_num_windows
+        self.segment_pool = segment_pool
+        self.segment_pool_temperature = segment_pool_temperature
+        self.consistency_weight = consistency_weight
+        self.consistency_type = consistency_type
+        self._segment_enabled = segment_window_length is not None
+        # The window length in samples is derived lazily from the datamodule's
+        # (model) sample rate the first time it is needed -- this avoids
+        # duplicating sample_rate on the model (which would also collide with
+        # the datamodule's ``sample_rate`` hparam at logging time) and stays
+        # correct under optional resampling (``model_sample_rate``).
+        self._window_samples = None
 
         logger.info(f"JAX devices: {jax.devices()}")
 
@@ -112,7 +141,120 @@ class JaxClassificationAframe(AframeClassification):
     def score(self, X: torch.Tensor) -> torch.Tensor:
         return self(X)
 
+    def _advance_optimizers(self):
+        # Needed for lightning when self.automatic_optimization = False
+        optimizers = self.optimizers()
+        if isinstance(optimizers, (list, tuple)):
+            for opt in optimizers:
+                opt.step()
+        else:
+            optimizers.step()
+
+    def _get_window_samples(self) -> int:
+        """Window length in samples, derived from the datamodule's rate."""
+        if self._window_samples is None:
+            sr = self.trainer.datamodule.model_sample_rate
+            self._window_samples = int(round(self.segment_window_length * sr))
+        return self._window_samples
+
+    def _unfold(self, X: torch.Tensor) -> torch.Tensor:
+        """Unfold a long kernel ``(B, C, T)`` into the batch axis.
+
+        Returns ``(B * N, C, W)`` in sample-major order
+        (``[s0w0, s0w1, ..., s1w0, ...]``) so per-window logits reshape back to
+        ``(B, N)``. The ``N`` windows of length ``W`` start at evenly spaced
+        integer offsets from 0 to ``T - W``.
+        """
+        B, C, T = X.shape
+        W = self._get_window_samples()
+        N = self.segment_num_windows
+        if T < W:
+            raise ValueError(
+                f"kernel length {T} samples is shorter than the segment "
+                f"window {W} samples (segment_window_length="
+                f"{self.segment_window_length}s)"
+            )
+        if N == 1:
+            starts = [0]
+        else:
+            starts = [round(i * (T - W) / (N - 1)) for i in range(N)]
+        windows = torch.stack([X[:, :, s : s + W] for s in starts], dim=1)
+        return windows.reshape(B * N, C, W)
+
+    def _segment_forward(self, X: torch.Tensor) -> torch.Tensor:
+        B = X.shape[0]
+        N = self.segment_num_windows
+        X_win = tensor_to_jax_array(self._unfold(X))
+
+        self.rng_key, step_k = jr.split(self.rng_key)
+        keys = jr.split(step_k, X_win.shape[0])
+
+        logits, new_state = jax_inference(
+            self.jax_model, X_win, self.jax_model_state, keys
+        )
+        self.jax_model_state = new_state
+
+        logits_bn = logits.reshape(B, N)
+        pooled = pool_window_logits(
+            logits_bn, self.segment_pool, self.segment_pool_temperature
+        )
+        return jax_array_to_tensor(pooled)
+
+    def _segment_training_step(self, batch):
+        X, y, _ = batch
+        N = self.segment_num_windows
+        X_win = tensor_to_jax_array(self._unfold(X))
+        y_j = tensor_to_jax_array(y)
+
+        self.rng_key, k = jr.split(self.rng_key)
+        keys = jr.split(k, X_win.shape[0])
+
+        (
+            self.jax_model,
+            self.jax_model_state,
+            self.opt_state,
+            metrics,
+        ) = jax_apply_segment_training_step(
+            self.jax_model,
+            self.jax_model_filter_spec,
+            self.jax_model_state,
+            X_win,
+            y_j,
+            N,
+            self.segment_pool,
+            self.segment_pool_temperature,
+            self.consistency_weight,
+            self.consistency_type,
+            self.opt_state,
+            self.optimizer.update,
+            keys,
+        )
+
+        for name in ("loss", "bce", "consistency"):
+            self.log(
+                f"train/{name}",
+                metrics[name].item(),
+                on_step=True,
+                on_epoch=True,
+                prog_bar=(name == "loss"),
+                sync_dist=True,
+            )
+        self.log(
+            "train/lr",
+            float(self.opt_state[1].hyperparams["learning_rate"]),
+            on_step=True,
+            on_epoch=True,
+            prog_bar=True,
+            sync_dist=True,
+        )
+
+        self._advance_optimizers()
+        return torch.tensor(0.0)
+
     def training_step(self, batch):
+        if self._segment_enabled:
+            return self._segment_training_step(batch)
+
         batch = tensor_to_jax_array(batch)
         X, y, params = batch
 
@@ -154,17 +296,14 @@ class JaxClassificationAframe(AframeClassification):
             sync_dist=True,
         )
 
-        # Needed for lightning if self.automatic_optimization = False
-        optimizers = self.optimizers()
-        if isinstance(optimizers, (list, tuple)):
-            for opt in optimizers:
-                opt.step()
-        else:
-            optimizers.step()
+        self._advance_optimizers()
 
         return torch.tensor(0.0)
 
     def forward(self, X: torch.Tensor) -> torch.Tensor:
+        if self._segment_enabled:
+            return self._segment_forward(X)
+
         X = tensor_to_jax_array(X)
 
         self.rng_key, step_k = jr.split(self.rng_key)

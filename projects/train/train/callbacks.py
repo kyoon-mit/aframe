@@ -85,6 +85,12 @@ class WandbSaveConfig(pl.cli.SaveConfigCallback):
             # pop off unecessary trainer args
             config = self.config.as_dict()
             config.pop("trainer")
+            # log the condor job id (set in the submit file as
+            # CONDOR_JOB_ID=$(Cluster).$(Process)) so runs can be traced
+            # back to their cluster job
+            condor_job_id = os.getenv("CONDOR_JOB_ID")
+            if condor_job_id is not None:
+                config["condor_job_id"] = condor_job_id
             wandb_logger.experiment.config.update(config)
 
 

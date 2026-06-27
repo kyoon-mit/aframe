@@ -2,6 +2,7 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 import optax
+from jax.scipy.special import logsumexp
 
 from jaxtyping import Array, PRNGKeyArray
 
@@ -22,6 +23,150 @@ def _bce_loss(logits: Array, y: Array) -> Array:
     """Binary cross entropy from combined outputs."""
     return jnp.mean(
         optax.sigmoid_binary_cross_entropy(logits, y.astype(logits.dtype))
+    )
+
+
+# ---------------------------------------------------------------------------
+# Segment-level (sliding-window) training: the model is fed a kernel longer
+# than its native window, unfolded into ``num_windows`` overlapping sub-windows
+# (flattened into the batch axis by the caller), scored per window, then the
+# per-window logits are integrated/pooled into a single segment logit that BCE
+# grades. This trains the deployed (slide -> integrate -> cluster) statistic
+# rather than a single window in isolation.
+# ---------------------------------------------------------------------------
+
+
+def pool_window_logits(
+    logits_bn: Array, method: str, temperature: float
+) -> Array:
+    """Pool per-window logits ``(B, N)`` into a segment logit ``(B, 1)``.
+
+    ``method``:
+        - ``"mean"``: average over windows.
+        - ``"max"``: hard max over windows (matches inference clustering).
+        - ``"logsumexp"``: smooth max ``tau * logsumexp(x / tau)`` with the
+          ``tau * log(N)`` normalisation removed, so it interpolates between
+          ``max`` (``tau -> 0``) and ``mean`` (``tau -> inf``) while staying on
+          the logit scale.
+    """
+    if method == "mean":
+        pooled = jnp.mean(logits_bn, axis=1)
+    elif method == "max":
+        pooled = jnp.max(logits_bn, axis=1)
+    elif method == "logsumexp":
+        tau = temperature
+        n = logits_bn.shape[1]
+        pooled = tau * (logsumexp(logits_bn / tau, axis=1) - jnp.log(n))
+    else:
+        raise ValueError(f"unknown pool method {method!r}")
+    return pooled[:, None]
+
+
+def consistency_penalty(logits_bn: Array, y: Array, kind: str) -> Array:
+    """Temporal-consistency / correlated-FP penalty on background windows.
+
+    Operates on the per-window logits ``(B, N)`` of background rows
+    (``y == 0``) only, discouraging correlated bursts as the window slides.
+
+    ``kind``:
+        - ``"tv"``: mean absolute difference of consecutive windows
+          (encourages a flat response).
+        - ``"var"``: across-window variance.
+        - ``"max"``: mean per-row max sigmoid (penalises the peak response).
+
+    Returns 0 when there are no background rows (or ``N < 2`` for ``tv``).
+    """
+    n = logits_bn.shape[1]
+    bg = (y.reshape(-1) < 0.5).astype(logits_bn.dtype)  # (B,)
+    denom = jnp.maximum(jnp.sum(bg), 1.0)
+    if kind == "tv":
+        if n < 2:
+            return jnp.asarray(0.0, logits_bn.dtype)
+        per_row = jnp.mean(jnp.abs(jnp.diff(logits_bn, axis=1)), axis=1)
+    elif kind == "var":
+        per_row = jnp.var(logits_bn, axis=1)
+    elif kind == "max":
+        per_row = jnp.max(jax.nn.sigmoid(logits_bn), axis=1)
+    else:
+        raise ValueError(f"unknown consistency type {kind!r}")
+    return jnp.sum(per_row * bg) / denom
+
+
+def jax_segment_loss_fn(
+    diff_model: eqx.Module,
+    static_model: eqx.Module,
+    state: eqx.nn.State,
+    X_windows: Array,
+    y: Array,
+    num_windows: int,
+    pool_method: str,
+    pool_temperature: float,
+    consistency_weight: float,
+    consistency_type: str,
+    key: PRNGKeyArray,
+) -> tuple[Array, tuple[eqx.nn.State, Array, Array]]:
+    """BCE on the pooled segment logit (A) + optional consistency penalty (B).
+
+    ``X_windows`` has the windows flattened into the batch axis in sample-major
+    order, i.e. shape ``(B * num_windows, C, W)`` laid out as
+    ``[s0w0, s0w1, ..., s1w0, ...]`` so the per-window logits reshape back to
+    ``(B, num_windows)``.
+    """
+    model = eqx.combine(diff_model, static_model)
+    logits, new_state = jax_fwd_batch(model, X_windows, state, key)
+    logits_bn = logits.reshape(-1, num_windows)
+    pooled = pool_window_logits(logits_bn, pool_method, pool_temperature)
+    y = y.reshape(-1, 1)
+    bce = _bce_loss(pooled, y)
+    if consistency_weight > 0.0:
+        penalty = consistency_penalty(logits_bn, y, consistency_type)
+    else:
+        penalty = jnp.asarray(0.0, pooled.dtype)
+    loss = bce + consistency_weight * penalty
+    return loss, (new_state, bce, penalty)
+
+
+@eqx.filter_jit
+def jax_apply_segment_training_step(
+    model: eqx.Module,
+    model_filter_spec,
+    state: eqx.nn.State,
+    X_windows: Array,
+    y: Array,
+    num_windows: int,
+    pool_method: str,
+    pool_temperature: float,
+    consistency_weight: float,
+    consistency_type: str,
+    opt_state,
+    opt_update,
+    key: PRNGKeyArray,
+) -> tuple[eqx.Module, eqx.nn.State, object, dict]:
+    diff_model, static_model = eqx.partition(model, model_filter_spec)
+    (loss, (new_state, bce, penalty)), grads = eqx.filter_value_and_grad(
+        jax_segment_loss_fn, has_aux=True
+    )(
+        diff_model,
+        static_model,
+        state,
+        X_windows,
+        y,
+        num_windows,
+        pool_method,
+        pool_temperature,
+        consistency_weight,
+        consistency_type,
+        key,
+    )
+    updates, new_opt_state = opt_update(grads, opt_state, diff_model)
+    new_model = eqx.combine(
+        eqx.apply_updates(diff_model, updates), static_model
+    )
+    return (
+        new_model,
+        new_state,
+        new_opt_state,
+        {"loss": loss, "bce": bce, "consistency": penalty},
     )
 
 

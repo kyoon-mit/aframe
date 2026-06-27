@@ -1,24 +1,28 @@
-# OriginalLinOSS (JAX/Equinox) binary-classification config.
+# OriginalLinOSS (JAX/Equinox) binary-classification config -- SEGMENT mode.
 #
-# Detection-statistic classifier using the JAX OriginalLinOSS architecture
-# (single logit) via JaxClassificationAframe.
+# Variant of 4s_merger.yaml that trains the *deployed* statistic: the model is
+# fed a kernel longer than its native 4.0 s window (kernel_length: 4.5) and
+# internally unfolds it into 5 overlapping 4.0 s sub-windows (stride 0.125 s),
+# scores each, then integrates/pools the per-window logits into a single segment
+# logit that BCE grades (mechanism "A"). The temporal-consistency / correlated
+# false-positive penalty (mechanism "B") is wired but off by default
+# (consistency_weight: 0.0) so it can be enabled in isolation later.
 #
-# OriginalLinOSS is a faithful port of discretax's plain LinOSS model (linear
-# encoder + stacked LinOSS StandardBlock blocks + MLP head) using the
-# generalized real-pair LinOSS sequence mixer (discretax PR #74: IM/IMEX/
-# IMEX2/IMEX3/EX, AG/RT init, stability projection, multi-head, input
-# normalization). Unlike LinOSS/LinOSS2 there is no
-# pooling backbone and no intermediate ResNet.
+# The unfold + pool happens inside the model (JaxClassificationAframe), so the
+# validation path needs no change: build_val_batches already yields 4.5 s
+# kernels (sample_length keys off kernel_length) and validation_step scores via
+# self.forward, which now pools internally -- exactly matching training.
 model:
   class_path: train.model.jax.JaxClassificationAframe
   init_args:
+    # load_from_checkpoint: /home/barmstrong/aframe_official/projects/train/outputs/aframe/bbwrbwsx/checkpoints/checkpoint_step_14000_metric_0.506260097026825.eqx
     arch:
       class_path: architectures.supervised.SupervisedTimeDomainOriginalLinOSS
       init_args:
         time_in_features: 2 # H1, L1
         time_hidden_dim: 64
         time_num_blocks: 3
-        time_dropout_rate: 0.05
+        time_dropout_rate: 0
         time_state_dim: 64
         time_r_min: 0.9
         time_theta_max: 3.14159265359
@@ -43,12 +47,27 @@ model:
         d_output: 1 # single classification logit
         seed: 0
 
-    learning_rate: 1e-4
+    learning_rate: 5e-4
     weight_decay: 0.01
     warmup_steps: 1000
     max_steps: 3000000
-    clip_grad_norm: 10.0
+    clip_grad_norm: 1000.0
     seed: 42
+
+    # --- segment (sliding-window) training -------------------------------
+    # A: native window the network processes (4.0 s) unfolded into 5 windows
+    #    spanning the 4.5 s kernel -> 0.125 s stride. logsumexp soft-max pool
+    #    (tau -> 0 = hard max as inference clusters; larger tau -> mean).
+    segment_window_length: 4.0
+    segment_num_windows: 3
+    segment_pool: logsumexp
+    segment_pool_temperature: 0.1
+    # B: correlated-FP penalty on background windows -- wired but off.
+    consistency_weight: 0.5
+    consistency_type: tv # tv | var | max
+    # NB: segment_window_length is in seconds; it is converted to samples using
+    # the datamodule's sample_rate at runtime (no sample_rate needed here).
+
     metric:
       class_path: train.metrics.TimeSlideAUROC
       init_args:
@@ -64,11 +83,17 @@ data:
 
     sample_rate: 2048
     windowing:
-      kernel_length: 1.0
-      window_lead_min: 0
-      window_lead_max: 0.25
+      # 5 s kernel = 4.0 s model window + 1 s internal slide (5 windows).
+      kernel_length: 5
+      # Merger placement relative to the 4.5 s kernel's leading edge. The wide
+      # 2 s jitter range moves the merger across many internal-window positions
+      # so the model learns a consistent response as the window slides. NOTE:
+      # sanity-check that the injected merger lands inside at least one of the 5
+      # windows for these values (see plan verification step 4).
+      window_lead_min: -0.25
+      window_lead_max: 1.75
 
-    batch_size: 256
+    batch_size: 128
     batches_per_epoch: 1000
     chunk_size: 10000
     chunks_per_epoch: 10
@@ -83,7 +108,7 @@ data:
     mute_prob: 0.055
     max_num_workers: 16
     valid_stride: 0.5
-    num_valid_views: 5
+    num_valid_views: 1
     valid_livetime: 57600
 
     snr_sampler:
@@ -130,7 +155,7 @@ trainer:
   logger:
     - class_path: train.callbacks.AframeWandbLogger
       init_args:
-        name: "aframe_original_linoss_classification_1s_merger"
+        name: "aframe_original_linoss_classification_4s_merger_segment"
         save_dir: outputs
         project: "aframe"
   callbacks:

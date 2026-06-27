@@ -12,13 +12,14 @@
 model:
   class_path: train.model.jax.JaxClassificationAframe
   init_args:
+    load_from_checkpoint: /home/barmstrong/aframe_official/projects/train/outputs/aframe/bbwrbwsx/checkpoints/checkpoint_step_14000_metric_0.506260097026825.eqx
     arch:
       class_path: architectures.supervised.SupervisedTimeDomainOriginalLinOSS
       init_args:
         time_in_features: 2 # H1, L1
         time_hidden_dim: 64
         time_num_blocks: 3
-        time_dropout_rate: 0.05
+        time_dropout_rate: 0
         time_state_dim: 64
         time_r_min: 0.9
         time_theta_max: 3.14159265359
@@ -79,6 +80,8 @@ data:
     psd_length: 20
     highpass: 20
     waveform_prob: 0.277
+    swap_prob: 0.014
+    mute_prob: 0.055
     max_num_workers: 16
     valid_stride: 0.5
     num_valid_views: 5
@@ -91,8 +94,8 @@ data:
         constant_params:
           maximum: 50
         start_params:
-          minimum: 20
-          index: -1
+          minimum: 8
+          index: -3
         end_params:
           minimum: 8
           index: -3
