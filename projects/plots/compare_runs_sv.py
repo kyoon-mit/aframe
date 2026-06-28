@@ -67,6 +67,18 @@ def top_method(sv_dir, combo_keys):
     return top, methods[top], len(methods)
 
 
+def rank_runs(runs, combo_keys):
+    """Order run names best-first by mean normalised left-edge SV of their
+    top method (same metric used to pick the top method within a run)."""
+    left = {
+        name: np.array([sv[k][0] for k in combo_keys])
+        for name, (_, (_, sv), _) in runs.items()
+    }
+    best = np.max(np.stack(list(left.values())), axis=0)
+    best[best == 0] = 1.0
+    return sorted(runs, key=lambda n: np.mean(left[n] / best), reverse=True)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--runs-dir", default=DEFAULT_RUNS_DIR)
@@ -77,6 +89,20 @@ def main():
         action="store_true",
         help="include runs that have not finished all integration methods "
         "(top method is then chosen among the methods available so far)",
+    )
+    ap.add_argument(
+        "--top-k",
+        type=int,
+        default=None,
+        help="only plot the K best-performing runs against the reference "
+        "(ranked by normalised left-edge sensitive volume)",
+    )
+    ap.add_argument(
+        "--exclude",
+        nargs="+",
+        default=[],
+        metavar="RUN",
+        help="run names to exclude from the comparison",
     )
     args = ap.parse_args()
 
@@ -113,6 +139,23 @@ def main():
                 n_complete,
             )
             del runs[n]
+
+    for name in args.exclude:
+        if name in runs:
+            logging.info("excluding run %s", name)
+            del runs[name]
+        else:
+            logging.warning("--exclude run %s not found, ignoring", name)
+
+    if not runs:
+        raise SystemExit("no runs left to plot after filtering")
+
+    if args.top_k is not None and args.top_k < len(runs):
+        ranking = rank_runs(runs, MASS_COMBOS)
+        dropped = ranking[args.top_k :]
+        for name in dropped:
+            logging.info("dropping run %s (outside top %d)", name, args.top_k)
+            del runs[name]
 
     logging.info(
         "comparing %d runs against reference %s", len(runs), args.reference

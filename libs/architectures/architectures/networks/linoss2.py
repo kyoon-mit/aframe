@@ -221,6 +221,9 @@ class LinOSSSequenceMixer(eqx.Module):
         use_head_output_projection: bool = False,
         A_max: float = 1.0,
         G_max: float = 1.0,
+        step_init: str = "logit_normal",
+        dt_min: float = 1e-3,
+        dt_max: float = 0.1,
         dtype: jnp.dtype = jnp.float32,
         **kwargs,
     ):
@@ -289,7 +292,14 @@ class LinOSSSequenceMixer(eqx.Module):
 
         if not damping:
             A_flat, G_flat, steps_flat = _init_linoss(
-                nxt(), state_dim, 0.0, A_max, dtype=dtype
+                nxt(),
+                state_dim,
+                0.0,
+                A_max,
+                step_init=step_init,
+                dt_min=dt_min,
+                dt_max=dt_max,
+                dtype=dtype,
             )
         else:
             if initialization == "RT":
@@ -301,11 +311,23 @@ class LinOSSSequenceMixer(eqx.Module):
                     1.0,
                     0.0,
                     theta_max,
+                    step_init=step_init,
+                    dt_min=dt_min,
+                    dt_max=dt_max,
                     dtype=dtype,
                 )
             elif initialization == "AG":
                 A_flat, G_flat, steps_flat = _init_damped_linoss_ag(
-                    nxt(), state_dim, 0.0, A_max, 0.0, G_max, dtype=dtype
+                    nxt(),
+                    state_dim,
+                    0.0,
+                    A_max,
+                    0.0,
+                    G_max,
+                    step_init=step_init,
+                    dt_min=dt_min,
+                    dt_max=dt_max,
+                    dtype=dtype,
                 )
             else:
                 raise NotImplementedError(
@@ -445,11 +467,56 @@ def _simple_uniform_init(
     return weights
 
 
+def _init_steps(
+    rng: PRNGKeyArray,
+    state_dim: int,
+    step_init: str = "logit_normal",
+    dt_min: float = 1e-3,
+    dt_max: float = 0.1,
+    dtype: jnp.dtype = jnp.float32,
+):
+    """Initialize the pre-sigmoid step logits.
+
+    The forward pass applies ``sigmoid`` to ``steps`` to obtain the
+    discretization timestep ``dt in (0, 1)``.
+
+    - ``"logit_normal"`` (default): ``steps ~ Normal(0, 0.5)``. After the
+      sigmoid this concentrates ``dt`` around ~0.5 (the original LinOSS init),
+      i.e. all modes share roughly the same timescale.
+    - ``"log_uniform"``: ``dt`` is sampled log-uniformly in
+      ``[dt_min, dt_max]`` (S4D-style multi-decade timescale spread) and
+      ``steps = logit(dt)``.
+      Requires ``0 < dt_min < dt_max < 1`` (sigmoid caps ``dt`` at 1).
+
+    Returns:
+        Pre-sigmoid step logits of shape ``(state_dim,)``.
+    """
+    if step_init == "logit_normal":
+        return normal(stddev=0.5)(rng, (state_dim,), dtype=dtype)
+    if step_init == "log_uniform":
+        if not 0.0 < dt_min < dt_max < 1.0:
+            raise ValueError(
+                "log_uniform step init requires 0 < dt_min < dt_max < 1, "
+                f"got dt_min={dt_min}, dt_max={dt_max}"
+            )
+        log_dt = random.uniform(rng, shape=(state_dim,)) * (
+            math.log(dt_max) - math.log(dt_min)
+        ) + math.log(dt_min)
+        dt = jnp.exp(log_dt)
+        # logit(dt) = log(dt) - log(1 - dt) = log_dt - log1p(-dt)
+        steps = log_dt - jnp.log1p(-dt)
+        return steps.astype(dtype)
+    raise NotImplementedError(f"step_init {step_init} not implemented")
+
+
 def _init_linoss(
     rng: PRNGKeyArray,
     state_dim: int,
     A_min: float,
     A_max: float,
+    step_init: str = "logit_normal",
+    dt_min: float = 1e-3,
+    dt_max: float = 0.1,
     dtype: jnp.dtype = jnp.float32,
 ):
     """Initialize recurrence parameters for undamped LinOSS.
@@ -463,7 +530,7 @@ def _init_linoss(
     A_diag = (
         A_min + random.uniform(A_key, shape=(state_dim,)) * (A_max - A_min)
     ).astype(dtype)
-    steps = normal(stddev=0.5)(step_key, (state_dim,), dtype=dtype)
+    steps = _init_steps(step_key, state_dim, step_init, dt_min, dt_max, dtype)
     return A_diag, jnp.zeros_like(A_diag), steps
 
 
@@ -474,6 +541,9 @@ def _init_damped_linoss_ag(
     A_max: float,
     G_min: float,
     G_max: float,
+    step_init: str = "logit_normal",
+    dt_min: float = 1e-3,
+    dt_max: float = 0.1,
     dtype: jnp.dtype = jnp.float32,
 ):
     """Initialize recurrence parameters for Damped LinOSS (AG strategy).
@@ -490,7 +560,7 @@ def _init_damped_linoss_ag(
     G_diag = (
         G_min + random.uniform(G_key, shape=(state_dim,)) * (G_max - G_min)
     ).astype(dtype)
-    steps = normal(stddev=0.5)(step_key, (state_dim,), dtype=dtype)
+    steps = _init_steps(step_key, state_dim, step_init, dt_min, dt_max, dtype)
     return A_diag, G_diag, steps
 
 
@@ -502,6 +572,9 @@ def _init_damped_linoss_rt(
     r_max: float,
     theta_min: float,
     theta_max: float,
+    step_init: str = "logit_normal",
+    dt_min: float = 1e-3,
+    dt_max: float = 0.1,
     dtype: jnp.dtype = jnp.float32,
 ):
     """Initialize recurrence parameters for Damped LinOSS (RT strategy).
@@ -515,7 +588,9 @@ def _init_damped_linoss_rt(
     """
     # Sample timesteps
     mag_key, arg_key, step_key = jr.split(rng, 3)
-    step_vals = normal(stddev=0.5)(step_key, (state_dim,))
+    step_vals = _init_steps(
+        step_key, state_dim, step_init, dt_min, dt_max, dtype
+    )
     step_sigmoid = nn.sigmoid(step_vals)
 
     # Sample eigenvalues in ring

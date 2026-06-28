@@ -105,6 +105,10 @@ DEFAULT_METHODS = [
     ("mean_0.25s", "mean", 0.25),
     ("mean_0.5s", "mean", 0.5),
     ("mean_2.0s", "mean", 2.0),
+    ("mean_2.5s", "mean", 2.5),
+    ("mean_3.0s", "mean", 3.0),
+    ("mean_3.5s", "mean", 3.5),
+    ("mean_4.0s", "mean", 4.0),
     ("max_1.0s", "max", 1.0),
     ("max_2.0s", "max", 2.0),
     ("ema_tau0.5s", "ema", 0.5),
@@ -114,6 +118,9 @@ DEFAULT_METHODS = [
     # short-window family from the held-out scorer sweep (tri:0.25 was the best
     # single default; the others win on a few specific models).
     ("mean_0.125s", "mean", 0.125),
+    ("tri_0.1s", "tri", 0.1),
+    ("tri_0.15s", "tri", 0.15),
+    ("tri_0.2s", "tri", 0.2),
     ("tri_0.25s", "tri", 0.25),
     ("median_0.1875s", "median", 0.1875),
     ("max_0.25s", "max", 0.25),

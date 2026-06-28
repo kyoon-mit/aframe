@@ -1,34 +1,28 @@
-# LinOSS2 (JAX/Equinox) chirp-mass regression config.
+# LinOSS2 (JAX/Equinox) binary-classification config -- SEGMENT mode.
 #
-# Same objective as configs/regression/regression.yaml (predict chirp_mass
-# from whitened strain) but using the generalized JAX LinOSS2 architecture
-# (multi-head, IM/IMEX/IMEX2/IMEX3/EX discretizations, AG/RT init, stability
-# projection) with a GaussianNLL (BetaNLL) + spread objective via
-# JaxRegressionAframe.
+# Variant of 4s_merger.yaml that trains the *deployed* statistic: the model is
+# fed a kernel longer than its native 4.0 s window (kernel_length: 4.5) and
+# internally unfolds it into 5 overlapping 4.0 s sub-windows (stride 0.125 s),
+# scores each, then integrates/pools the per-window logits into a single segment
+# logit that BCE grades (mechanism "A"). The temporal-consistency / correlated
+# false-positive penalty (mechanism "B") is wired but off by default
+# (consistency_weight: 0.0) so it can be enabled in isolation later.
 #
-# Key points (mirroring linoss/4s_merger.yaml):
-#   - waveform_prob: 1.0  (every sample is injected)
-#   - ChirpMass param transform supplies the regression target
-#   - d_output: 2  (chirp_mass mean + pre-Softplus log-variance)
-#
-# NOTE: LinOSS2 has a different parameter layout than LinOSS, so the LinOSS
-# checkpoint is not loaded here. Set `load_from_checkpoint` to a LinOSS2
-# checkpoint to resume/fine-tune.
-seed_everything: 42
+# The unfold + pool happens inside the model (JaxClassificationAframe), so the
+# validation path needs no change: build_val_batches already yields 4.5 s
+# kernels (sample_length keys off kernel_length) and validation_step scores via
+# self.forward, which now pools internally -- exactly matching training.
 model:
-  class_path: train.model.jax.JaxRegressionAframe
+  class_path: train.model.jax.JaxClassificationAframe
   init_args:
-    load_from_checkpoint: "/home/barmstrong/aframe_official/projects/train/outputs/aframe/y3ez4n69/checkpoints/checkpoint_step_221000_metric_0.5174694061279297.eqx"
+    load_from_checkpoint: "/home/barmstrong/aframe_official/projects/train/outputs/aframe/obwmd6q7/checkpoints/checkpoint_step_269000_metric_0.5269203782081604.eqx"
     arch:
       class_path: architectures.regression.RegressionTimeDomainLinOSS2
       init_args:
-        num_ifos: 2 # H1, L1
-        sample_rate: 2048
-        kernel_length: 4.0
         time_in_features: 2 # H1, L1
         time_hidden_dim: 64
         time_num_blocks: 3
-        time_dropout_rate: 0.1
+        time_dropout_rate: 0
         time_state_dim: 64
         time_r_min: 0.9
         time_theta_max: 3.14159265359
@@ -56,20 +50,30 @@ model:
         resnet_norm_groups: 16
         mlp_width: 64
         mlp_depth: 2
-        d_output: 2 # chirp_mass mean + pre-Softplus log-var
+        d_output: 1 # single classification logit
         seed: 0
-    d_output: 2 # chirp_mass mean + pre-Softplus log-var
-    normalize_input: true
-    y_mean: [1.2] # centre of BNS chirp_mass prior [0.87, 2.22]
-    y_std: [0.35] # approx std of uniform [0.87, 2.22]
+
     learning_rate: 1e-4
     weight_decay: 0.01
     warmup_steps: 1000
     max_steps: 3000000
-    clip_grad_norm: 100.0
-    beta_nll: 0.3
-    lambda_spread: 0.0
-    seed: 42
+    clip_grad_norm: 1000.0
+    seed: 43
+
+    # --- segment (sliding-window) training -------------------------------
+    # A: native window the network processes (4.0 s) unfolded into 5 windows
+    #    spanning the 4.5 s kernel -> 0.125 s stride. logsumexp soft-max pool
+    #    (tau -> 0 = hard max as inference clusters; larger tau -> mean).
+    segment_window_length: 4.0
+    segment_num_windows: 3
+    segment_pool: logsumexp
+    segment_pool_temperature: 0.1
+    # B: correlated-FP penalty on background windows -- wired but off.
+    consistency_weight: 0
+    consistency_type: tv # tv | var | max
+    # NB: segment_window_length is in seconds; it is converted to samples using
+    # the datamodule's sample_rate at runtime (no sample_rate needed here).
+
     metric:
       class_path: train.metrics.TimeSlideAUROC
       init_args:
@@ -85,11 +89,17 @@ data:
 
     sample_rate: 2048
     windowing:
-      kernel_length: 4.0
-      window_lead_min: 0
-      window_lead_max: 0.5
+      # 5 s kernel = 4.0 s model window + 1 s internal slide (5 windows).
+      kernel_length: 5
+      # Merger placement relative to the 4.5 s kernel's leading edge. The wide
+      # 2 s jitter range moves the merger across many internal-window positions
+      # so the model learns a consistent response as the window slides. NOTE:
+      # sanity-check that the injected merger lands inside at least one of the 5
+      # windows for these values (see plan verification step 4).
+      window_lead_min: -0.25
+      window_lead_max: 1.75
 
-    batch_size: 128
+    batch_size: 64
     batches_per_epoch: 1000
     chunk_size: 10000
     chunks_per_epoch: 10
@@ -99,10 +109,12 @@ data:
     fftlength: 2.0
     psd_length: 20
     highpass: 20
-    waveform_prob: 1.0
+    waveform_prob: 0.277
+    swap_prob: 0.014
+    mute_prob: 0.055
     max_num_workers: 16
     valid_stride: 0.5
-    num_valid_views: 5
+    num_valid_views: 1
     valid_livetime: 57600
 
     snr_sampler:
@@ -115,9 +127,9 @@ data:
           minimum: 8
           index: -3
         end_params:
-          minimum: 4
+          minimum: 8
           index: -3
-        decay_steps: 15000
+        decay_steps: 10000
 
     param_transforms:
       - class_path: train.transforms.ChirpMass
@@ -149,30 +161,30 @@ trainer:
   logger:
     - class_path: train.callbacks.AframeWandbLogger
       init_args:
-        name: "aframe_linoss2_regression_4s_merger"
+        name: "aframe_linoss2_classification_4s_merger_segment"
         save_dir: outputs
         project: "aframe"
   callbacks:
     - class_path: lightning.pytorch.callbacks.EarlyStopping
       init_args:
-        # GaussianNLL validation objective; lower is better.
+        # TimeSlideAUROC is higher-is-better.
         monitor: "validation/TimeSlideAUROC_epoch"
         mode: "max"
-        patience: 100
+        patience: 50
     # equinox-aware checkpointer; the default ModelCheckpoint cannot
     # serialise the JAX/equinox model living on the LightningModule.
     - class_path: train.utils.jax.save_model.JAXCheckpointManager
       init_args:
         monitor: "validation/TimeSlideAUROC_epoch"
         mode: "max"
-        save_top_k: 5
+        save_top_k: 3
         warmup_steps: 1000
 
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: epoch
+
     - class_path: train.metric.plotting.SnrVsScoreScatterCallback
-
-    - class_path: train.metric.plotting.ChirpMassErrorVsSnrCallback
-
-    - class_path: train.metric.plotting.TrueVsPredictedScatterCallback
 
   strategy: auto
   devices: auto

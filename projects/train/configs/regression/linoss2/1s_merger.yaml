@@ -28,7 +28,7 @@ model:
         time_in_features: 2 # H1, L1
         time_hidden_dim: 64
         time_num_blocks: 3
-        time_dropout_rate: 0.1
+        time_dropout_rate: 0
         time_state_dim: 64
         time_r_min: 0.9
         time_theta_max: 3.14159265359
@@ -85,11 +85,11 @@ data:
 
     sample_rate: 2048
     windowing:
-      kernel_length: 4.0
+      kernel_length: 1.0
       window_lead_min: 0
       window_lead_max: 0.5
 
-    batch_size: 128
+    batch_size: 256
     batches_per_epoch: 1000
     chunk_size: 10000
     chunks_per_epoch: 10
@@ -115,9 +115,9 @@ data:
           minimum: 8
           index: -3
         end_params:
-          minimum: 4
+          minimum: 8
           index: -3
-        decay_steps: 15000
+        decay_steps: 10000
 
     param_transforms:
       - class_path: train.transforms.ChirpMass
@@ -149,7 +149,7 @@ trainer:
   logger:
     - class_path: train.callbacks.AframeWandbLogger
       init_args:
-        name: "aframe_linoss2_regression_4s_merger"
+        name: "aframe_linoss2_regression_1s_merger"
         save_dir: outputs
         project: "aframe"
   callbacks:

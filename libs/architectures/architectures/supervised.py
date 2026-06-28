@@ -329,6 +329,8 @@ class SupervisedTimeDomainOriginalLinOSS(JaxArchitecture):
         mlp_width: int = 64,
         mlp_depth: int = 2,
         d_output: int = 1,
+        readout: str = "mean",
+        readout_channels: int | None = None,
         *,
         seed: int = 0,
     ) -> None:
@@ -359,6 +361,8 @@ class SupervisedTimeDomainOriginalLinOSS(JaxArchitecture):
             mlp_width=mlp_width,
             mlp_depth=mlp_depth,
             d_output=d_output,
+            readout=readout,
+            readout_channels=readout_channels,
             key=jr.PRNGKey(seed),
         )
 

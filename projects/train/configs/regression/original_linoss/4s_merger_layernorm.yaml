@@ -1,26 +1,25 @@
-# LinOSS2 (JAX/Equinox) chirp-mass regression config.
+# OriginalLinOSS (JAX/Equinox) chirp-mass regression config.
 #
 # Same objective as configs/regression/regression.yaml (predict chirp_mass
-# from whitened strain) but using the generalized JAX LinOSS2 architecture
-# (multi-head, IM/IMEX/IMEX2/IMEX3/EX discretizations, AG/RT init, stability
-# projection) with a GaussianNLL (BetaNLL) + spread objective via
-# JaxRegressionAframe.
+# from whitened strain) but using the JAX OriginalLinOSS architecture with a
+# GaussianNLL (BetaNLL) + spread objective via JaxRegressionAframe.
+#
+# OriginalLinOSS is a faithful port of discretax's plain LinOSS model (linear
+# encoder + stacked LinOSS StandardBlock blocks + MLP head) using the
+# generalized real-pair LinOSS sequence mixer (discretax PR #74: IM/IMEX/
+# IMEX2/IMEX3/EX, AG/RT init, stability projection, multi-head, input
+# normalization). Unlike LinOSS/LinOSS2 there is no
+# pooling backbone and no intermediate ResNet.
 #
 # Key points (mirroring linoss/4s_merger.yaml):
 #   - waveform_prob: 1.0  (every sample is injected)
 #   - ChirpMass param transform supplies the regression target
 #   - d_output: 2  (chirp_mass mean + pre-Softplus log-variance)
-#
-# NOTE: LinOSS2 has a different parameter layout than LinOSS, so the LinOSS
-# checkpoint is not loaded here. Set `load_from_checkpoint` to a LinOSS2
-# checkpoint to resume/fine-tune.
-seed_everything: 42
 model:
   class_path: train.model.jax.JaxRegressionAframe
   init_args:
-    load_from_checkpoint: "/home/barmstrong/aframe_official/projects/train/outputs/aframe/y3ez4n69/checkpoints/checkpoint_step_221000_metric_0.5174694061279297.eqx"
     arch:
-      class_path: architectures.regression.RegressionTimeDomainLinOSS2
+      class_path: architectures.regression.RegressionTimeDomainOriginalLinOSS
       init_args:
         num_ifos: 2 # H1, L1
         sample_rate: 2048
@@ -28,34 +27,33 @@ model:
         time_in_features: 2 # H1, L1
         time_hidden_dim: 64
         time_num_blocks: 3
-        time_dropout_rate: 0.1
+        time_dropout_rate: 0.05
         time_state_dim: 64
         time_r_min: 0.9
         time_theta_max: 3.14159265359
-        time_num_res_blocks: 1
-        time_conv_kernel_size: 4
-        time_conv_position: pre
-        # LinOSS2 sequence-mixer options
+        # OriginalLinOSS sequence-mixer options (discretax PR #74)
         time_discretization: IMEX2 # IM | IMEX | IMEX2 | IMEX3 | EX
         # RT init samples eigenvalues in the (r_min..1, 0..theta_max) annulus,
-        # so time_r_min / time_theta_max above are actually used (AG ignores
-        # them and instead samples A/G uniformly up to A_max / G_max).
+        # so time_r_min / time_theta_max above are used by RT (AG ignores them
+        # and instead samples A/G uniformly up to A_max / G_max).
         time_initialization: RT # AG | RT
         time_damping: true
         time_stability: oscillatory # oscillatory | stable
-        time_projection_eps: 1e-3 # stability margin inset from Jury boundary
-        time_input_normalization: true # LRU-style init gain; requires damping=true
+        time_projection_eps: 0.001 # stability margin inset from Jury boundary
+        time_input_normalization: true # LRU-style init gain; requires damping
         time_num_heads: 4
         time_use_head_output_projection: true
         time_A_max: 1.0 # AG init only
         time_G_max: 1.0 # AG init only
+        time_prenorm: true
+        # TEST 3: LayerNorm instead of BatchNorm. LayerNorm is per-sample
+        # (normalizes over the feature axis per time step) and is robust to the
+        # wide SNR range in the batch, unlike BatchNorm whose batch statistics
+        # are unstable when amplitudes vary strongly.
+        time_norm_type: layer # batch | layer
         dtype: float32
-        resnet_layers: [2, 2]
-        resnet_latent_dim: 64
-        resnet_kernel_size: 7
-        resnet_norm_groups: 16
         mlp_width: 64
-        mlp_depth: 2
+        mlp_depth: 3
         d_output: 2 # chirp_mass mean + pre-Softplus log-var
         seed: 0
     d_output: 2 # chirp_mass mean + pre-Softplus log-var
@@ -66,7 +64,7 @@ model:
     weight_decay: 0.01
     warmup_steps: 1000
     max_steps: 3000000
-    clip_grad_norm: 100.0
+    clip_grad_norm: 10.0
     beta_nll: 0.3
     lambda_spread: 0.0
     seed: 42
@@ -87,9 +85,9 @@ data:
     windowing:
       kernel_length: 4.0
       window_lead_min: 0
-      window_lead_max: 0.5
+      window_lead_max: 0.25
 
-    batch_size: 128
+    batch_size: 256
     batches_per_epoch: 1000
     chunk_size: 10000
     chunks_per_epoch: 10
@@ -112,12 +110,12 @@ data:
         constant_params:
           maximum: 50
         start_params:
+          minimum: 20
+          index: -1
+        end_params:
           minimum: 8
           index: -3
-        end_params:
-          minimum: 4
-          index: -3
-        decay_steps: 15000
+        decay_steps: 10000
 
     param_transforms:
       - class_path: train.transforms.ChirpMass
@@ -149,7 +147,7 @@ trainer:
   logger:
     - class_path: train.callbacks.AframeWandbLogger
       init_args:
-        name: "aframe_linoss2_regression_4s_merger"
+        name: "aframe_original_linoss_regression_4s_merger_layernorm"
         save_dir: outputs
         project: "aframe"
   callbacks:

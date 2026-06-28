@@ -27,9 +27,11 @@ import numpy as np
 from plots.legacy.matplotlib_tools import make_grid, plot_err_bands
 
 # default location of the results tree relative to the repo root
-DEFAULT_RUNS_ROOT = Path("runs/aframe_results/runs")
+DEFAULT_RUNS_ROOT = Path(
+    "/home/barmstrong/aframe_official/runs/aframe_results/runs"
+)
 DEFAULT_REFERENCE = Path(
-    "runs/aframe_results/reference/aframe-decimator-sv.h5"
+    "/home/barmstrong/aframe_official/runs/aframe_results/reference/aframe-decimator-sv.h5"
 )
 SV_SUBDIR = Path("results_aframe/plots/sv")
 
