@@ -1,5 +1,8 @@
 import io
 import logging
+import re
+import shutil
+from pathlib import Path
 from typing import Optional
 
 import h5py
@@ -22,10 +25,73 @@ def scale_model(model, instances):
         model.config.add_instance_group(count=instances)
 
 
-def export(
-    weights: str,
+def _install_python_aframe(
     repository_directory: str,
-    batch_file: str,
+    aframe_model_dir: str,
+    *,
+    batch_size: int,
+    num_ifos: int,
+    seq_len: int,
+    output_name: str,
+) -> None:
+    """Overwrite the repo's ``aframe`` model with a Triton python backend.
+
+    Copies the version directory (``model.py`` etc.) from ``aframe_model_dir``
+    and writes a python-backend ``config.pbtxt`` with the target geometry,
+    reusing the source config's blocks but rewriting the input/output dims.
+    This is the no-compile path: the model is served as-is rather than
+    exported to TensorRT/ONNX.
+    """
+    src = Path(aframe_model_dir)
+    dst = Path(repository_directory) / "aframe"
+
+    src_version = src / "1"
+    dst_version = dst / "1"
+    if dst_version.exists():
+        shutil.rmtree(dst_version)
+    shutil.copytree(
+        src_version,
+        dst_version,
+        ignore=shutil.ignore_patterns(
+            "__pycache__", "config.yaml", "weights.*"
+        ),
+    )
+
+    cfg = (src / "config.pbtxt").read_text()
+    cfg = re.sub(
+        r"input\s*\{.*?\}",
+        "input {\n"
+        '  name: "X"\n'
+        "  data_type: TYPE_FP32\n"
+        f"  dims: {batch_size}\n"
+        f"  dims: {num_ifos}\n"
+        f"  dims: {seq_len}\n"
+        "}",
+        cfg,
+        count=1,
+        flags=re.DOTALL,
+    )
+    cfg = re.sub(
+        r"output\s*\{.*?\}",
+        "output {\n"
+        f'  name: "{output_name}"\n'
+        "  data_type: TYPE_FP32\n"
+        f"  dims: {batch_size}\n"
+        "  dims: 1\n"
+        "}",
+        cfg,
+        count=1,
+        flags=re.DOTALL,
+    )
+    (dst / "config.pbtxt").write_text(cfg)
+    logging.info(
+        f"Installed python-backend aframe from {src} "
+        f"(input dims [{batch_size}, {num_ifos}, {seq_len}])"
+    )
+
+
+def export(
+    repository_directory: str,
     num_ifos: int,
     kernel_length: float,
     inference_sampling_rate: float,
@@ -34,11 +100,14 @@ def export(
     fduration: float,
     psd_length: float,
     preprocessor: torch.nn.Module,
+    weights: Optional[str] = None,
+    batch_file: Optional[str] = None,
     streams_per_gpu: int = 1,
     num_outputs: Optional[int] = 1,
     aframe_instances: Optional[int] = None,
     preproc_instances: Optional[int] = None,
     platform: qv.Platform = qv.Platform.TENSORRT,
+    aframe_model_dir: Optional[str] = None,
     clean: bool = False,
     verbose: bool = False,
     **kwargs,
@@ -108,15 +177,6 @@ def export(
             Key word arguments specific to the export platform
     """
 
-    # load in the model graph
-    logging.info("Initializing model graph")
-
-    with open_file(weights, "rb") as f:
-        graph = nn = torch.jit.load(f, map_location="cpu")
-
-    graph.eval()
-    logging.info(f"Initialize:\n{nn}")
-
     # instantiate a model repository at the
     # indicated location. Split up the preprocessor
     # and the neural network (which we'll call aframe)
@@ -133,31 +193,6 @@ def export(
     if aframe_instances is not None:
         scale_model(aframe, aframe_instances)
 
-    # Infer the shape of each input from the batch file.
-    # Assumes the output is stored as "y"
-    with open_file(batch_file, "rb") as f:
-        batch_file = h5py.File(io.BytesIO(f.read()))
-        input_shape_dict = {
-            key: (batch_size,) + tuple(batch_file[key].shape[1:])
-            for key in batch_file.keys()
-            if key != "y"
-        }
-
-    # the network will have some different keyword
-    # arguments required for export depending on
-    # the target inference platform
-    # TODO: hardcoding these kwargs for now, but worth
-    # thinking about a more robust way to handle this
-    kwargs = {}
-    if platform == qv.Platform.ONNX:
-        kwargs["opset_version"] = 13
-
-        # turn off graph optimization because of this error
-        # https://github.com/triton-inference-server/server/issues/3418
-        aframe.config.optimization.graph.level = -1
-    elif platform == qv.Platform.TENSORRT:
-        kwargs["use_fp16"] = False
-
     # determining the number of neural networks for
     # naming the outputs
     if num_outputs < 1:
@@ -168,12 +203,64 @@ def export(
         else [f"discriminator_{i}" for i in range(num_outputs)]
     )
 
-    aframe.export_version(
-        graph,
-        input_shapes=input_shape_dict,
-        output_names=output_names,
-        **kwargs,
-    )
+    skip_compile = aframe_model_dir is not None
+
+    if skip_compile:
+        # No graph to compile: the aframe model is served by a Triton python
+        # backend (installed below). Register its I/O on the quiver config so
+        # the ensemble can be wired, and derive the input shape directly from
+        # the geometry rather than a training batch file.
+        if num_outputs != 1:
+            raise ValueError(
+                "aframe_model_dir (skip-compile) only supports num_outputs=1"
+            )
+        seq_len = int(kernel_length * sample_rate)
+        input_shape_dict = {"X": (batch_size, num_ifos, seq_len)}
+        aframe.config.add_input("X", input_shape_dict["X"], dtype="float32")
+        aframe.config.add_output(
+            output_names[0], (batch_size, 1), dtype="float32"
+        )
+        aframe.config.write()
+    else:
+        # load in the model graph
+        logging.info("Initializing model graph")
+        with open_file(weights, "rb") as f:
+            graph = nn = torch.jit.load(f, map_location="cpu")
+
+        graph.eval()
+        logging.info(f"Initialize:\n{nn}")
+
+        # Infer the shape of each input from the batch file.
+        # Assumes the output is stored as "y"
+        with open_file(batch_file, "rb") as f:
+            batch_file = h5py.File(io.BytesIO(f.read()))
+            input_shape_dict = {
+                key: (batch_size,) + tuple(batch_file[key].shape[1:])
+                for key in batch_file.keys()
+                if key != "y"
+            }
+
+        # the network will have some different keyword
+        # arguments required for export depending on
+        # the target inference platform
+        # TODO: hardcoding these kwargs for now, but worth
+        # thinking about a more robust way to handle this
+        kwargs = {}
+        if platform == qv.Platform.ONNX:
+            kwargs["opset_version"] = 13
+
+            # turn off graph optimization because of this error
+            # https://github.com/triton-inference-server/server/issues/3418
+            aframe.config.optimization.graph.level = -1
+        elif platform == qv.Platform.TENSORRT:
+            kwargs["use_fp16"] = False
+
+        aframe.export_version(
+            graph,
+            input_shapes=input_shape_dict,
+            output_names=output_names,
+            **kwargs,
+        )
 
     # now try to create an ensemble that has a snapshotter
     # at the front for streaming new data to
@@ -230,3 +317,15 @@ def export(
     snapshotter.config.parameters["intra_op_thread_count"].string_value = "2"
 
     snapshotter.config.write()
+
+    # Finally, in the no-compile path, swap the placeholder aframe (used only
+    # to wire the ensemble above) for the python-backend model files.
+    if skip_compile:
+        _install_python_aframe(
+            repository_directory,
+            aframe_model_dir,
+            batch_size=batch_size,
+            num_ifos=num_ifos,
+            seq_len=seq_len,
+            output_name=output_names[0],
+        )
