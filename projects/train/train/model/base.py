@@ -170,7 +170,7 @@ class AframeBase(pl.LightningModule):
         return loss
 
     def validation_step(self, batch, _) -> None:
-        shift, X_bg, X_inj = batch
+        shift, X_bg, X_inj, params = batch
 
         y_bg = self.score(X_bg)
 

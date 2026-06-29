@@ -2,7 +2,7 @@
 tune_config:
   mode: "max"
   metric: "valid_auroc"
-  scheduler: 
+  scheduler:
     class_path: ray.tune.schedulers.ASHAScheduler
     init_args:
       max_t: 200
@@ -37,7 +37,7 @@ sync_config:
 # ray.init
 ray_init:
   address: null
-  
+
 # tune.Tune.param_space
 param_space:
   model.learning_rate: tune.loguniform(1e-4, 1e-3)
@@ -46,7 +46,7 @@ param_space:
 tune_callback:
   class_path: lightray.callbacks.LightRayReportCheckpointCallback
   init_args:
-    'on': "validation_end"
+    "on": "validation_end"
     checkpoint_every: 10
 
 # resources per trial
