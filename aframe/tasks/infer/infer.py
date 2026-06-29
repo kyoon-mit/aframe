@@ -10,7 +10,6 @@ import h5py
 import law
 import luigi
 import numpy as np
-import psutil
 from hermes.aeriel.monitor import ServerMonitor
 from hermes.aeriel.serve import serve
 from luigi.util import inherits
@@ -30,20 +29,13 @@ class DeployInferLocal(InferBase):
     @staticmethod
     def get_ip_address() -> str:
         """
-        Get the local nodes cluster-internal IP address
-        """
-        for _, addrs in psutil.net_if_addrs().items():
-            for addr in addrs:
-                if (
-                    addr.family == socket.AF_INET
-                    and not addr.address.startswith("127.")
-                ):
-                    return addr.address
-        raise ValueError("No valid IP address found")
+        Get the cluster-internal hostname of the node serving Triton.
 
-    @property
-    def model_repo_dir(self):
-        return self.input()["model_repository"].path
+        Returns the FQDN rather than a raw IP so that worker nodes resolve
+        it via cluster DNS. A raw IP scan is unreliable because it can
+        return a non-routable bridge/docker address.
+        """
+        return socket.getfqdn()
 
     def htcondor_workflow_run_context(self):
         """
@@ -61,14 +53,32 @@ class DeployInferLocal(InferBase):
         ip = self.get_ip_address()
         os.environ["AFRAME_TRITON_IP"] = ip
         server_log = self.output_dir / "server.log"
+        model_repo = (
+            Path(self.model_repo_dir)
+            if self.model_repo_dir
+            else self.input()["model_repository"].path
+        )
+
+        # Group HTTP/gRPC/metrics ports around the configured gRPC port
+        # (default 8000/8001/8002) so a second server can run on the same
+        # node without colliding on the defaults.
+        http_port = self.triton_port - 1
+        grpc_port = self.triton_port
+        metrics_port = self.triton_port + 1
+        server_args = [
+            f"--http-port={http_port}",
+            f"--grpc-port={grpc_port}",
+            f"--metrics-port={metrics_port}",
+        ]
 
         # TODO: figure out why serves
         # `gpus` variable does not expose
         # proper GPU ids to triton
         serve_context = serve(
-            self.model_repo_dir,
+            model_repo,
             self.triton_image,
             log_file=server_log,
+            server_args=server_args,
             wait=True,
         )
 
@@ -84,6 +94,16 @@ class DeployInferLocal(InferBase):
             def __enter__(self):
                 os.environ["CUDA_VISIBLE_DEVICES"] = self.obj.gpus
                 self.stack.enter_context(serve_context)
+                # ServerMonitor hardcodes gRPC port 8001 internally, so skip
+                # it when running on an offset port to avoid attaching to the
+                # wrong server.
+                if self.obj.triton_port != 8001:
+                    logging.warning(
+                        "triton_port=%s != 8001; skipping ServerMonitor "
+                        "(it can only poll the default gRPC port 8001).",
+                        self.obj.triton_port,
+                    )
+                    return
                 monitor = ServerMonitor(
                     model_name=self.obj.model_name,
                     ips="localhost",
