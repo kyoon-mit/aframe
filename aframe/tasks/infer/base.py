@@ -30,6 +30,13 @@ class InferParameters(law.Task):
     sequence_id = luigi.IntParameter()
     model_name = luigi.Parameter()
     model_version = luigi.IntParameter()
+    triton_port = luigi.IntParameter(
+        default=8001,
+        description="Triton gRPC port. HTTP port is triton_port - 1 and "
+        "metrics port is triton_port + 1 (defaults keep standard "
+        "8000/8001/8002). Use a distinct port to run a second server on "
+        "the same node without colliding on the default ports.",
+    )
     streams_per_gpu = luigi.IntParameter()
     rate_per_gpu = luigi.FloatParameter(
         default=100.0, description="Inferences per second per gpu"
@@ -38,6 +45,11 @@ class InferParameters(law.Task):
     return_timeseries = luigi.BoolParameter(default="false")
     output_dir = PathParameter(default=paths().results_dir)
     train_task = luigi.TaskParameter()
+    model_repo_dir = luigi.OptionalParameter(
+        default=None,
+        description="Path to a pre-built Triton model repository. When set, "
+        "the Export task is skipped and this directory is used directly.",
+    )
 
 
 @inherits(InferParameters)
@@ -73,7 +85,7 @@ class InferBase(
                 "amount of data, and the aggregation process will be slow. It "
                 "is not recommended to save the output timeseries for long "
                 "timeslides or high inference rates",
-                stacklevel=2.0,
+                stacklevel=2,
             )
 
     @property
@@ -125,7 +137,8 @@ class InferBase(
 
     def workflow_requires(self):
         reqs = {}
-        reqs["model_repository"] = ExportLocal.req(self)
+        if not self.model_repo_dir:
+            reqs["model_repository"] = ExportLocal.req(self)
         testing_waveforms = TestingWaveforms.req(self)
         fetch = testing_waveforms.requires().workflow_requires()[
             "test_segments"
@@ -210,14 +223,16 @@ class InferBase(
         ip = os.getenv("AFRAME_TRITON_IP")
         self.tmp_dir.mkdir(exist_ok=True, parents=True)
         fname, shifts = self.branch_data
+        metrics_port = self.triton_port + 1
         sequence = Sequence(
             ifos=self.ifos,
             batch_size=self.batch_size,
             inference_sampling_rate=self.inference_sampling_rate,
-            rate=self.rate_per_client,
             shifts=shifts,
             background_fname=fname,
             injection_set_fname=self.injection_set_fname,
+            triton_address=f"{ip}:{self.triton_port}",
+            metrics_port=metrics_port,
         )
 
         postprocessor = Postprocessor(
@@ -231,7 +246,7 @@ class InferBase(
         )
 
         client = InferenceClient(
-            address=f"{ip}:8001",
+            address=f"{ip}:{self.triton_port}",
             model_name=self.model_name,
             model_version=self.model_version,
             callback=sequence,
