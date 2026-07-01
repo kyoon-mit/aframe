@@ -1,4 +1,4 @@
-from concurrent.futures import Executor, as_completed
+from concurrent.futures import Executor
 from dataclasses import dataclass, make_dataclass
 
 import h5py
@@ -593,6 +593,7 @@ class WaveformPolarizationSet(InjectionMetadata, BilbyParameterSet):
         waveform_approximant: str,
         right_pad: float,
         ex: Executor | None = None,
+        chunksize: int = 1,
     ):
         """Generate waveforms from parameters using PyCBC.
 
@@ -608,6 +609,9 @@ class WaveformPolarizationSet(InjectionMetadata, BilbyParameterSet):
             waveform_approximant: Waveform approximant name.
             right_pad: Padding from coalescence to right edge in seconds.
             ex: Optional Executor for parallel waveform generation.
+            chunksize: Number of waveforms per task when generating in
+                parallel via ``ex.map``. Larger values amortize the
+                per-task pickling/IPC overhead. Ignored when ``ex`` is None.
 
         Returns:
             WaveformPolarizationSet with generated waveforms.
@@ -638,19 +642,18 @@ class WaveformPolarizationSet(InjectionMetadata, BilbyParameterSet):
 
         lal_params = params.convert_to_lal_param_set(reference_frequency)
         param_list = transpose(lal_params.generation_params)
-        # give flexibility if we want to parallelize or not
+        # give flexibility if we want to parallelize or not. Executor.map
+        # yields results in submission order, so enumerate gives the right
+        # destination index in both the serial and parallel paths.
         if ex is None:
-            for i, polars in enumerate(map(waveform_generator, param_list)):
-                for key, value in polars.items():
-                    polarizations[key][i] = value
+            results = map(waveform_generator, param_list)
         else:
-            futures = ex.map(waveform_generator, param_list)
-            idx_map = dict(zip(futures, len(futures), strict=True))
-            for f in as_completed(futures):
-                i = idx_map.pop(f)
-                polars = f.result()
-                for key, value in polars.items():
-                    polarizations[key][i] = value
+            results = ex.map(
+                waveform_generator, param_list, chunksize=chunksize
+            )
+        for i, polars in enumerate(results):
+            for key, value in polars.items():
+                polarizations[key][i] = value
 
         d = {k: getattr(params, k) for k in params.__dataclass_fields__}
         polarizations.update(d)
@@ -659,6 +662,112 @@ class WaveformPolarizationSet(InjectionMetadata, BilbyParameterSet):
         polarizations["num_injections"] = len(params)
         polarizations["right_pad"] = right_pad
         return cls(**polarizations)
+
+    @classmethod
+    def from_parameters_to_file(
+        cls,
+        params: "BilbyParameterSet",
+        minimum_frequency: float,
+        reference_frequency: float,
+        sample_rate: float,
+        waveform_duration: float,
+        waveform_approximant: str,
+        right_pad: float,
+        output_file: PATH,
+        write_batch_size: int = 2048,
+        ex: Executor | None = None,
+        chunksize: int = 1,
+        chunks: tuple[int, ...] | None = None,
+    ) -> None:
+        """Generate waveforms and stream them to an HDF5 file in batches.
+
+        Equivalent to ``from_parameters(...).write(output_file)`` but never
+        holds the full ``cross``/``plus`` arrays in memory:
+        parameters and metadata are written first, then the waveform datasets
+        are filled ``write_batch_size`` rows at a time and flushed. This caps
+        peak memory at roughly one batch of waveforms, which is what makes
+        large banks of long-duration signals feasible (the in-memory path
+        preallocates two ``(num_signals, sample_rate * waveform_duration)``
+        float64 arrays up front).
+
+        The resulting file is laid out identically to ``Ledger.write`` output,
+        so every reader works unchanged.
+
+        Args:
+            output_file: Path to the HDF5 file to create.
+            write_batch_size: Number of waveforms generated and flushed per
+                iteration. Trades peak memory against the number of flushes.
+            ex: Optional Executor for parallel generation (see
+                ``from_parameters``).
+            chunksize: ``ex.map`` chunk size used within each batch.
+            chunks: HDF5 chunk shape for the ``cross``/``plus`` datasets.
+        """
+        if waveform_duration < right_pad:
+            raise ValueError(
+                "Right padding must be less than waveform duration; "
+                f"got values of {right_pad} and {waveform_duration}"
+            )
+
+        waveform_generator = _WaveformGenerator(
+            waveform_approximant=waveform_approximant,
+            sample_rate=sample_rate,
+            waveform_duration=waveform_duration,
+            right_pad=right_pad,
+            minimum_frequency=minimum_frequency,
+            reference_frequency=reference_frequency,
+        )
+        waveform_length = int(sample_rate * waveform_duration)
+        n = len(params)
+
+        lal_params = params.convert_to_lal_param_set(reference_frequency)
+        param_list = transpose(lal_params.generation_params)
+
+        meta = {
+            "sample_rate": sample_rate,
+            "duration": waveform_duration,
+            "right_pad": right_pad,
+            "num_injections": n,
+        }
+
+        with h5py.File(output_file, "w") as f:
+            f.attrs["length"] = n
+            param_group = f.create_group("parameters")
+            waveform_group = f.create_group("waveforms")
+            waveform_dsets = {}
+            for key, attr in cls.__dataclass_fields__.items():
+                kind = attr.metadata["kind"]
+                if kind == "parameter":
+                    param_group.create_dataset(key, data=getattr(params, key))
+                elif kind == "waveform":
+                    waveform_dsets[key] = waveform_group.create_dataset(
+                        key,
+                        shape=(n, waveform_length),
+                        dtype="f8",
+                        chunks=chunks,
+                    )
+                elif kind == "metadata":
+                    if meta.get(key) is not None:
+                        f.attrs[key] = meta[key]
+
+            for start in range(0, n, write_batch_size):
+                stop = min(start + write_batch_size, n)
+                batch = param_list[start:stop]
+                if ex is None:
+                    results = map(waveform_generator, batch)
+                else:
+                    results = ex.map(
+                        waveform_generator, batch, chunksize=chunksize
+                    )
+                buffers = {
+                    key: np.empty((stop - start, waveform_length))
+                    for key in waveform_dsets
+                }
+                for j, polars in enumerate(results):
+                    for key, value in polars.items():
+                        buffers[key][j] = value
+                for key, dset in waveform_dsets.items():
+                    dset[start:stop] = buffers[key]
+                f.flush()
 
 
 @dataclass
