@@ -1,6 +1,7 @@
 from collections import defaultdict
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
-from typing import Callable, Dict, List, Tuple, Union
+from typing import Callable, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import torch
@@ -31,6 +32,8 @@ def rejection_sample(
     snr_threshold: float,
     psd: Union[Path, torch.Tensor],
     max_num_samples: int,
+    pool: Optional[int] = None,
+    chunksize: Optional[int] = None,
 ) -> Tuple[ResponseSetFields, InjectionParameterSet]:
     # get the detector tensors and vertices
     # for projecting our waveforms
@@ -52,13 +55,22 @@ def rejection_sample(
 
     prior, detector_frame_prior = prior()
 
+    # optionally generate waveforms in parallel across processes
+    if pool:
+        if chunksize is None:
+            chunksize = max(1, num_signals // (pool * 8))
+        ex = ProcessPoolExecutor(max_workers=pool)
+    else:
+        ex, chunksize = None, 1
+
     # loop until we've generated enough signals
     # with large enough snr to fill the segment,
     # keeping track of the number of signals rejected
     num_injections, total_accepted = 0, 0
     rejected_params = InjectionParameterSet()
-    # Start by simulating the desired number of accepted signals
-    num_samples = num_signals
+    # Start by simulating the desired number of accepted signals, but never
+    # more than max_num_samples in one batch (that is the memory cap).
+    num_samples = min(num_signals, max_num_samples)
     while total_accepted < num_signals:
         params = prior.sample(num_samples)
         if not detector_frame_prior:
@@ -74,6 +86,8 @@ def rejection_sample(
             waveform_duration,
             waveform_approximant,
             right_pad,
+            ex=ex,
+            chunksize=chunksize,
         )
         polarizations = {
             "cross": torch.Tensor(polarization_set.cross),
@@ -166,15 +180,16 @@ def rejection_sample(
         # don't generate more than `max_num_samples`
         num_samples = min(num_samples, max_num_samples)
 
-        # To make sure we don't waste time repeatedly
-        # generating a small number of samples, always
-        # generate at least the initial number of signals.
-        # TODO: Is there a more efficient lower bound?
-        num_samples = max(num_samples, num_signals)
+        # Avoid tiny batches, but never exceed max_num_samples: the memory cap
+        # above must win, so floor at the capped initial batch size.
+        num_samples = max(num_samples, min(num_signals, max_num_samples))
 
     parameters["right_pad"] = right_pad
     parameters["sample_rate"] = sample_rate
     parameters["duration"] = waveform_duration
     parameters["num_injections"] = num_injections
     parameters["ifos"] = ifos
+    if ex is not None:
+        ex.shutdown()
+
     return parameters, rejected_params
