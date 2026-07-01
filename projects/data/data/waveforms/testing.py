@@ -32,6 +32,8 @@ def testing_waveforms(
     output_dir: Path,
     jitter: float = 0.1,
     seed: Optional[int] = None,
+    pool: Optional[int] = None,
+    chunksize: Optional[int] = None,
 ):
     """
     Generates testing waveforms via rejection sampling
@@ -151,6 +153,8 @@ def testing_waveforms(
         snr_threshold=snr_threshold,
         psd=psds,
         max_num_samples=max_num_samples,
+        pool=pool,
+        chunksize=chunksize,
     )
 
     # create the ResponseSet dataclass based on the passed ifos
