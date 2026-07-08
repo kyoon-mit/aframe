@@ -67,8 +67,24 @@ def _helper_param_iter(group, derived_dict):
         yield name, arr
 
 
+# parameters that convert_to_detector_frame scales by (1 + redshift);
+# everything else (spins, angles, mass_ratio, redshift itself) is frame
+# independent and keeps a single histogram
+REDSHIFT_SCALED_PARAMETERS = {"mass_1", "mass_2", "chirp_mass", "total_mass"}
+
+
 def plot_parameters(parameter_group, parameter_config, dest_dir):
-    """One raw-count histogram per parameter, saved as <name>.png."""
+    """One raw-count histogram per parameter, saved as <name>.png.
+
+    Stored mass-like parameters are detector frame. When the file contains
+    a redshift dataset, each of those plots also overlays the source-frame
+    distribution (detector values divided by 1 + redshift) as a dotted
+    black outline, with "(detector)" / "(source)" appended to the labels.
+    """
+    redshift = None
+    if "redshift" in parameter_group:
+        redshift = parameter_group["redshift"][:]
+
     derived = {}
     if "chirp_mass" not in parameter_group:
         mass1 = parameter_group["mass_1"][:]
@@ -98,14 +114,31 @@ def plot_parameters(parameter_group, parameter_config, dest_dir):
             settings["max"] + settings["bin_size"],
             settings["bin_size"],
         )
+        # overlay the source frame only for redshift-scaled parameters
+        source_values = None
+        detector_label = settings["label"]
+        scaled = parameter_name in REDSHIFT_SCALED_PARAMETERS
+        if redshift is not None and scaled:
+            source_values = values / (1 + redshift)
+            detector_label = f"{settings['label']} (detector)"
+
         figure, axis = plt.subplots(figsize=(6, 4))
         axis.hist(
             values,
             bins=bin_edges,
             color=settings["color"],
             alpha=settings["alpha"],
-            label=settings["label"],
+            label=detector_label,
         )
+        if source_values is not None:
+            axis.hist(
+                source_values,
+                bins=bin_edges,
+                histtype="step",
+                color="black",
+                linestyle="dotted",
+                label=f"{settings['label']} (source)",
+            )
         axis.set_xlabel(settings["xlabel"])
         axis.set_ylabel("count")
         axis.legend(loc="upper right", fontsize=8)
