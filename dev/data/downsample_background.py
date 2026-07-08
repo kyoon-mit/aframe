@@ -63,12 +63,15 @@ def main():
                 output_dataset.attrs["dx"] = (
                     input_dataset.attrs["dx"] * arguments.factor
                 )
-        new_sample_rate = 1 / (input_dataset.attrs["dx"] * arguments.factor)
-        print(
-            f"{file_name}: {len(resampled)} samples "
-            f"@ {new_sample_rate:.0f} Hz",
-            flush=True,
-        )
+                # compute and print sample rate while file still open
+                new_sample_rate = 1 / (
+                    input_dataset.attrs["dx"] * arguments.factor
+                )
+                print(
+                    f"{file_name}: {len(resampled)} samples "
+                    f"@ {new_sample_rate:.0f} Hz",
+                    flush=True,
+                )
     print(f"wrote {len(input_files)} files -> {arguments.dest}", flush=True)
 
 
