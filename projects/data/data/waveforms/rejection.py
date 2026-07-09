@@ -107,7 +107,7 @@ def rejection_sample(
         # Load/calculate psds if not given explicitly
         if isinstance(psd, Path):
             df = 1 / waveform_duration
-            psd = load_psds(psd, ifos, df)
+            psd = load_psds(psd, ifos, df, sample_rate=sample_rate)
 
         # compute both individual ifo snrs and network snr
         ifo_snrs = compute_ifo_snr(

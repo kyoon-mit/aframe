@@ -135,7 +135,7 @@ def testing_waveforms(
     # calculate psd that will be used for snr calculation
     df = 1 / waveform_duration
     logging.info(f"Using background file {psd_file} for psd calculation")
-    psds = utils.load_psds(psd_file, ifos, df=df)
+    psds = utils.load_psds(psd_file, ifos, df=df, sample_rate=sample_rate)
 
     # perform the rejection sampling
     parameters, rejected_params = rejection_sample(
