@@ -143,6 +143,33 @@
       "alpha": 1.0,
       "xlabel": "Secondary Spin Tilt Angle [rad]",
       "label": "$\\theta_2$"
+    },
+    "snr": {
+      "min": 0.0,
+      "max": 55.0,
+      "bin_size": 1,
+      "color": "darkblue",
+      "alpha": 1.0,
+      "xlabel": "SNR (combined)",
+      "label": "snr (combined)"
+    },
+    "snr_h1": {
+      "min": 0.0,
+      "max": 55.0,
+      "bin_size": 1,
+      "color": "darkblue",
+      "alpha": 1.0,
+      "xlabel": "SNR (H1)",
+      "label": "snr (H1)"
+    },
+    "snr_l1": {
+      "min": 0.0,
+      "max": 55.0,
+      "bin_size": 1,
+      "color": "darkblue",
+      "alpha": 1.0,
+      "xlabel": "SNR (L1)",
+      "label": "snr (L1)"
     }
   }
 }
