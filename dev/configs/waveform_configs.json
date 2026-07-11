@@ -1,0 +1,40 @@
+{
+  "shared": {
+    "ifos": ["H1", "L1"],
+    "waveform_approximant": "IMRPhenomPv2",
+    "waveform_duration": 32,
+    "right_pad": 2,
+    "minimum_frequency": 20,
+    "reference_frequency": 50,
+    "highpass": 20,
+    "lowpass": null,
+    "snr_threshold": 4,
+    "max_num_samples": 1024,
+    "seed": 42
+  },
+  "train": {
+    "prior": "priors.priors.end_o3_ratesandpops_bns",
+    "background_dir": null,
+    "output_dir": "/n/holystore01/LABS/iaifi_lab/Lab/kyoon/DATA/aframe_data/train",
+    "target_events": 200000,
+    "output_sample_rate": 2048
+  },
+  "val": {
+    "prior": "priors.priors.end_o3_ratesandpops_bns",
+    "background_dir": "/n/holystore01/LABS/iaifi_lab/Lab/kyoon/DATA/O3a_H1_L1_4096Hz",
+    "output_dir": "/n/holystore01/LABS/iaifi_lab/Lab/kyoon/DATA/aframe_data/val",
+    "target_events": 50000,
+    "output_sample_rate": 2048,
+    "lowpass": 1024
+  },
+  "diagnostic": {
+    "prior": "priors.priors.end_o3_ratesandpops_bns",
+    "background_dir": "/n/holystore01/LABS/iaifi_lab/Lab/kyoon/DATA/O3b_H1_L1_4096Hz",
+    "output_dir": "/n/holystore01/LABS/iaifi_lab/Lab/kyoon/DATA/aframe_data/diagnostic",
+    "target_events": 50000,
+    "output_sample_rate": 4096,
+    "l1_shifts": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+    "spacing": 0,
+    "buffer": 32
+  }
+}
