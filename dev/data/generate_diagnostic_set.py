@@ -62,7 +62,6 @@ log = logging.getLogger(__name__)
 
 DEFAULT_CONFIG = (
     Path(__file__).resolve().parent.parent
-    / "dev"
     / "configs"
     / "waveform_configs.json"
 )
