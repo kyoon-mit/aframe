@@ -21,7 +21,16 @@ from pathlib import Path
 
 import h5py
 
-from utils.data import get_num_shifts_from_num_signals
+from utils.data import (
+    get_num_shifts_from_Tb,
+    get_num_shifts_from_num_signals,
+)
+
+BACKGROUND_TARGETS = {
+    "1 month": 30 * 86400,
+    "1 year": 365.25 * 86400,
+    "10 years": 3652.5 * 86400,
+}
 
 DEFAULT_CONFIG = (
     Path(__file__).resolve().parent.parent
@@ -95,6 +104,32 @@ def main():
         )
         print(
             f"  shift {shift:2d}s: {count} events, cumulative {total}{marker}"
+        )
+
+    report_background_shifts(spans, durations, config["psd_length"])
+
+
+def accumulated_livetime(durations, num_shifts, psd_length):
+    """Background seconds gathered by num_shifts one-second slides."""
+    return sum(
+        max(0, duration - psd_length - shift)
+        for shift in range(1, num_shifts + 1)
+        for duration in durations
+    )
+
+
+def report_background_shifts(spans, durations, psd_length):
+    print("\nbackground livetime (get_num_shifts_from_Tb, 1 s slides):")
+    for label, target_seconds in BACKGROUND_TARGETS.items():
+        num_shifts = get_num_shifts_from_Tb(
+            spans, target_seconds, shift=1, psd_length=psd_length
+        )
+        achieved_days = (
+            accumulated_livetime(durations, num_shifts, psd_length) / 86400
+        )
+        print(
+            f"  {label:>8}: {num_shifts:5d} shifts"
+            f"  ({achieved_days:,.1f} days accumulated)"
         )
 
 
