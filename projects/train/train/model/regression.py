@@ -79,7 +79,7 @@ class SupervisedRegressionAframe(AframeBase):
             targets = params[name].repeat(num_views)
             mae = F.l1_loss(param_estimates[:, i], targets)
             self.log(
-                f"validation/mae_{name}",
+                f"val/mae_{name}",
                 mae,
                 on_step=False,
                 on_epoch=True,
@@ -189,14 +189,22 @@ class GaussianNLLRegressionAframe(SupervisedRegressionAframe):
         for i, name in enumerate(self.param_names):
             targets = params[name].repeat(num_views)
             self.log(
-                f"validation/mse_{name}",
+                f"val/mse_{name}",
                 F.mse_loss(mean_phys[:, i], targets),
                 on_step=False,
                 on_epoch=True,
                 sync_dist=True,
             )
+            # MAE logged for curiosity only; MSE is the monitored metric
             self.log(
-                f"validation/sigma_{name}",
+                f"val/mae_{name}",
+                F.l1_loss(mean_phys[:, i], targets),
+                on_step=False,
+                on_epoch=True,
+                sync_dist=True,
+            )
+            self.log(
+                f"val/sigma_{name}",
                 sigma_phys[:, i].mean(),
                 on_step=False,
                 on_epoch=True,
