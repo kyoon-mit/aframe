@@ -189,8 +189,8 @@ class GaussianNLLRegressionAframe(SupervisedRegressionAframe):
         for i, name in enumerate(self.param_names):
             targets = params[name].repeat(num_views)
             self.log(
-                f"validation/mae_{name}",
-                F.l1_loss(mean_phys[:, i], targets),
+                f"validation/mse_{name}",
+                F.mse_loss(mean_phys[:, i], targets),
                 on_step=False,
                 on_epoch=True,
                 sync_dist=True,
