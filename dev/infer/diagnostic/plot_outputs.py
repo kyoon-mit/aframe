@@ -2,7 +2,7 @@
 
 Fig 1: predicted sigma vs kernel-right-edge-relative-to-merger (sig vs bkg).
 Fig 2: chirp-mass relative error (pred-true)/true vs the same (sig only).
-Saves PNGs next to the CSVs. Also drops a loud-only (SNR>=15) variant.
+Saves PNGs next to the CSVs. Also drops a loud-only variant.
 
     uv run python plot_outputs.py --outdir <dir with raw_sig.csv/raw_bkg.csv>
 """
@@ -13,6 +13,9 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import pandas as pd
+
+
+SNR_THRESHOLD = 8.0
 
 
 def band(df, col):
@@ -90,20 +93,21 @@ def main():
         f"{args.outdir}/chirp_relerr_vs_window.png",
     )
 
-    loud_sig = sig[sig.snr >= 15]
-    loud_bkg = bkg[bkg.snr >= 15]
+    loud_sig = sig[sig.snr >= SNR_THRESHOLD]
+    loud_bkg = bkg[bkg.snr >= SNR_THRESHOLD]
     n_loud = loud_sig.strain_id.nunique()
     if n_loud > 5:
         sigma_fig(
             loud_sig,
             loud_bkg,
-            f"sigma vs time-to-merger (SNR>=15, n={n_loud})",
-            f"{args.outdir}/sigma_vs_window_snr15.png",
+            f"sigma vs time-to-merger (SNR>={SNR_THRESHOLD}, n={n_loud})",
+            f"{args.outdir}/sigma_vs_window_snr{SNR_THRESHOLD}.png",
         )
         relerr_fig(
             loud_sig,
-            f"chirp recovery vs time-to-merger (SNR>=15, n={n_loud})",
-            f"{args.outdir}/chirp_relerr_vs_window_snr15.png",
+            f"chirp recovery vs time-to-merger "
+            f"(SNR>={SNR_THRESHOLD}, n={n_loud})",
+            f"{args.outdir}/chirp_relerr_vs_window_snr{SNR_THRESHOLD}.png",
         )
 
 
