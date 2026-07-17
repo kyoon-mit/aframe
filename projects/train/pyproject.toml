@@ -34,6 +34,13 @@ dependencies = [
     "torchaudio>=2.5.0",
 ]
 
+[project.optional-dependencies]
+jax = [
+    "equinox>=0.11,<0.12",
+    "jax[cuda12]>=0.4.28,<0.6",
+    "optax>=0.2,<0.3",
+]
+
 [project.scripts]
 train = "train.cli:main"
 
