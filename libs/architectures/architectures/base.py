@@ -17,3 +17,12 @@ class Architecture(torch.nn.Module):
 
     # def __init__(self, num_ifos: int) -> None:
     #     pass
+
+
+class JaxArchitecture:
+    """Plain marker base for JAX architectures.
+
+    Kept as a non-dataclass class so the LightningCLI (jsonargparse) can
+    build subclass arguments from it; concrete architectures additionally
+    inherit ``equinox.Module`` so they remain JAX pytrees.
+    """
