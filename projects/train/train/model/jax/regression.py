@@ -6,11 +6,12 @@ import jax
 import jax.random as jr
 import optax
 import torch
+import torch.nn.functional as F
 from torch import nn
 
 from architectures import Architecture
 from architectures.base import JaxArchitecture
-from train.model.regression import GaussianNLLRegressionAframe
+from train.model.regression_ky import GaussianNLLRegressionAframeCustomLR
 from train.utils.jax.convert import jax_array_to_tensor, tensor_to_jax_array
 from train.utils.jax.load_model import load_model
 from train.utils.jax.training import (
@@ -21,15 +22,18 @@ from train.utils.jax.training import (
 logger = logging.getLogger(__name__)
 
 
-class JaxRegressionAframe(GaussianNLLRegressionAframe):
+class JaxRegressionAframe(GaussianNLLRegressionAframeCustomLR):
     """JAX/equinox chirp-mass regression trained with GaussianNLL.
 
-    Reuses the ``GaussianNLLRegressionAframe`` validation (which logs
-    ``val/mse_{param}``) and normalization buffers, but runs the
-    forward/backward pass in JAX with an optax optimizer while Lightning
-    drives the loop under ``automatic_optimization = False``. The
-    architecture output is ``(d_output,)`` with the means in the first
-    half and pre-Softplus variances in the second half.
+    Inherits ``GaussianNLLRegressionAframeCustomLR`` so validation logs the
+    exact same metrics as the S4D regression models (``val/gaussnll``,
+    ``val/spread_penalty``, ``val/spread_raw``, ``val/loss``,
+    ``val/mse_*``, ``val/mae_*``, ``val/sigma_*``,
+    ``val/within_{1,2,5,10}pct_*``). The forward/backward pass runs in JAX
+    with an optax optimizer while Lightning drives the loop under
+    ``automatic_optimization = False``; the training step logs the same
+    ``train/*`` metric set. The architecture output is ``(d_output,)`` with
+    means in the first half and pre-Softplus variances in the second half.
     """
 
     def __init__(
@@ -51,19 +55,23 @@ class JaxRegressionAframe(GaussianNLLRegressionAframe):
         reset_optimizer_on_load: bool = True,
     ) -> None:
         super().__init__(
-            arch=Architecture(),
-            param_names=param_names,
+            Architecture(),
+            param_names,
             beta_nll=beta_nll,
             y_mean=y_mean,
             y_std=y_std,
             learning_rate=learning_rate,
-            pct_lr_ramp=0.0,
             weight_decay=weight_decay,
+            ssm_lr=learning_rate,
+            lambda_spread=lambda_spread,
+            normalize_input=normalize_input,
+            lr_scheduler=None,
+            warm_start_ckpt=None,
+            pct_lr_ramp=0.0,
         )
         self.automatic_optimization = False
         self.beta_nll = beta_nll
         self.lambda_spread = lambda_spread
-        self.normalize_input = normalize_input
 
         # dummy torch parameter so optimizer.step() advances global_step
         self._step_marker = nn.Parameter(torch.zeros(1))
@@ -115,8 +123,12 @@ class JaxRegressionAframe(GaussianNLLRegressionAframe):
         # dummy optimizer; the real update is applied in JAX/optax
         return torch.optim.SGD([self._step_marker], lr=0.0)
 
+    def on_train_batch_end(self, outputs, batch, batch_idx):
+        # override the S4D SSM clamp (no torch kernel params here)
+        pass
+
     def _maybe_normalize(self, X: torch.Tensor) -> torch.Tensor:
-        if self.normalize_input:
+        if self.hparams.normalize_input:
             X = X / X.std(dim=-1, keepdim=True).clamp(min=1e-8)
         return X
 
@@ -136,13 +148,13 @@ class JaxRegressionAframe(GaussianNLLRegressionAframe):
         targets = torch.stack(
             [params[k][mask] for k in self.param_names], dim=1
         )
-        y_norm = self._normalize(targets).reshape(-1, self.n_vars)
+        y_norm = self._normalize(targets)
 
-        X = tensor_to_jax_array(self._maybe_normalize(X[mask]))
-        y_norm = tensor_to_jax_array(y_norm)
+        Xj = tensor_to_jax_array(self._maybe_normalize(X[mask]))
+        yj = tensor_to_jax_array(y_norm.reshape(-1, self.n_vars))
 
         self.rng_key, k = jr.split(self.rng_key)
-        keys = jr.split(k, X.shape[0])
+        keys = jr.split(k, Xj.shape[0])
         (
             self.jax_model,
             self.jax_model_state,
@@ -152,8 +164,8 @@ class JaxRegressionAframe(GaussianNLLRegressionAframe):
             self.jax_model,
             self.jax_model_filter_spec,
             self.jax_model_state,
-            X,
-            y_norm,
+            Xj,
+            yj,
             self.beta_nll,
             self.lambda_spread,
             self.opt_state,
@@ -161,34 +173,70 @@ class JaxRegressionAframe(GaussianNLLRegressionAframe):
             keys,
         )
 
-        self.log(
-            "train/loss",
-            float(metrics["loss"]),
-            on_step=True,
-            on_epoch=True,
-            prog_bar=True,
-            sync_dist=True,
-        )
+        mean = jax_array_to_tensor(metrics["mean"])
+        var = jax_array_to_tensor(metrics["var"])
+
         self.log(
             "train/gaussnll",
             float(metrics["nll"]),
             on_step=False,
             on_epoch=True,
-            sync_dist=True,
         )
         self.log(
             "train/spread_penalty",
             float(metrics["spread"]),
             on_step=False,
             on_epoch=True,
-            sync_dist=True,
+        )
+        self.log(
+            "train/spread_raw",
+            self._spread_raw(y_norm, mean),
+            on_step=False,
+            on_epoch=True,
+        )
+
+        mean_phys = mean * self.y_std + self.y_mean
+        sigma_phys = torch.sqrt(var) * self.y_std
+        rel_err = (mean_phys - targets).abs() / targets.abs().clamp(min=1e-8)
+        for i, name in enumerate(self.param_names):
+            self.log(
+                f"train/mse_{name}",
+                F.mse_loss(mean_phys[:, i], targets[:, i]),
+                on_step=False,
+                on_epoch=True,
+            )
+            self.log(
+                f"train/mae_{name}",
+                F.l1_loss(mean_phys[:, i], targets[:, i]),
+                on_step=False,
+                on_epoch=True,
+            )
+            self.log(
+                f"train/sigma_{name}",
+                sigma_phys[:, i].mean(),
+                on_step=False,
+                on_epoch=True,
+            )
+            for pct in (1, 2, 5, 10):
+                self.log(
+                    f"train/within_{pct}pct_{name}",
+                    (rel_err[:, i] < pct / 100.0).float().mean(),
+                    on_step=False,
+                    on_epoch=True,
+                )
+
+        self.log(
+            "train/loss",
+            float(metrics["loss"]),
+            on_step=True,
+            on_epoch=True,
+            prog_bar=True,
         )
         self.log(
             "train/lr",
             float(self.opt_state[1].hyperparams["learning_rate"]),
             on_step=True,
             on_epoch=True,
-            sync_dist=True,
         )
 
         opt = self.optimizers()
