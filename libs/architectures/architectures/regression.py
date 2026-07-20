@@ -173,3 +173,58 @@ except ImportError:
                 "JAX and equinox are required for RegressionTimeDomainLinOSS. "
                 "Install them with: uv sync --extra jax"
             )
+
+
+try:
+    import equinox as _eqx
+    import jax.random as _jr
+
+    from architectures.networks.linoss_variants import (
+        LinOSSModelResNetMLPDecoder,
+    )
+
+    class RegressionTimeDomainLinOSSResNetMLPDecoder(
+        JaxArchitecture, _eqx.Module
+    ):
+        """JAX LinOSS with a ResNet1D + MLP readout head."""
+
+        model: LinOSSModelResNetMLPDecoder
+
+        def __init__(
+            self,
+            num_ifos: int,
+            d_output: int = 2,
+            d_model: int = 64,
+            d_state: int = 64,
+            n_layers: int = 4,
+            dropout: float = 0.2,
+            r_min: float = 0.9,
+            theta_max: float = 3.14159265359,
+            seed: int = 0,
+            sample_rate: float = None,
+            kernel_length: float = None,
+        ):
+            self.model = LinOSSModelResNetMLPDecoder(
+                d_input=num_ifos,
+                d_output=d_output,
+                d_model=d_model,
+                d_state=d_state,
+                n_layers=n_layers,
+                dropout=dropout,
+                key=_jr.PRNGKey(seed),
+                r_min=r_min,
+                theta_max=theta_max,
+            )
+
+        def __call__(self, x, state, key=None):
+            return self.model(x, state, key=key)
+
+except ImportError:
+
+    class RegressionTimeDomainLinOSSResNetMLPDecoder(JaxArchitecture):
+        """Stub raised when JAX/equinox are not installed."""
+
+        def __init__(self, *args, **kwargs):
+            raise ImportError(
+                "JAX and equinox are required. uv sync --extra jax"
+            )

@@ -100,3 +100,47 @@ def jax_inference(
 ) -> tuple[Array, eqx.nn.State]:
     inference_model = eqx.tree_inference(model, value=True)
     return jax_fwd_batch(inference_model, X, state, key)
+
+
+def _bce_loss(logits: Array, y: Array) -> Array:
+    import optax
+
+    return jnp.mean(
+        optax.sigmoid_binary_cross_entropy(logits, y.astype(logits.dtype))
+    )
+
+
+def jax_classification_loss_fn(
+    diff_model: eqx.Module,
+    static_model: eqx.Module,
+    state: eqx.nn.State,
+    X: Array,
+    y: Array,
+    key: PRNGKeyArray,
+) -> tuple[Array, tuple]:
+    model = eqx.combine(diff_model, static_model)
+    logits, new_state = jax_fwd_batch(model, X, state, key)
+    loss = _bce_loss(logits, y.reshape(-1, 1))
+    return loss, (new_state, loss)
+
+
+@eqx.filter_jit
+def jax_apply_classification_training_step(
+    model: eqx.Module,
+    model_filter_spec,
+    state: eqx.nn.State,
+    X: Array,
+    y: Array,
+    opt_state,
+    opt_update,
+    key: PRNGKeyArray,
+) -> tuple[eqx.Module, eqx.nn.State, object, dict]:
+    diff_model, static_model = eqx.partition(model, model_filter_spec)
+    (loss, (new_state, _)), grads = eqx.filter_value_and_grad(
+        jax_classification_loss_fn, has_aux=True
+    )(diff_model, static_model, state, X, y, key)
+    updates, new_opt_state = opt_update(grads, opt_state, diff_model)
+    new_model = eqx.combine(
+        eqx.apply_updates(diff_model, updates), static_model
+    )
+    return new_model, new_state, new_opt_state, {"loss": loss}
