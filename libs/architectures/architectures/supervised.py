@@ -6,6 +6,10 @@ from jaxtyping import Float
 from ml4gw.nn.resnet.resnet_1d import NormLayer, ResNet1D
 from ml4gw.nn.resnet.resnet_2d import ResNet2D
 from ml4gw.nn.ssm.s4d import S4Model
+from architectures.networks.s4d_variants import (
+    S4ModelPrenorm,
+    S4ModelResNetMLPDecoder,
+)
 from torch import Tensor
 import torch
 
@@ -315,3 +319,53 @@ class SupervisedHeterodyneTimeDomainResNet(SupervisedArchitecture):
 
     def forward(self, X):
         return self.time_domain_resnet(X)
+
+
+class SupervisedS4ModelPrenorm(S4ModelPrenorm, SupervisedArchitecture):
+    def __init__(
+        self,
+        num_ifos: int,
+        d_output: int = 1,
+        d_model: int = 128,
+        d_state: int = 64,
+        n_layers: int = 4,
+        dropout: float = 0.1,
+        dt_min: float = 0.001,
+        dt_max: float = 0.1,
+    ) -> None:
+        super().__init__(
+            d_input=num_ifos,
+            d_output=d_output,
+            d_model=d_model,
+            d_state=d_state,
+            n_layers=n_layers,
+            dropout=dropout,
+            dt_min=dt_min,
+            dt_max=dt_max,
+        )
+
+
+class SupervisedS4ModelResNetMLPDecoder(
+    S4ModelResNetMLPDecoder, SupervisedArchitecture
+):
+    def __init__(
+        self,
+        num_ifos: int,
+        d_output: int = 1,
+        d_model: int = 128,
+        d_state: int = 64,
+        n_layers: int = 4,
+        dropout: float = 0.1,
+        dt_min: float = 0.001,
+        dt_max: float = 0.1,
+    ) -> None:
+        super().__init__(
+            d_input=num_ifos,
+            d_output=d_output,
+            d_model=d_model,
+            d_state=d_state,
+            n_layers=n_layers,
+            dropout=dropout,
+            dt_min=dt_min,
+            dt_max=dt_max,
+        )
