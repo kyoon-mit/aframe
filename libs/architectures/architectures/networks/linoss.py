@@ -195,9 +195,9 @@ class LinOSSModel(eqx.Module):
         for mixer, norm, k in zip(
             self.mixers, self.norms, layer_keys, strict=True
         ):
-            z = mixer(y)
+            z = mixer(jax.vmap(norm)(y))  # prenorm
             z = self.dropout(z, key=k)
-            y = jax.vmap(norm)(y + z)  # postnorm, matches S4Model
+            y = y + z
 
         y = jnp.mean(y, axis=0)  # (d_model,)
         logits = self.decoder(y)  # (d_output,)
