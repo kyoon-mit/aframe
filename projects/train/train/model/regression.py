@@ -214,33 +214,28 @@ class GaussianNLLRegressionAframe(SupervisedRegressionAframe):
     def test_step(self, batch, _):
         """Per-batch raw outputs for ``PlotParamEstCallback``.
 
-        Returns physical-unit predictions on the injected views and on the
-        clean background, which the callback concatenates into
-        ``param_est_results.csv`` / ``param_est_results_bkg.csv``.
+        Test batches come from the training injection pipeline, so a batch
+        mixes injected and pure-background rows (the split is set by
+        ``waveform_prob``). Injected rows carry the regression targets;
+        background rows have NaN parameters and supply the noise-only
+        predictions the detection/background plots need.
         """
-        _, X_bg, X_inj, params = batch
-        num_views, N, *shape = X_inj.shape
-        X_inj = X_inj.view(num_views * N, *shape)
-
-        mean, var = self._split(self(X_inj))
+        X, _y, params = batch
+        mean, var = self._split(self(X))
         mean_phys = mean * self.y_std + self.y_mean
         sigma_phys = torch.sqrt(var) * self.y_std
 
-        mean_bg, var_bg = self._split(self(X_bg))
-        mean_bg_phys = mean_bg * self.y_std + self.y_mean
-        sigma_bg_phys = torch.sqrt(var_bg) * self.y_std
-
-        y_true = torch.stack(
-            [params[k].repeat(num_views) for k in self.param_names], dim=1
-        )
+        targets = torch.stack([params[k] for k in self.param_names], dim=1)
+        injected = ~torch.isnan(targets).any(dim=1)
 
         outputs = {
-            "y_true": y_true.detach().cpu(),
-            "y_pred": mean_phys.detach().cpu(),
-            "y_sigma": sigma_phys.detach().cpu(),
-            "y_pred_bg": mean_bg_phys.detach().cpu(),
-            "y_sigma_bg": sigma_bg_phys.detach().cpu(),
+            "y_true": targets[injected].detach().cpu(),
+            "y_pred": mean_phys[injected].detach().cpu(),
+            "y_sigma": sigma_phys[injected].detach().cpu(),
         }
+        if (~injected).any():
+            outputs["y_pred_bg"] = mean_phys[~injected].detach().cpu()
+            outputs["y_sigma_bg"] = sigma_phys[~injected].detach().cpu()
         if "snr" in params:
-            outputs["snr"] = params["snr"].repeat(num_views).detach().cpu()
+            outputs["snr"] = params["snr"][injected].detach().cpu()
         return outputs

@@ -198,6 +198,9 @@ class BaseAframeDataset(pl.LightningDataModule):
         min_valid_duration: float = 15000,
         valid_livetime: float = (3600 * 12),
         max_num_workers: int = 6,
+        # test args
+        test_background_dir: Optional[str] = None,
+        test_batches: Optional[int] = None,
         # dataloading args
         chunks_per_epoch: int = 1,
         chunk_size: int = 10000,
@@ -238,6 +241,11 @@ class BaseAframeDataset(pl.LightningDataModule):
             self.hparams.background_dir
         )
         self.waveforms_dir = fs_utils.get_data_dir(self.hparams.waveforms_dir)
+        self.test_fname_dir = (
+            fs_utils.get_data_dir(test_background_dir)
+            if test_background_dir is not None
+            else None
+        )
         self.verbose = verbose
 
     def init_logging(self, verbose: bool):
@@ -560,7 +568,9 @@ class BaseAframeDataset(pl.LightningDataModule):
         # TODO: maybe pass indices as argument to
         # waveform loader to reduce quantity of data
         # we need to load
-        if self.trainer.training and self.waveforms_from_disk:
+        if (
+            self.trainer.training or self.trainer.testing
+        ) and self.waveforms_from_disk:
             X, [waveforms, params] = batch
             waveforms = self.slice_waveforms(waveforms)
             batch = X, (waveforms, params)
@@ -578,9 +588,10 @@ class BaseAframeDataset(pl.LightningDataModule):
         but before it gets passed to the LightningModule.
         Use this to do on-device augmentation/preprocessing.
         """
-        if self.trainer.training:
+        if self.trainer.training or self.trainer.testing:
             # if we're training, perform random augmentations
-            # on input data and use it to impact labels
+            # on input data and use it to impact labels. testing reuses
+            # this path so kernels sit at the trained alignment
             if self.waveforms_from_disk:
                 [X], (waveforms, params) = batch
                 batch = self.inject(X=X, waveforms=waveforms, params=params)
@@ -733,14 +744,44 @@ class BaseAframeDataset(pl.LightningDataModule):
         )
         return dataset
 
-    def train_dataloader(self) -> torch.utils.data.DataLoader:
+    def test_dataloader(self) -> torch.utils.data.DataLoader:
+        """
+        Test batches come from the *training* injection pipeline run over a
+        held-out background directory, so kernels sit at the alignment the
+        model was trained on and the SNR distribution stays configurable
+        through ``snr_sampler``. Set ``test_background_dir`` to use it.
+        """
+        if self.hparams.test_background_dir is None:
+            raise ValueError(
+                "test_background_dir must be set to build a test dataloader"
+            )
+        fnames = sorted(glob.glob(f"{self.test_fname_dir}/background/*.hdf5"))
+        if not fnames:
+            raise ValueError(
+                f"No background files found in {self.test_fname_dir}"
+            )
+        self._logger.info(
+            f"Testing on {len(fnames)} background files from "
+            f"{self.test_fname_dir}"
+        )
+        return self.train_dataloader(
+            fnames=fnames,
+            batches_per_epoch=self.hparams.test_batches
+            or self.batches_per_epoch,
+        )
+
+    def train_dataloader(
+        self,
+        fnames: Optional[Sequence[str]] = None,
+        batches_per_epoch: Optional[int] = None,
+    ) -> torch.utils.data.DataLoader:
         # build our strain dataset and dataloader
         dataset = Hdf5TimeSeriesDataset(
-            self.train_fnames,
+            fnames if fnames is not None else self.train_fnames,
             channels=self.hparams.ifos,
             kernel_size=int(self.hparams.sample_rate * self.sample_length),
             batch_size=self.hparams.batch_size,
-            batches_per_epoch=self.batches_per_epoch,
+            batches_per_epoch=batches_per_epoch or self.batches_per_epoch,
             coincident=False,
             num_files_per_batch=self.hparams.num_files_per_batch,
         )
