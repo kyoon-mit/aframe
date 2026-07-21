@@ -28,4 +28,4 @@ data:
       sample_rate: 2048
       num_val_waveforms: 8192
       val_waveform_file: /n/holystore01/LABS/iaifi_lab/Lab/kyoon/DATA/aframe_data/val/end_o3_ratesandpops_bns_snr4.hdf5
-      training_waveform_path: /n/holystore01/LABS/iaifi_lab/Lab/kyoon/DATA/aframe_data/val/end_o3_ratesandpops_bns_snr4.hdf5
+      training_waveform_path: /n/holystore01/LABS/iaifi_lab/Lab/kyoon/DATA/aframe_data/train/end_o3_ratesandpops_bns_uniform_chirp.hdf5
