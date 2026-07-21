@@ -210,3 +210,37 @@ class GaussianNLLRegressionAframe(SupervisedRegressionAframe):
                 on_epoch=True,
                 sync_dist=True,
             )
+
+    def test_step(self, batch, _):
+        """Per-batch raw outputs for ``PlotParamEstCallback``.
+
+        Returns physical-unit predictions on the injected views and on the
+        clean background, which the callback concatenates into
+        ``param_est_results.csv`` / ``param_est_results_bkg.csv``.
+        """
+        _, X_bg, X_inj, params = batch
+        num_views, N, *shape = X_inj.shape
+        X_inj = X_inj.view(num_views * N, *shape)
+
+        mean, var = self._split(self(X_inj))
+        mean_phys = mean * self.y_std + self.y_mean
+        sigma_phys = torch.sqrt(var) * self.y_std
+
+        mean_bg, var_bg = self._split(self(X_bg))
+        mean_bg_phys = mean_bg * self.y_std + self.y_mean
+        sigma_bg_phys = torch.sqrt(var_bg) * self.y_std
+
+        y_true = torch.stack(
+            [params[k].repeat(num_views) for k in self.param_names], dim=1
+        )
+
+        outputs = {
+            "y_true": y_true.detach().cpu(),
+            "y_pred": mean_phys.detach().cpu(),
+            "y_sigma": sigma_phys.detach().cpu(),
+            "y_pred_bg": mean_bg_phys.detach().cpu(),
+            "y_sigma_bg": sigma_bg_phys.detach().cpu(),
+        }
+        if "snr" in params:
+            outputs["snr"] = params["snr"].repeat(num_views).detach().cpu()
+        return outputs
