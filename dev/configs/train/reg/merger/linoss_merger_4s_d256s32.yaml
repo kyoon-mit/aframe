@@ -7,14 +7,14 @@ trainer:
   check_val_every_n_epoch: 2
   log_every_n_steps: 20
   enable_progress_bar: true
-  default_root_dir: /n/holystore01/LABS/iaifi_lab/Lab/kyoon/aframe/dev/runs/merger_4s_linoss/train/reg/chirp_mass_26-30s_d64_s64_l4_linoss_regdev
+  default_root_dir: /n/holystore01/LABS/iaifi_lab/Lab/kyoon/aframe/dev/runs/linoss_merger_4s_d256s32/train/reg/chirp_mass_26-30s_d256_s32_l4_linoss_regdev
 
   logger:
     - class_path: train.callbacks.AframeWandbLogger
       init_args:
-        name: chirp_mass_snr_4_50_26-30s_d64_s64_l4_linoss_regdev
-        id:   chirp_mass_snr_4_50_26-30s_d64_s64_l4_linoss_regdev
-        save_dir: /n/holystore01/LABS/iaifi_lab/Lab/kyoon/aframe/dev/runs/merger_4s_linoss/train/reg/chirp_mass_26-30s_d64_s64_l4_linoss_regdev
+        name: chirp_mass_snr_4_50_26-30s_d256_s32_l4_linoss_regdev
+        id:   chirp_mass_snr_4_50_26-30s_d256_s32_l4_linoss_regdev
+        save_dir: /n/holystore01/LABS/iaifi_lab/Lab/kyoon/aframe/dev/runs/linoss_merger_4s_d256s32/train/reg/chirp_mass_26-30s_d256_s32_l4_linoss_regdev
         project: BNS-PUBLICATION
 
   callbacks:
@@ -28,7 +28,6 @@ trainer:
         monitor: val/mse_chirp_mass
         mode: min
         patience: 100000
-
 model:
   class_path: train.model.jax.JaxRegressionAframe
   init_args:
@@ -37,8 +36,8 @@ model:
       init_args:
         num_ifos: 2
         d_output: 2
-        d_model: 64
-        d_state: 64
+        d_model: 256
+        d_state: 32
         n_layers: 4
         dropout: 0.2
         r_min: 0.9
@@ -70,8 +69,8 @@ data:
     left_pad: 3.5
     right_pad: 0.0
 
-    batch_size: 96
-    batches_per_epoch: 520
+    batch_size: 64
+    batches_per_epoch: 781
     chunk_size: 2000
     chunks_per_epoch: 25
     num_files_per_batch: 1

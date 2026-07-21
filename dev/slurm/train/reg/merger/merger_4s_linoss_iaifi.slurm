@@ -1,14 +1,14 @@
 #!/bin/bash
-#SBATCH --partition=gpu_test
+#SBATCH --partition=iaifi_gpu
 #SBATCH --job-name=merger4s_linoss_reg
 #SBATCH --gres=gpu:1
 #SBATCH --mem=63999M
 #SBATCH --cpus-per-task=8
-#SBATCH --time=12:00:00
+#SBATCH --time=2-12:00:00
 #SBATCH --output=/n/holystore01/LABS/iaifi_lab/Lab/kyoon/aframe/dev/runs/merger_4s_linoss/train/reg/slurm_logs/%x_%j.out
 #SBATCH --error=/n/holystore01/LABS/iaifi_lab/Lab/kyoon/aframe/dev/runs/merger_4s_linoss/train/reg/slurm_logs/%x_%j.err
 
-VERSION=test4
+VERSION=test5
 
 REPO=/n/holystore01/LABS/iaifi_lab/Lab/kyoon/aframe
 BASE_NAME=chirp_mass_26-30s_d64_s64_l4_linoss_regdev

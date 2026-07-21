@@ -7,35 +7,35 @@ trainer:
   check_val_every_n_epoch: 2
   log_every_n_steps: 20
   enable_progress_bar: true
-  default_root_dir: /n/holystore01/LABS/iaifi_lab/Lab/kyoon/aframe/dev/runs/merger_4s_big_linoss_linear/train/reg/linoss_linear_regdev
+  default_root_dir: /n/holystore01/LABS/iaifi_lab/Lab/kyoon/aframe/dev/runs/linoss_merger_4s_d256s32_resnet/train/class/chirp_mass_26-30s_d256_s32_l4_linoss_resnet_regdev
 
   logger:
     - class_path: train.callbacks.AframeWandbLogger
       init_args:
-        name: linoss_linear_regdev
-        id:   linoss_linear_regdev
-        save_dir: /n/holystore01/LABS/iaifi_lab/Lab/kyoon/aframe/dev/runs/merger_4s_big_linoss_linear/train/reg/linoss_linear_regdev
-        project: BNS-PUBLICATION
+        name: chirp_mass_snr_4_50_26-30s_d256_s32_l4_linoss_resnet_regdev
+        id:   chirp_mass_snr_4_50_26-30s_d256_s32_l4_linoss_resnet_regdev
+        save_dir: /n/holystore01/LABS/iaifi_lab/Lab/kyoon/aframe/dev/runs/linoss_merger_4s_d256s32_resnet/train/class/chirp_mass_26-30s_d256_s32_l4_linoss_resnet_regdev
+        project: BNS-PUBLICATION-CLASS
 
   callbacks:
     - class_path: train.utils.jax.save_model.JAXCheckpointManager
       init_args:
-        monitor: val/mse_chirp_mass
-        mode: min
+        monitor: validation/TimeSlideAUROC
+        mode: max
         save_top_k: 3
     - class_path: lightning.pytorch.callbacks.EarlyStopping
       init_args:
-        monitor: val/mse_chirp_mass
-        mode: min
+        monitor: validation/TimeSlideAUROC
+        mode: max
         patience: 100000
 model:
-  class_path: train.model.jax.JaxRegressionAframe
+  class_path: train.model.jax.JaxClassificationAframe
   init_args:
     arch:
-      class_path: architectures.regression.RegressionTimeDomainLinOSS
+      class_path: architectures.regression.RegressionTimeDomainLinOSSResNetMLPDecoder
       init_args:
         num_ifos: 2
-        d_output: 2
+        d_output: 1
         d_model: 256
         d_state: 32
         n_layers: 4
@@ -43,12 +43,11 @@ model:
         r_min: 0.9
         theta_max: 3.14159265359
         seed: 0
-    param_names:
-      - chirp_mass
-    beta_nll: 0.3
-    lambda_spread: 0.2
-    y_mean: [1.80]
-    y_std: [0.55]
+    metric:
+      class_path: train.metrics.TimeSlideAUROC
+      init_args:
+        max_fpr: 1e-3
+        pool_length: 50
     normalize_input: true
     learning_rate: 1e-4
     weight_decay: 0.01
@@ -80,12 +79,12 @@ data:
     psd_length: 20.0
     highpass: 20
 
-    waveform_prob: 1.0
+    waveform_prob: 0.5
     swap_prob: 0.0
     mute_prob: 0.0
     max_num_workers: 8
 
-    num_valid_views: 1
+    num_valid_views: 4
     valid_stride: 25
     valid_livetime: 210000
 
