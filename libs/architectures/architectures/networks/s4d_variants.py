@@ -36,6 +36,7 @@ class S4ModelResNetMLPDecoder(S4Model):
         dropout: float = 0.2,
         dt_min: float = 0.001,
         dt_max: float = 0.1,
+        prenorm: bool = False,
         resnet_layers: tuple[int, ...] = (2, 2, 2),
         resnet_latent_dim: int = 64,
         mlp_width: int = 64,
@@ -51,6 +52,7 @@ class S4ModelResNetMLPDecoder(S4Model):
             dt_min=dt_min,
             dt_max=dt_max,
         )
+        self.prenorm = prenorm
         self.resnet = ResNet1D(
             in_channels=d_model,
             layers=list(resnet_layers),
@@ -71,7 +73,12 @@ class S4ModelResNetMLPDecoder(S4Model):
         for layer, norm, dropout in zip(
             self.s4_layers, self.norms, self.dropouts, strict=True
         ):
-            z = dropout(layer(x))
-            x = norm((z + x).transpose(-1, -2)).transpose(-1, -2)
+            if self.prenorm:
+                z = norm(x.transpose(-1, -2)).transpose(-1, -2)
+                z = dropout(layer(z))
+                x = x + z
+            else:
+                z = dropout(layer(x))
+                x = norm((z + x).transpose(-1, -2)).transpose(-1, -2)
         h = self.resnet(x)
         return self.mlp(h)
