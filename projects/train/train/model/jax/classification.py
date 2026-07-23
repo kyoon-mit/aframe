@@ -15,6 +15,7 @@ from train.model.supervised_ky import SupervisedAframeS4CustomLR
 from train.utils.jax.convert import jax_array_to_tensor, tensor_to_jax_array
 from train.utils.jax.load_model import load_model
 from train.utils.jax.training import (
+    ssm_param_labels,
     jax_apply_classification_training_step,
     jax_inference,
 )
@@ -37,6 +38,7 @@ class JaxClassificationAframe(SupervisedAframeS4CustomLR):
         arch: JaxArchitecture,
         metric: TimeSlideAUROC,
         learning_rate: float = 1e-4,
+        ssm_lr: Optional[float] = None,
         weight_decay: float = 0.0,
         max_steps: int = 500_000,
         warmup_steps: int = 1000,
@@ -46,10 +48,11 @@ class JaxClassificationAframe(SupervisedAframeS4CustomLR):
         load_from_checkpoint: Optional[str] = None,
         reset_optimizer_on_load: bool = True,
     ) -> None:
+        ssm_lr = learning_rate if ssm_lr is None else ssm_lr
         super().__init__(
             Architecture(),
             metric=metric,
-            ssm_lr=learning_rate,
+            ssm_lr=ssm_lr,
             learning_rate=learning_rate,
             weight_decay=weight_decay,
             pct_lr_ramp=0.0,
@@ -66,17 +69,31 @@ class JaxClassificationAframe(SupervisedAframeS4CustomLR):
             eqx.is_inexact_array, self.jax_model
         )
 
-        self.scheduler = optax.warmup_cosine_decay_schedule(
-            init_value=0.0,
-            peak_value=learning_rate,
-            warmup_steps=warmup_steps,
-            decay_steps=max_steps,
-            end_value=learning_rate * 0.01,
-        )
+        def _sched(peak):
+            return optax.warmup_cosine_decay_schedule(
+                init_value=0.0,
+                peak_value=peak,
+                warmup_steps=warmup_steps,
+                decay_steps=max_steps,
+                end_value=peak * 0.01,
+            )
+
+        self.scheduler = _sched(learning_rate)
+        self.ssm_scheduler = _sched(ssm_lr)
         self.optimizer = optax.chain(
             optax.clip_by_global_norm(clip_grad_norm),
-            optax.inject_hyperparams(optax.adamw)(
-                learning_rate=self.scheduler, weight_decay=weight_decay
+            optax.multi_transform(
+                {
+                    "ssm": optax.inject_hyperparams(optax.adamw)(
+                        learning_rate=self.ssm_scheduler,
+                        weight_decay=weight_decay,
+                    ),
+                    "other": optax.inject_hyperparams(optax.adamw)(
+                        learning_rate=self.scheduler,
+                        weight_decay=weight_decay,
+                    ),
+                },
+                ssm_param_labels,
             ),
         )
         diff_model, _ = eqx.partition(

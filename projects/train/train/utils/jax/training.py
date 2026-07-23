@@ -144,3 +144,21 @@ def jax_apply_classification_training_step(
         eqx.apply_updates(diff_model, updates), static_model
     )
     return new_model, new_state, new_opt_state, {"loss": loss}
+
+
+def ssm_param_labels(params):
+    """Label each leaf ``"ssm"`` if it lives inside the LinOSS mixers
+    (``model.mixers``), else ``"other"`` -- used by ``optax.multi_transform``
+    to give the SSM params their own learning rate."""
+
+    def tag(path, _leaf):
+        return (
+            "ssm"
+            if any(
+                isinstance(k, jax.tree_util.GetAttrKey) and k.name == "mixers"
+                for k in path
+            )
+            else "other"
+        )
+
+    return jax.tree_util.tree_map_with_path(tag, params)
