@@ -1,10 +1,10 @@
 #!/bin/bash
-#SBATCH --partition=gpu
-#SBATCH --job-name=premerger_pre4s_dur4s
+#SBATCH --partition=gpu_test
+#SBATCH --job-name=s4d_pre4s_dur4s_resnet
 #SBATCH --gres=gpu:1
 #SBATCH --mem=63999M
 #SBATCH --cpus-per-task=8
-#SBATCH --time=3-00:00:00
+#SBATCH --time=12:00:00
 #SBATCH --output=/n/holystore01/LABS/iaifi_lab/Lab/kyoon/aframe/dev/runs/premerger/pre_4s/duration_4s/train/reg/slurm_logs/%x_%j.out
 #SBATCH --error=/n/holystore01/LABS/iaifi_lab/Lab/kyoon/aframe/dev/runs/premerger/pre_4s/duration_4s/train/reg/slurm_logs/%x_%j.err
 
@@ -13,10 +13,10 @@
 VERSION=test1
 
 REPO=/n/holystore01/LABS/iaifi_lab/Lab/kyoon/aframe
-BASE_NAME=s4d_pre_4s_dur_4s
-WANDB_NAME=s4d_pre_4s_dur_4s
+BASE_NAME=s4d_pre_4s_dur_4s_resnet
+WANDB_NAME=s4d_pre_4s_dur_4s_resnet
 RUN_DIR=${REPO}/dev/runs/premerger/pre_4s/duration_4s/train/reg/${BASE_NAME}_${VERSION}
-CONFIG=${REPO}/dev/configs/train/reg/premerger/pre_4s/duration_4s.yaml
+CONFIG=${REPO}/dev/configs/train/reg/premerger/pre_4s/duration_4s_resnet.yaml
 # CKPT_PATH=${REPO}/dev/runs/premerger/pre_4s/duration_4s/train/reg/${BASE_NAME}_test2/BNS-PUBLICATION/${WANDB_NAME}_test2/checkpoints/last.ckpt
 
 mkdir -p "${RUN_DIR}/logs"
