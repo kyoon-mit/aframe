@@ -52,10 +52,11 @@ model:
     y_std: [0.55]
     normalize_input: true
     learning_rate: 1e-4
+    ssm_lr: 1e-3
     weight_decay: 0.01
     max_steps: 500000
     warmup_steps: 1000
-    clip_grad_norm: 10.0
+    clip_grad_norm: 1.0
     seed: 42
 
 data:
@@ -70,10 +71,10 @@ data:
     left_pad: 3.5
     right_pad: 0.0
 
-    batch_size: 64
-    batches_per_epoch: 781
+    batch_size: 128
+    batches_per_epoch: 25   # ~50k waveforms per epoch
     chunk_size: 2000
-    chunks_per_epoch: 25
+    chunks_per_epoch: 25     # 25 x 2000 = 50k draws; full 200k pool every ~4 epochs
     num_files_per_batch: 1
 
     fduration: 1.0
