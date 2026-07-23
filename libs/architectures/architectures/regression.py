@@ -2,9 +2,14 @@ from typing import Literal, Optional
 
 import torch
 from ml4gw.nn.resnet.resnet_1d import NormLayer, ResNet1D
+from ml4gw.nn.ssm.s4d import S4Model
 
 from architectures import Architecture
 from architectures.base import JaxArchitecture
+from architectures.networks.s4d_variants import (
+    S4ModelDenoiseRegress,
+    S4ModelSeq2Seq,
+)
 
 
 class RegressionArchitecture(Architecture):
@@ -65,6 +70,64 @@ class RegressionTimeDomainResNet(ResNet1D, RegressionArchitecture):
             stride_type=stride_type,
             norm_layer=norm_layer,
         )
+
+
+class RegressionTimeDomainS4DenoiseRegress(RegressionArchitecture):
+    """S4D denoiser (seq-to-seq) feeding an S4D regressor.
+
+    ``forward`` returns ``(x_denoised, param_estimates)``: a cleaned I/Q
+    sequence ``(N, num_ifos, L)`` and the regression head
+    ``(N, d_output)``. Pairs with ``DenoisedGaussianNLLRegression``.
+    """
+
+    def __init__(
+        self,
+        num_ifos: int,
+        d_output: int = 2,
+        denoiser_d_model: int = 128,
+        denoiser_d_state: int = 64,
+        denoiser_n_layers: int = 4,
+        denoiser_dropout: float = 0.2,
+        regressor_d_model: int = 128,
+        regressor_d_state: int = 64,
+        regressor_n_layers: int = 4,
+        regressor_dropout: float = 0.2,
+        dt_min: float = 1e-3,
+        dt_max: float = 0.1,
+        detach_denoiser: bool = False,
+        # linked from the CLI but unused here
+        sample_rate: Optional[float] = None,
+        kernel_length: Optional[float] = None,
+    ) -> None:
+        super().__init__()
+        self.model = S4ModelDenoiseRegress(
+            denoiser=S4ModelSeq2Seq,
+            regressor=S4Model,
+            denoiser_params={
+                "d_input": num_ifos,
+                "d_output": num_ifos,
+                "d_model": denoiser_d_model,
+                "d_state": denoiser_d_state,
+                "n_layers": denoiser_n_layers,
+                "dropout": denoiser_dropout,
+                "dt_min": dt_min,
+                "dt_max": dt_max,
+            },
+            regressor_params={
+                "d_input": num_ifos,
+                "d_output": d_output,
+                "d_model": regressor_d_model,
+                "d_state": regressor_d_state,
+                "n_layers": regressor_n_layers,
+                "dropout": regressor_dropout,
+                "dt_min": dt_min,
+                "dt_max": dt_max,
+            },
+            detach_denoiser=detach_denoiser,
+        )
+
+    def forward(self, X: torch.Tensor):
+        return self.model(X)
 
 
 class MultiTaskTimeDomainResNet(MultiTaskArchitecture):

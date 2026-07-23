@@ -62,6 +62,20 @@ class SupervisedAframeDataset(BaseAframeDataset):
         rvs = torch.rand(size=X.shape[:1], device=X.device)
         mask = rvs < self.sample_prob
 
+        # an all-background batch (possible when sample_prob < 1) would
+        # send empty tensors through the projector and crash cuFFT
+        if not mask.any():
+            y = torch.zeros((X.size(0), 1), device=X.device)
+            params_out = {
+                key: torch.full((X.size(0),), float("nan"), device=X.device)
+                for key in list(params) + ["dec", "psi", "phi", "snr"]
+            }
+            params_out = self.apply_param_transforms(params_out)
+            # clean (noise-free) target for the denoising task: all zeros
+            # here since no signal was injected
+            self._clean_signal = torch.zeros_like(X)
+            return X, y, psds, params_out
+
         dec, psi, phi = self.sample_extrinsic(X[mask])
         N = mask.sum().item()
         idx = torch.randperm(waveforms.shape[0])[:N]
@@ -98,6 +112,12 @@ class SupervisedAframeDataset(BaseAframeDataset):
 
         # inject the IFO responses
         X[mask] += kernels
+
+        # stash the clean (noise-free) signal for the denoising task, before
+        # `mask` is mutated by swap/mute below; zeros on non-injected rows
+        clean = torch.zeros_like(X)
+        clean[mask] = kernels
+        self._clean_signal = clean
 
         # make labels, turning off injection mask where
         # we swapped or muted

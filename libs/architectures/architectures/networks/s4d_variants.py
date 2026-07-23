@@ -82,3 +82,52 @@ class S4ModelResNetMLPDecoder(S4Model):
                 x = norm((z + x).transpose(-1, -2)).transpose(-1, -2)
         h = self.resnet(x)
         return self.mlp(h)
+
+
+class S4ModelSeq2Seq(S4Model):
+    """S4D sequence-to-sequence model."""
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            x: (B, d_input, L)
+
+        Returns:
+            (B, d_output, L)
+        """
+        x = x.transpose(-1, -2)  # (B, L, d_input)
+        x = self.encoder(x)  # (B, L, d_model)
+        x = x.transpose(-1, -2)  # (B, d_model, L)
+        for layer, norm, dropout in zip(
+            self.s4_layers, self.norms, self.dropouts, strict=True
+        ):
+            z = norm(x.transpose(-1, -2)).transpose(-1, -2)
+            z = dropout(layer(z))
+            x = x + z
+        x = x.transpose(-1, -2)  # (B, L, d_model)
+        x = self.decoder(x)  # (B, L, d_output)
+        return x.transpose(-1, -2)  # (B, d_output, L)
+
+
+class S4ModelDenoiseRegress(nn.Module):
+    def __init__(
+        self,
+        denoiser: nn.Module,
+        regressor: nn.Module,
+        denoiser_params: dict,
+        regressor_params: dict,
+        detach_denoiser: bool = False,
+    ):
+        super().__init__()
+        self.denoiser = denoiser(**denoiser_params)
+        self.regressor = regressor(**regressor_params)
+        self.detach_denoiser = detach_denoiser
+        return
+
+    def forward(self, x):  # (B, d_input, L) -> (B, d_output)
+        x_denoised = self.denoiser(x)  # (B, d_input, L) -> (B, d_input, L)
+        if self.detach_denoiser:
+            y = self.regressor(x_denoised.detach())
+        else:
+            y = self.regressor(x_denoised)  # (B, d_input, L) -> (B, d_output)
+        return x_denoised, y

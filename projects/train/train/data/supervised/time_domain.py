@@ -52,6 +52,29 @@ class TimeDomainSupervisedAframeDataset(SupervisedAframeDataset):
             )
 
 
+class DenoisingTimeDomainSupervisedAframeDataset(
+    TimeDomainSupervisedAframeDataset
+):
+    """Training batches for a joint denoiser + regressor.
+
+    Emits ``(X, X_clean, y, params)`` where ``X`` is the whitened noisy
+    input and ``X_clean`` is the same-whitening projection of the injected
+    waveform alone (zeros on non-injected rows). Because whitening is linear,
+    ``whiten(noise + signal) = whiten(noise) + whiten(signal)``, so the clean
+    target is just the whitened injected kernels. Validation is unchanged.
+    """
+
+    def inject(self, X, waveforms, params):
+        # call the base inject directly (not the parent's) so we keep the
+        # psds; it also stashes the raw clean kernels on self._clean_signal
+        X, y, psds, params_out = SupervisedAframeDataset.inject(
+            self, X=X, waveforms=waveforms, params=params
+        )
+        X = self.apply_transforms(X, psds)
+        X_clean = self.apply_transforms(self._clean_signal, psds)
+        return X, X_clean, y, params_out
+
+
 class HeterodyneTimeDomainSupervisedAframeDataset(SupervisedAframeDataset):
     """
     A derived class from BaseAframeDataset and SupervisedAframeDataset, it
