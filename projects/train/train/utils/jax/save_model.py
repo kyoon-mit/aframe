@@ -26,6 +26,7 @@ class JAXCheckpointManager(Callback):
         step_top_k: int = 10,
         every_n_steps: int | None = None,
         warmup_steps: int | None = None,
+        save_last: bool = True,
     ):
         self.monitor = monitor
         self.mode = mode
@@ -33,6 +34,7 @@ class JAXCheckpointManager(Callback):
         self.step_top_k = step_top_k
         self.cfg_every_n_steps = every_n_steps
         self.cfg_warmup_steps = warmup_steps
+        self.save_last = save_last
 
         # Separate tracking for metric-based and step-based checkpoints
         self.metric_checkpoints: dict[float, Path] = {}
@@ -87,6 +89,27 @@ class JAXCheckpointManager(Callback):
         # Handle step-based saving
         if self.cfg_every_n_steps is not None:
             self._save_by_steps(trainer)
+
+        # Always keep the most recent weights, independent of the monitored
+        # metric, so a plateaued/late run is never left with only warmup ckpts
+        if self.save_last:
+            self._save_last(trainer)
+
+    def on_train_end(self, trainer: Trainer, pl_module: LightningModule):
+        if self.save_last:
+            self._save_last(trainer)
+
+    def on_exception(self, trainer, pl_module, exception):
+        if self.save_last:
+            self._save_last(trainer)
+
+    def _save_last(self, trainer: Trainer):
+        model = trainer.lightning_module.jax_model
+        state = trainer.lightning_module.jax_model_state
+        opt_state = trainer.lightning_module.opt_state
+        last_path = self.output_dir / "last.eqx"
+        eqx.tree_serialise_leaves(last_path, (model, state, opt_state))
+        logger.info(f"Saved last checkpoint at step {trainer.global_step}")
 
     def _should_skip_warmup(self, trainer: Trainer) -> bool:
         current_step = trainer.global_step
