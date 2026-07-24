@@ -8,6 +8,7 @@ from architectures import Architecture
 from architectures.base import JaxArchitecture
 from architectures.networks.s4d_variants import (
     S4ModelDenoiseRegress,
+    S4ModelResNetMLPDecoder,
     S4ModelSeq2Seq,
 )
 
@@ -120,6 +121,73 @@ class RegressionTimeDomainS4DenoiseRegress(RegressionArchitecture):
                 "d_state": regressor_d_state,
                 "n_layers": regressor_n_layers,
                 "dropout": regressor_dropout,
+                "dt_min": dt_min,
+                "dt_max": dt_max,
+            },
+            detach_denoiser=detach_denoiser,
+        )
+
+    def forward(self, X: torch.Tensor):
+        return self.model(X)
+
+
+class RegressionTimeDomainS4DenoiseRegressResNetMLP(RegressionArchitecture):
+    """S4D seq-to-seq denoiser feeding an S4D + ResNet1D/MLP regressor.
+
+    Same as ``RegressionTimeDomainS4DenoiseRegress`` but the regressor head
+    is ``S4ModelResNetMLPDecoder`` (S4 layers -> ResNet1D -> MLP) instead of
+    mean-pool + linear. ``forward`` returns ``(x_denoised, param_estimates)``.
+    """
+
+    def __init__(
+        self,
+        num_ifos: int,
+        d_output: int = 2,
+        denoiser_d_model: int = 128,
+        denoiser_d_state: int = 64,
+        denoiser_n_layers: int = 4,
+        denoiser_dropout: float = 0.2,
+        regressor_d_model: int = 128,
+        regressor_d_state: int = 64,
+        regressor_n_layers: int = 4,
+        regressor_dropout: float = 0.2,
+        regressor_prenorm: bool = False,
+        resnet_layers: tuple[int, ...] = (2, 2, 2),
+        resnet_latent_dim: int = 64,
+        mlp_width: int = 64,
+        mlp_depth: int = 2,
+        dt_min: float = 1e-3,
+        dt_max: float = 0.1,
+        detach_denoiser: bool = False,
+        sample_rate: Optional[float] = None,
+        kernel_length: Optional[float] = None,
+    ) -> None:
+        super().__init__()
+        self.model = S4ModelDenoiseRegress(
+            denoiser=S4ModelSeq2Seq,
+            regressor=S4ModelResNetMLPDecoder,
+            denoiser_params={
+                "d_input": num_ifos,
+                "d_output": num_ifos,
+                "d_model": denoiser_d_model,
+                "d_state": denoiser_d_state,
+                "n_layers": denoiser_n_layers,
+                "dropout": denoiser_dropout,
+                "dt_min": dt_min,
+                "dt_max": dt_max,
+            },
+            regressor_params={
+                "d_input": num_ifos,
+                "d_output": d_output,
+                "d_model": regressor_d_model,
+                "d_state": regressor_d_state,
+                "n_layers": regressor_n_layers,
+                "dropout": regressor_dropout,
+                "prenorm": regressor_prenorm,
+                "resnet_layers": resnet_layers,
+                "resnet_latent_dim": resnet_latent_dim,
+                "mlp_width": mlp_width,
+                "mlp_depth": mlp_depth,
                 "dt_min": dt_min,
                 "dt_max": dt_max,
             },
