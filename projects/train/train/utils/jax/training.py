@@ -71,8 +71,6 @@ def jax_apply_regression_training_step(
     lambda_spread: float,
     opt_state,
     opt_update,
-    lr_other: float,
-    lr_ssm: float,
     key: PRNGKeyArray,
 ) -> tuple[eqx.Module, eqx.nn.State, object, dict]:
     diff_model, static_model = eqx.partition(model, model_filter_spec)
@@ -88,9 +86,8 @@ def jax_apply_regression_training_step(
             key,
         )
     )
-    directions, new_opt_state = opt_update(grads, opt_state, diff_model)
-    labels = ssm_param_labels(diff_model)
-    updates = _scale_by_group_lr(directions, labels, lr_other, lr_ssm)
+    # optax multi_transform(adamw) already applies the per-group lr schedule
+    updates, new_opt_state = opt_update(grads, opt_state, diff_model)
     new_model = eqx.combine(
         eqx.apply_updates(diff_model, updates), static_model
     )
