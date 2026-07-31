@@ -9,5 +9,6 @@
 # Step 4: sensitive volume vs FAR (aframe's SensitiveVolumePlot).
 
 set -euo pipefail
+TAG=${1:-boxcar}
 cd /n/holystore01/LABS/iaifi_lab/Lab/kyoon/aframe/projects/plots
-uv run python /n/holystore01/LABS/iaifi_lab/Lab/kyoon/aframe/dev/infer/steps/step4_sv_plot.py --results /n/holystore01/LABS/iaifi_lab/Lab/kyoon/MODEL/aframe/reg-dev-latest/triton_ts/merger_4s/results
+uv run python /n/holystore01/LABS/iaifi_lab/Lab/kyoon/aframe/dev/infer/steps/step4_sv_plot.py --dir /n/holystore01/LABS/iaifi_lab/Lab/kyoon/MODEL/aframe/reg-dev-latest/triton_ts/merger_4s/aggregated/"$TAG"

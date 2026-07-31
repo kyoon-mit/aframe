@@ -1,3 +1,4 @@
+import torch
 from lightning.pytorch.cli import LightningCLI
 
 from train.callbacks import WandbSaveConfig
@@ -61,6 +62,14 @@ class AframeCLI(LightningCLI):
         except Exception:
             pass
 
+        try:
+            parser.link_arguments(
+                "data.init_args.valid_stride",
+                "model.init_args.metric_full.init_args.stride",
+            )
+        except Exception:
+            pass
+
         # TODO: This is a workaround for linking num_chirp_masses between
         # the model and the architecture for in_channels.
         try:
@@ -101,6 +110,8 @@ class AframeCLI(LightningCLI):
 
 
 def main(args=None):
+    # allow TF32 on Tensor Cores for float32 matmuls
+    torch.set_float32_matmul_precision("high")
     cli = AframeCLI(
         AframeBase,
         BaseAframeDataset,

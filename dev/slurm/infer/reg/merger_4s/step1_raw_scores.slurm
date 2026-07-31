@@ -4,7 +4,7 @@
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=16G
 #SBATCH --time=04:00:00
-#SBATCH --array=0-249%6                # 250 branches, 6 at a time (the 80GB GPU can take it)
+#SBATCH --array=0-249%1                # 250 branches; serial (%1) -- S4D batch-128 fills 80GB, no concurrency
 #SBATCH --output=/n/holystore01/LABS/iaifi_lab/Lab/kyoon/aframe/slurm/wandb_logs/infer/step1_%a.log
 #
 # Step 1: one branch per task. Saves the RAW (un-integrated) scores to

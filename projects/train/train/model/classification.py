@@ -1,3 +1,5 @@
+from typing import Optional
+
 from architectures import Architecture
 
 from train.metrics import TimeSlideAUROC
@@ -23,11 +25,15 @@ class AframeClassification(AframeBase):
         self,
         arch: Architecture,
         metric: TimeSlideAUROC,
+        metric_full: Optional[TimeSlideAUROC] = None,
         *args,
         **kwargs,
     ) -> None:
         super().__init__(arch, *args, **kwargs)
         self.metric = metric
+        # optional full-ROC AUROC (max_fpr=1.0): a lower-variance cross-check
+        # of the noisy low-FAR partial AUROC. Nearly free (same scores).
+        self.metric_full = metric_full
 
     def validation_step(self, batch, _) -> None:
         shift, X_bg, X_inj, params = batch
@@ -49,3 +55,13 @@ class AframeClassification(AframeBase):
             on_epoch=True,
             sync_dist=True,
         )
+
+        if self.metric_full is not None:
+            self.metric_full.update(shift, y_bg, y_fg)
+            self.log(
+                "validation/TimeSlideAUROC_full",
+                self.metric_full,
+                on_step=True,
+                on_epoch=True,
+                sync_dist=True,
+            )

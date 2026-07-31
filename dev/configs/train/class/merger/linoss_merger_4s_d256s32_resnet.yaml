@@ -1,11 +1,11 @@
-seed_everything: 20260612
+seed_everything: 20260622
 
 trainer:
   accelerator: auto
   devices: auto
   max_epochs: 100000
-  check_val_every_n_epoch: 2
-  log_every_n_steps: 20
+  check_val_every_n_epoch: 10
+  log_every_n_steps: 50
   enable_progress_bar: true
   default_root_dir: /n/holystore01/LABS/iaifi_lab/Lab/kyoon/aframe/dev/runs/linoss_merger_4s_d256s32_resnet/train/class/chirp_mass_26-30s_d256_s32_l4_linoss_resnet_regdev
 
@@ -29,6 +29,10 @@ trainer:
         monitor: validation/TimeSlideAUROC
         mode: max
         patience: 100000
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: epoch
+
 model:
   class_path: train.model.jax.JaxClassificationAframe
   init_args:
@@ -41,21 +45,28 @@ model:
         d_state: 32
         n_layers: 4
         dropout: 0.2
-        r_min: 0.9
+        r_min: 0.5
         theta_max: 3.14159265359
-        seed: 0
+        seed: 42
     metric:
       class_path: train.metrics.TimeSlideAUROC
       init_args:
         max_fpr: 1e-3
         pool_length: 50
     normalize_input: true
-    learning_rate: 1e-4
-    ssm_lr: 1e-3
+    learning_rate: 1e-3
+    ssm_lr: 1e-2
     weight_decay: 0.01
-    max_steps: 500000
-    warmup_steps: 1000
-    clip_grad_norm: 10.0
+    clip_grad_norm: 1.0
+    lr_scheduler:
+      class_path: train.model.regression_ky.WarmupCosineAnnealingWarmRestarts
+      init_args:
+        warmup_epochs: 10
+        T_0: 1000
+        T_mult: 1
+        eta_min: 5.0e-5
+    lr_scheduler_interval: epoch
+
     seed: 42
 
 data:
@@ -70,8 +81,8 @@ data:
     left_pad: 3.5
     right_pad: 0.0
 
-    batch_size: 64
-    batches_per_epoch: 781
+    batch_size: 128
+    batches_per_epoch: 25
     chunk_size: 2000
     chunks_per_epoch: 25
     num_files_per_batch: 1
@@ -84,7 +95,7 @@ data:
     waveform_prob: 0.5
     swap_prob: 0.0
     mute_prob: 0.0
-    max_num_workers: 8
+    max_num_workers: 16
 
     num_valid_views: 4
     valid_stride: 25
@@ -97,10 +108,10 @@ data:
           index: -2
           maximum: 100.0
         start_params:
-          minimum: 4.0
+          minimum: 20.0
         end_params:
           minimum: 4.0
-        decay_steps: 100
+        decay_steps: 50
 
     param_transforms:
       - class_path: train.transforms.ChirpMass

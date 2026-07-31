@@ -9,5 +9,6 @@
 # Step 3: combine all branches into one background + foreground, summing Tb.
 
 set -euo pipefail
+TAG=${1:-boxcar}
 cd /n/holystore01/LABS/iaifi_lab/Lab/kyoon/aframe/projects/infer
-uv run python /n/holystore01/LABS/iaifi_lab/Lab/kyoon/aframe/dev/infer/steps/step3_aggregate.py --results /n/holystore01/LABS/iaifi_lab/Lab/kyoon/MODEL/aframe/reg-dev-latest/triton_ts/merger_4s/results
+uv run python /n/holystore01/LABS/iaifi_lab/Lab/kyoon/aframe/dev/infer/steps/step3_aggregate.py --results /n/holystore01/LABS/iaifi_lab/Lab/kyoon/MODEL/aframe/reg-dev-latest/triton_ts/merger_4s/results --tag "$TAG"

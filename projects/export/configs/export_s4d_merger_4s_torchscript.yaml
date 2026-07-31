@@ -1,0 +1,36 @@
+# TorchScript / libtorch export for the S4D merger_4s id2 model.
+#
+# Serves the aframe net on Triton's pytorch_libtorch backend (like the
+# preprocessor) instead of the python backend -- so the container needs no
+# torch-in-stub. weights is the traced TorchScript module (built in the train
+# env: normalize_input -> S4Model -> softplus -> sqrt -> -sigma). Geometry
+# mirrors export_s4d_merger_4s.yaml.
+
+weights: /n/holystore01/LABS/iaifi_lab/Lab/kyoon/MODEL/aframe/reg-dev-latest/torchscript/merger_4s/chirp_mass_snr_8_50_60-64s_d64_s64_l4_on_disk_id2/aframe.pt
+batch_file: /n/holystore01/LABS/iaifi_lab/Lab/kyoon/MODEL/aframe/reg-dev-latest/torchscript/merger_4s/chirp_mass_snr_8_50_60-64s_d64_s64_l4_on_disk_id2/batch.h5
+repository_directory: /n/holystore01/LABS/iaifi_lab/Lab/kyoon/MODEL/aframe/reg-dev-latest/triton_ts/merger_4s/chirp_mass_snr_8_50_60-64s_d64_s64_l4_on_disk_id2
+
+num_ifos: 2
+kernel_length: 4.0
+inference_sampling_rate: 16
+sample_rate: 2048
+batch_size: 128
+fduration: 1
+psd_length: 20
+preprocessor:
+  class_path: utils.preprocessing.BatchWhitener
+  init_args:
+    kernel_length: 4.0
+    inference_sampling_rate: 16
+    sample_rate: 2048
+    batch_size: 128
+    fduration: 1
+    fftlength: 2
+    highpass: 20
+streams_per_gpu: 6
+preproc_instances: 3
+aframe_instances: 1
+num_outputs: 1
+platform: TORCHSCRIPT
+clean: true
+verbose: true

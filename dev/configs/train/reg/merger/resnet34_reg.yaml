@@ -1,21 +1,21 @@
-seed_everything: 20260612
+seed_everything: 20260627
 
 trainer:
   accelerator: auto
   devices: auto
-  max_epochs: 5
-  check_val_every_n_epoch: 1
+  max_epochs: 100000
+  check_val_every_n_epoch: 2
   gradient_clip_val: 1.0
   log_every_n_steps: 20
   enable_progress_bar: true
-  default_root_dir: /n/holystore01/LABS/iaifi_lab/Lab/kyoon/aframe/dev/runs/denoise_regress_4s/train/reg/s4d_denoise_regress_4s_test1
+  default_root_dir: /n/holystore01/LABS/iaifi_lab/Lab/kyoon/aframe/dev/runs/resnet34_reg/train/reg/resnet34_reg_regdev
 
   logger:
     - class_path: train.callbacks.AframeWandbLogger
       init_args:
-        name: s4d_denoise_regress_4s_test1
-        id:   s4d_denoise_regress_4s_test1
-        save_dir: /n/holystore01/LABS/iaifi_lab/Lab/kyoon/aframe/dev/runs/denoise_regress_4s/train/reg/s4d_denoise_regress_4s_test1
+        name: resnet34_reg_regdev
+        id:   resnet34_reg_regdev
+        save_dir: /n/holystore01/LABS/iaifi_lab/Lab/kyoon/aframe/dev/runs/resnet34_reg/train/reg/resnet34_reg_regdev
         project: BNS-PUBLICATION
 
   callbacks:
@@ -25,7 +25,7 @@ trainer:
         mode: min
         save_top_k: 3
         save_last: true
-        filename: 's4d_chirp_mass_mse_{epoch:02d}'
+        filename: 'resnet34_chirp_mass_mse_{epoch:02d}'
         auto_insert_metric_name: false
     - class_path: lightning.pytorch.callbacks.ModelCheckpoint
       init_args:
@@ -33,7 +33,7 @@ trainer:
         mode: min
         save_top_k: 1
         save_last: true
-        filename: 's4d_chirp_mass_mse_{epoch:02d}'
+        filename: 'resnet34_chirp_mass_mse_{epoch:02d}'
         auto_insert_metric_name: false
     - class_path: lightning.pytorch.callbacks.EarlyStopping
       init_args:
@@ -43,47 +43,33 @@ trainer:
     - class_path: lightning.pytorch.callbacks.LearningRateMonitor
       init_args:
         logging_interval: epoch
+    - class_path: train.callbacks.EMA
+      init_args:
+        decay: 0.999
 
 model:
-  class_path: train.model.regression_ky.DenoisedGaussianNLLRegression
+  class_path: train.model.regression_ky.GaussianNLLRegressionAframeCustomLR
   init_args:
     arch:
-      class_path: architectures.regression.RegressionTimeDomainS4DenoiseRegress
+      class_path: architectures.regression.RegressionTimeDomainResNet
       init_args:
-        num_ifos: 2
-        d_output: 2          # chirp_mass mean + variance
-        denoiser_d_model: 64
-        denoiser_d_state: 32
-        denoiser_n_layers: 4
-        denoiser_dropout: 0.2
-        regressor_d_model: 64
-        regressor_d_state: 32
-        regressor_n_layers: 4
-        regressor_dropout: 0.2
-        dt_min: 1.0e-3
-        dt_max: 5.0
-        detach_denoiser: false
+        num_params: 2        # chirp_mass mean + variance
+        layers: [3, 4, 6, 3]
+        kernel_size: 3
     param_names:
       - chirp_mass
     beta_nll: 0.3
     y_mean: [1.80]
     y_std: [0.55]
-    # test4 (lr 3e-4, restarts) destabilized after ~epoch 99; test5
-    # fine-tunes test4's best ckpt gently with no restart in-window
-    learning_rate: 1e-4   # non-SSM parameters
-    ssm_lr: 1e-3
+    learning_rate: 1e-4
+    ssm_lr: 1e-4
     normalize_input: true
     warm_start_ckpt: null
-    lambda_spread: 0.2    # 0.3 spent the window-length info gain on spread; buy back mse
-    lambda_denoise: 1.0
-    lambda_regress: 1.0
-    regress_schedule: [[0, 0.0], [2, 1.0]]  # denoiser-only 2 ep, then joint
+    lambda_spread: 0.2
     weight_decay: 0.01
     lr_scheduler:
       class_path: train.model.regression_ky.WarmupCosineAnnealingWarmRestarts
       init_args:
-        # anneal fully within the 12h wall time so the run
-        # consolidates instead of oscillating at full lr
         warmup_epochs: 1
         T_0: 140
         T_mult: 2
@@ -91,7 +77,7 @@ model:
     lr_scheduler_interval: epoch
 
 data:
-  class_path: train.data.supervised.DenoisingTimeDomainSupervisedAframeDataset
+  class_path: train.data.supervised.TimeDomainSupervisedAframeDataset
   init_args:
     background_dir: /n/holystore01/LABS/iaifi_lab/Lab/kyoon/DATA/O3a_H1_L1_2048Hz
     waveforms_dir: /n/holystore01/LABS/iaifi_lab/Lab/kyoon/DATA/aframe_data/train
@@ -99,14 +85,13 @@ data:
     sample_rate: 2048
 
     kernel_length: 4.0
-    model_input_sample_rate: 256
     left_pad: 3.5
     right_pad: 0.0
 
-    batch_size: 16
-    batches_per_epoch: 50
-    chunk_size: 2000
-    chunks_per_epoch: 25      # 25 x 2000 = 50k draws; full 200k pool every ~4 epochs
+    batch_size: 256
+    batches_per_epoch: 256
+    chunk_size: 2048
+    chunks_per_epoch: 32      # 32 * 2048 = 65536 = batch_size * batches_per_epoch
     num_files_per_batch: 1
 
     fduration: 1.0
@@ -121,7 +106,7 @@ data:
 
     num_valid_views: 1
     valid_stride: 25
-    valid_livetime: 210000   # 5 shifts at stride 25 -> ~8365 windows to host 8192 val waveforms
+    valid_livetime: 210000
 
     snr_sampler:
       class_path: train.augmentations.SnrSampler
@@ -130,7 +115,7 @@ data:
           index: -2
           maximum: 100.0
         start_params:
-          minimum: 4.0      # ckpt already snr>=4-adapted; train settled
+          minimum: 4.0
         end_params:
           minimum: 4.0
         decay_steps: 100

@@ -18,5 +18,5 @@ OUTDIR=/n/holystore01/LABS/iaifi_lab/Lab/kyoon/MODEL/aframe/reg-dev-latest/raw_c
 
 # cd into the train uv project for its env; the script itself lives in dev/.
 cd /n/holystore01/LABS/iaifi_lab/Lab/kyoon/aframe/projects/train
-uv run python /n/holystore01/LABS/iaifi_lab/Lab/kyoon/aframe/dev/infer/save_outputs.py --outdir "$OUTDIR"
+uv run python /n/holystore01/LABS/iaifi_lab/Lab/kyoon/aframe/dev/infer/diagnostic/save_outputs.py --outdir "$OUTDIR"
 # Options: --max-strains N  --min-snr X  --edge-min/-max/-step  (default grid -> [-8,-4]..[-3,1])

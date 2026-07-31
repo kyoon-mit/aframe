@@ -37,12 +37,15 @@ class JaxClassificationAframe(SupervisedAframeS4CustomLR):
         self,
         arch: JaxArchitecture,
         metric: TimeSlideAUROC,
+        metric_full: Optional[TimeSlideAUROC] = None,
         learning_rate: float = 1e-4,
         ssm_lr: Optional[float] = None,
         weight_decay: float = 0.0,
-        max_steps: int = 500_000,
-        warmup_steps: int = 1000,
         clip_grad_norm: float = 10.0,
+        max_steps: int = 500_000,  # accepted for config compat
+        warmup_steps: int = 1000,  # (warmup now via lr_scheduler)
+        lr_scheduler=None,
+        lr_scheduler_interval: str = "epoch",
         normalize_input: bool = False,
         seed: int = 42,
         load_from_checkpoint: Optional[str] = None,
@@ -52,14 +55,18 @@ class JaxClassificationAframe(SupervisedAframeS4CustomLR):
         super().__init__(
             Architecture(),
             metric=metric,
+            metric_full=metric_full,
             ssm_lr=ssm_lr,
             learning_rate=learning_rate,
             weight_decay=weight_decay,
             pct_lr_ramp=0.0,
+            lr_scheduler=lr_scheduler,
+            lr_scheduler_interval=lr_scheduler_interval,
             normalize_input=normalize_input,
         )
         self.automatic_optimization = False
         self._step_marker = nn.Parameter(torch.zeros(1))
+        self._step_marker_ssm = nn.Parameter(torch.zeros(1))
 
         logger.info(f"JAX devices: {jax.devices()}")
 
@@ -69,32 +76,16 @@ class JaxClassificationAframe(SupervisedAframeS4CustomLR):
             eqx.is_inexact_array, self.jax_model
         )
 
-        def _sched(peak):
-            return optax.warmup_cosine_decay_schedule(
-                init_value=0.0,
-                peak_value=peak,
-                warmup_steps=warmup_steps,
-                decay_steps=max_steps,
-                end_value=peak * 0.01,
-            )
+        # direction-only adamw; per-group lr applied in the jax step from the
+        # torch scheduler. weight decay off for SSM (mixer) params, like S4D.
+        def _wd_mask(params):
+            labels = ssm_param_labels(params)
+            return jax.tree_util.tree_map(lambda lab: lab == "other", labels)
 
-        self.scheduler = _sched(learning_rate)
-        self.ssm_scheduler = _sched(ssm_lr)
         self.optimizer = optax.chain(
             optax.clip_by_global_norm(clip_grad_norm),
-            optax.multi_transform(
-                {
-                    "ssm": optax.inject_hyperparams(optax.adamw)(
-                        learning_rate=self.ssm_scheduler,
-                        weight_decay=weight_decay,
-                    ),
-                    "other": optax.inject_hyperparams(optax.adamw)(
-                        learning_rate=self.scheduler,
-                        weight_decay=weight_decay,
-                    ),
-                },
-                ssm_param_labels,
-            ),
+            optax.scale_by_adam(),
+            optax.add_decayed_weights(weight_decay, mask=_wd_mask),
         )
         diff_model, _ = eqx.partition(
             self.jax_model, self.jax_model_filter_spec
@@ -119,7 +110,40 @@ class JaxClassificationAframe(SupervisedAframeS4CustomLR):
         self.rng_key = jr.PRNGKey(seed)
 
     def configure_optimizers(self):
-        return torch.optim.SGD([self._step_marker], lr=0.0)
+        # dummy 2-group torch optimizer driven by the S4D-style scheduler so
+        # LearningRateMonitor reports both lrs; real update runs in JAX.
+        optimizer = torch.optim.SGD(
+            [
+                {
+                    "params": [self._step_marker],
+                    "lr": self.hparams.learning_rate,
+                },
+                {"params": [self._step_marker_ssm], "lr": self.hparams.ssm_lr},
+            ]
+        )
+        if self._lr_scheduler_factory is None:
+            return optimizer
+        scheduler = self._lr_scheduler_factory(optimizer)
+        return {
+            "optimizer": optimizer,
+            "lr_scheduler": {
+                "scheduler": scheduler,
+                "interval": self.hparams.lr_scheduler_interval,
+                # log under the same panel as the S4D AdamW models
+                # (LearningRateMonitor uses this name over the optimizer
+                # class, so the dummy SGD no longer spawns an lr-SGD panel)
+                "name": "lr-AdamW",
+            },
+        }
+
+    def on_train_epoch_end(self):
+        sched = self.lr_schedulers()
+        if sched is not None and self.hparams.lr_scheduler_interval == "epoch":
+            sched.step()
+
+    def _current_lrs(self):
+        groups = self.optimizers().param_groups
+        return float(groups[0]["lr"]), float(groups[1]["lr"])
 
     def on_train_batch_end(self, outputs, batch, batch_idx):
         pass
@@ -146,6 +170,7 @@ class JaxClassificationAframe(SupervisedAframeS4CustomLR):
 
         self.rng_key, k = jr.split(self.rng_key)
         keys = jr.split(k, Xj.shape[0])
+        lr_other, lr_ssm = self._current_lrs()
         (
             self.jax_model,
             self.jax_model_state,
@@ -159,6 +184,8 @@ class JaxClassificationAframe(SupervisedAframeS4CustomLR):
             yj,
             self.opt_state,
             self.optimizer.update,
+            lr_other,
+            lr_ssm,
             keys,
         )
 
@@ -169,12 +196,7 @@ class JaxClassificationAframe(SupervisedAframeS4CustomLR):
             on_epoch=True,
             prog_bar=True,
         )
-        self.log(
-            "train/lr",
-            float(self.opt_state[1].hyperparams["learning_rate"]),
-            on_step=True,
-            on_epoch=True,
-        )
+        # lr is reported by LearningRateMonitor, same as the S4D models
 
         opt = self.optimizers()
         opt.step()

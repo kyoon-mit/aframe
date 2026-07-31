@@ -1,4 +1,7 @@
+from typing import Optional
+
 import torch
+from ml4gw.nn.norm import GroupNorm1D
 from ml4gw.nn.resnet.resnet_1d import ResNet1D
 from ml4gw.nn.ssm.s4d import S4Model
 from torch import nn
@@ -37,6 +40,7 @@ class S4ModelResNetMLPDecoder(S4Model):
         dt_min: float = 0.001,
         dt_max: float = 0.1,
         prenorm: bool = False,
+        num_groups: Optional[int] = None,
         resnet_layers: tuple[int, ...] = (2, 2, 2),
         resnet_latent_dim: int = 64,
         mlp_width: int = 64,
@@ -53,6 +57,16 @@ class S4ModelResNetMLPDecoder(S4Model):
             dt_max=dt_max,
         )
         self.prenorm = prenorm
+        # opt-in group norm over the d_model channels; None keeps the base
+        # S4Model LayerNorm (applied on the transposed (B, L, d_model) view)
+        self._groupnorm = num_groups is not None
+        if self._groupnorm:
+            self.norms = nn.ModuleList(
+                [
+                    GroupNorm1D(num_channels=d_model, num_groups=num_groups)
+                    for _ in range(n_layers)
+                ]
+            )
         self.resnet = ResNet1D(
             in_channels=d_model,
             layers=list(resnet_layers),
@@ -66,6 +80,13 @@ class S4ModelResNetMLPDecoder(S4Model):
         layers += [nn.Linear(width, d_output)]
         self.mlp = nn.Sequential(*layers)
 
+    def _apply_norm(self, norm: nn.Module, x: torch.Tensor) -> torch.Tensor:
+        # x is (B, d_model, L). GroupNorm1D normalizes channels directly;
+        # LayerNorm needs the (B, L, d_model) view.
+        if self._groupnorm:
+            return norm(x)
+        return norm(x.transpose(-1, -2)).transpose(-1, -2)
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = x.transpose(-1, -2)
         x = self.encoder(x)
@@ -74,18 +95,58 @@ class S4ModelResNetMLPDecoder(S4Model):
             self.s4_layers, self.norms, self.dropouts, strict=True
         ):
             if self.prenorm:
-                z = norm(x.transpose(-1, -2)).transpose(-1, -2)
+                z = self._apply_norm(norm, x)
                 z = dropout(layer(z))
                 x = x + z
             else:
                 z = dropout(layer(x))
-                x = norm((z + x).transpose(-1, -2)).transpose(-1, -2)
+                x = self._apply_norm(norm, z + x)
         h = self.resnet(x)
         return self.mlp(h)
 
 
 class S4ModelSeq2Seq(S4Model):
     """S4D sequence-to-sequence model."""
+
+    def __init__(
+        self,
+        d_input: int,
+        d_output: int,
+        d_model: int = 128,
+        d_state: int = 64,
+        n_layers: int = 4,
+        dropout: float = 0.2,
+        dt_min: float = 0.001,
+        dt_max: float = 0.1,
+        prenorm: bool = False,
+        num_groups: Optional[int] = None,
+    ):
+        super().__init__(
+            d_input=d_input,
+            d_output=d_output,
+            d_model=d_model,
+            d_state=d_state,
+            n_layers=n_layers,
+            dropout=dropout,
+            dt_min=dt_min,
+            dt_max=dt_max,
+        )
+        self.prenorm = prenorm
+        self._groupnorm = num_groups is not None
+        if self._groupnorm:
+            self.norms = nn.ModuleList(
+                [
+                    GroupNorm1D(num_channels=d_model, num_groups=num_groups)
+                    for _ in range(n_layers)
+                ]
+            )
+
+    def _apply_norm(self, norm: nn.Module, x: torch.Tensor) -> torch.Tensor:
+        # x is (B, d_model, L). GroupNorm1D normalizes channels directly;
+        # LayerNorm needs the (B, L, d_model) view.
+        if self._groupnorm:
+            return norm(x)
+        return norm(x.transpose(-1, -2)).transpose(-1, -2)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -101,9 +162,13 @@ class S4ModelSeq2Seq(S4Model):
         for layer, norm, dropout in zip(
             self.s4_layers, self.norms, self.dropouts, strict=True
         ):
-            z = norm(x.transpose(-1, -2)).transpose(-1, -2)
-            z = dropout(layer(z))
-            x = x + z
+            if self.prenorm:
+                z = self._apply_norm(norm, x)
+                z = dropout(layer(z))
+                x = x + z
+            else:
+                z = dropout(layer(x))
+                x = self._apply_norm(norm, z + x)
         x = x.transpose(-1, -2)  # (B, L, d_model)
         x = self.decoder(x)  # (B, L, d_output)
         return x.transpose(-1, -2)  # (B, d_output, L)

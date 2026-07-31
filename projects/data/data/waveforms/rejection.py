@@ -1,5 +1,5 @@
 from collections import defaultdict
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import Executor, ProcessPoolExecutor
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple, Union
 
@@ -34,6 +34,7 @@ def rejection_sample(
     max_num_samples: int,
     pool: Optional[int] = None,
     chunksize: Optional[int] = None,
+    executor: Optional[Executor] = None,
 ) -> Tuple[ResponseSetFields, InjectionParameterSet]:
     # get the detector tensors and vertices
     # for projecting our waveforms
@@ -55,11 +56,20 @@ def rejection_sample(
 
     prior, detector_frame_prior = prior()
 
-    # optionally generate waveforms in parallel across processes
-    if pool:
+    # optionally generate waveforms in parallel across processes. An
+    # externally provided executor is reused (and not shut down here),
+    # which lets callers share one pool across many calls.
+    owns_executor = False
+    if executor is not None:
+        ex = executor
+        workers = getattr(executor, "_max_workers", None) or 1
+        if chunksize is None:
+            chunksize = max(1, num_signals // (workers * 8))
+    elif pool:
         if chunksize is None:
             chunksize = max(1, num_signals // (pool * 8))
         ex = ProcessPoolExecutor(max_workers=pool)
+        owns_executor = True
     else:
         ex, chunksize = None, 1
 
@@ -189,7 +199,7 @@ def rejection_sample(
     parameters["duration"] = waveform_duration
     parameters["num_injections"] = num_injections
     parameters["ifos"] = ifos
-    if ex is not None:
+    if ex is not None and owns_executor:
         ex.shutdown()
 
     return parameters, rejected_params

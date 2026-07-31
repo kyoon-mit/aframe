@@ -11,7 +11,7 @@ import jax
 import jax.random as jr
 from jaxtyping import Array, PRNGKeyArray
 
-from architectures.networks.linoss import LinOSSMixer
+from architectures.networks.linoss import LinOSSMixer, LinOSSModel
 
 
 class _Downsample1D(eqx.Module):
@@ -236,6 +236,7 @@ class LinOSSModelResNetMLPDecoder(eqx.Module):
         key: PRNGKeyArray,
         r_min: float = 0.9,
         theta_max: float = math.pi,
+        num_groups: int | None = None,
         resnet_layers: tuple[int, ...] = (2, 2, 2),
         resnet_latent_dim: int = 64,
         resnet_kernel_size: int = 3,
@@ -255,7 +256,15 @@ class LinOSSModelResNetMLPDecoder(eqx.Module):
             )
             for i in range(n_layers)
         ]
-        self.norms = [eqx.nn.LayerNorm(d_model) for _ in range(n_layers)]
+        # opt-in group norm over the d_model channels (applied per timestep,
+        # like the LayerNorm it replaces); None keeps LayerNorm
+        if num_groups is not None:
+            self.norms = [
+                eqx.nn.GroupNorm(groups=num_groups, channels=d_model)
+                for _ in range(n_layers)
+            ]
+        else:
+            self.norms = [eqx.nn.LayerNorm(d_model) for _ in range(n_layers)]
         self.dropout = eqx.nn.Dropout(dropout)
         self.resnet = ResNet1D(
             in_channels=d_model,
@@ -291,3 +300,126 @@ class LinOSSModelResNetMLPDecoder(eqx.Module):
         h = self.resnet(y)  # (resnet_latent_dim,)
         logits = self.mlp(h)  # (d_output,)
         return logits, state
+
+
+class LinOSSModelSeq2Seq(eqx.Module):
+    """LinOSS sequence-to-sequence denoiser: ``(d_input, T) ->
+    (d_output, T)``, no pooling; decoder applied per timestep."""
+
+    encoder: eqx.nn.Linear
+    mixers: list
+    norms: list
+    dropout: eqx.nn.Dropout
+    decoder: eqx.nn.Linear
+
+    def __init__(
+        self,
+        d_input,
+        d_output,
+        d_model=64,
+        d_state=64,
+        n_layers=4,
+        dropout=0.2,
+        *,
+        key,
+        r_min=0.9,
+        theta_max=math.pi,
+    ):
+        keys = jr.split(key, 2 + n_layers)
+        self.encoder = eqx.nn.Linear(d_input, d_model, key=keys[0])
+        self.mixers = [
+            LinOSSMixer(
+                d_model,
+                d_state,
+                key=keys[1 + i],
+                r_min=r_min,
+                theta_max=theta_max,
+            )
+            for i in range(n_layers)
+        ]
+        self.norms = [eqx.nn.LayerNorm(d_model) for _ in range(n_layers)]
+        self.dropout = eqx.nn.Dropout(dropout)
+        self.decoder = eqx.nn.Linear(d_model, d_output, key=keys[-1])
+
+    def __call__(self, x, key=None):
+        x = x.T  # (T, d_input)
+        y = jax.vmap(self.encoder)(x)
+        if key is None:
+            key = jr.PRNGKey(0)
+        layer_keys = jr.split(key, len(self.mixers))
+        for mixer, norm, k in zip(
+            self.mixers, self.norms, layer_keys, strict=True
+        ):
+            z = mixer(jax.vmap(norm)(y))
+            z = self.dropout(z, key=k)
+            y = y + z
+        out = jax.vmap(self.decoder)(y)  # (T, d_output)
+        return out.T  # (d_output, T)
+
+
+class LinOSSDenoiseClassify(eqx.Module):
+    """LinOSS seq-to-seq denoiser feeding a LinOSS classifier.
+
+    ``__call__`` returns ``((x_denoised, logits), state)``: the cleaned
+    ``(d_input, T)`` sequence and the ``(d_output,)`` detection logit.
+    """
+
+    denoiser: LinOSSModelSeq2Seq
+    classifier: LinOSSModel
+    detach_denoiser: bool = eqx.field(static=True)
+
+    def __init__(
+        self,
+        d_input,
+        d_output=1,
+        denoiser_d_model=64,
+        denoiser_d_state=64,
+        denoiser_n_layers=4,
+        denoiser_dropout=0.2,
+        classifier_d_model=64,
+        classifier_d_state=64,
+        classifier_n_layers=4,
+        classifier_dropout=0.2,
+        detach_denoiser=False,
+        *,
+        key,
+        r_min=0.9,
+        theta_max=math.pi,
+    ):
+        kd, kc = jr.split(key)
+        self.denoiser = LinOSSModelSeq2Seq(
+            d_input,
+            d_input,
+            denoiser_d_model,
+            denoiser_d_state,
+            denoiser_n_layers,
+            denoiser_dropout,
+            key=kd,
+            r_min=r_min,
+            theta_max=theta_max,
+        )
+        self.classifier = LinOSSModel(
+            d_input,
+            d_output,
+            classifier_d_model,
+            classifier_d_state,
+            classifier_n_layers,
+            classifier_dropout,
+            key=kc,
+            r_min=r_min,
+            theta_max=theta_max,
+        )
+        self.detach_denoiser = detach_denoiser
+
+    def __call__(self, x, state=None, key=None):
+        if key is None:
+            key = jr.PRNGKey(0)
+        k1, k2 = jr.split(key)
+        x_denoised = self.denoiser(x, key=k1)  # (d_input, T)
+        clf_in = (
+            jax.lax.stop_gradient(x_denoised)
+            if self.detach_denoiser
+            else x_denoised
+        )
+        logits, state = self.classifier(clf_in, state, key=k2)
+        return (x_denoised, logits), state

@@ -1,15 +1,20 @@
-"""Step 1: run inference and save the RAW (un-integrated) model scores.
+"""Step 1: run inference and save the RAW model-output timeseries.
 
-Same arguments as aframe's ``infer`` (it reuses aframe's parser), but also
-writes ``timeseries.hdf5`` holding the model output before any integration or
-clustering, plus the metadata step 2 needs to rebuild events from it.
+Same arguments as aframe's ``infer`` (it reuses aframe's parser), but instead
+of aframe's inline integrate/cluster (which assumes a 1-D discriminator) it
+captures the raw discriminator timeseries straight from the streaming client
+and writes ``timeseries.hdf5`` -- the model output before any postprocessing,
+plus the metadata step 2 needs to rebuild events from it.
 
 This is the only step that needs Triton/GPU. Once the raw scores are cached,
-step 2 can re-apply any integration method for free.
+step 2 applies any integration method AND any metric for free -- so the served
+discriminator emits the full model output ([mass, sigma], two channels), never
+a single collapsed statistic. background_ts/foreground_ts are (N,) for a
+1-channel serve or (N, 2) for the [mass, sigma] serve.
 
 Example (one branch):
     uv run python step1_raw_scores.py \\
-        --config /path/to/infer_merger_s4_id2.yaml \\
+        --config /path/to/infer_merger_s4_test7.yaml \\
         --client.address ${TRITON}:8001 \\
         --data.triton_address ${TRITON}:8001 \\
         --data.background_fname /path/to/background-....hdf5 \\
@@ -18,12 +23,52 @@ Example (one branch):
 """
 
 import os
+import time
 
 import h5py
 import numpy as np
+from tqdm import tqdm
 
 from infer.cli import build_parser
-from infer.main import infer
+
+
+def stream_scores(client, sequence):
+    """Stream one sequence and return the RAW (background_ts, foreground_ts).
+
+    Replicates infer()'s request loop but stops before the integrate/cluster
+    step, so it works for a multi-channel discriminator. Returns whatever the
+    server emits per window: (N,) for 1-channel, (N, C) for C channels.
+    """
+    for i, (background_window, injected_window) in enumerate(tqdm(sequence)):
+        sequence_start = i == 0
+        sequence_end = i == len(sequence) - 1
+        client.infer(
+            np.stack([background_window, background_window]),
+            request_id=i,
+            sequence_id=sequence.id,
+            sequence_start=sequence_start,
+            sequence_end=sequence_end,
+        )
+        if injected_window is not None:
+            client.infer(
+                np.stack([background_window, injected_window]),
+                request_id=i,
+                sequence_id=sequence.id + 1,
+                sequence_start=sequence_start,
+                sequence_end=sequence_end,
+            )
+        # warm up: block on the first response so inference errors surface now
+        if not i:
+            while not sequence.started:
+                client.get()
+                time.sleep(1e-2)
+
+    result = client.get()
+    while result is None:
+        result = client.get()
+        time.sleep(1e-1)
+    background_ts, foreground_ts = result
+    return background_ts, foreground_ts
 
 
 def save_raw_scores(
@@ -79,13 +124,10 @@ def main():
 
     cfg = parser.instantiate_classes(cfg)
     with cfg.client:
-        background, foreground, background_scores, foreground_scores = infer(
-            cfg.client, cfg.data, cfg.postprocessor, return_timeseries=True
+        background_scores, foreground_scores = stream_scores(
+            cfg.client, cfg.data
         )
 
-    # keep the usual event files so nothing downstream breaks
-    background.write(os.path.join(output_dir, "background.hdf5"))
-    foreground.write(os.path.join(output_dir, "foreground.hdf5"))
     save_raw_scores(
         output_dir,
         background_scores,

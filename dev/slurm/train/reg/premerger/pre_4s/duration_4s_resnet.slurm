@@ -10,7 +10,7 @@
 
 # gpu_test verification run. Requires the repo checked out on reg-dev-latest.
 # Bump VERSION below before each new run.
-VERSION=test1
+VERSION=test2
 
 REPO=/n/holystore01/LABS/iaifi_lab/Lab/kyoon/aframe
 BASE_NAME=s4d_pre_4s_dur_4s_resnet

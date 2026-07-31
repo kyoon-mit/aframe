@@ -5,6 +5,7 @@ from ml4gw.nn.resnet.resnet_1d import NormLayer, ResNet1D
 from ml4gw.nn.ssm.s4d import S4Model
 
 from architectures import Architecture
+from architectures.supervised import SupervisedArchitecture
 from architectures.base import JaxArchitecture
 from architectures.networks.s4d_variants import (
     S4ModelDenoiseRegress,
@@ -73,7 +74,9 @@ class RegressionTimeDomainResNet(ResNet1D, RegressionArchitecture):
         )
 
 
-class RegressionTimeDomainS4DenoiseRegress(RegressionArchitecture):
+class RegressionTimeDomainS4DenoiseRegress(
+    RegressionArchitecture, SupervisedArchitecture
+):
     """S4D denoiser (seq-to-seq) feeding an S4D regressor.
 
     ``forward`` returns ``(x_denoised, param_estimates)``: a cleaned I/Q
@@ -131,7 +134,9 @@ class RegressionTimeDomainS4DenoiseRegress(RegressionArchitecture):
         return self.model(X)
 
 
-class RegressionTimeDomainS4DenoiseRegressResNetMLP(RegressionArchitecture):
+class RegressionTimeDomainS4DenoiseRegressResNetMLP(
+    RegressionArchitecture, SupervisedArchitecture
+):
     """S4D seq-to-seq denoiser feeding an S4D + ResNet1D/MLP regressor.
 
     Same as ``RegressionTimeDomainS4DenoiseRegress`` but the regressor head
@@ -152,6 +157,8 @@ class RegressionTimeDomainS4DenoiseRegressResNetMLP(RegressionArchitecture):
         regressor_n_layers: int = 4,
         regressor_dropout: float = 0.2,
         regressor_prenorm: bool = False,
+        denoiser_prenorm: bool = False,
+        num_groups: Optional[int] = None,
         resnet_layers: tuple[int, ...] = (2, 2, 2),
         resnet_latent_dim: int = 64,
         mlp_width: int = 64,
@@ -173,6 +180,8 @@ class RegressionTimeDomainS4DenoiseRegressResNetMLP(RegressionArchitecture):
                 "d_state": denoiser_d_state,
                 "n_layers": denoiser_n_layers,
                 "dropout": denoiser_dropout,
+                "prenorm": denoiser_prenorm,
+                "num_groups": num_groups,
                 "dt_min": dt_min,
                 "dt_max": dt_max,
             },
@@ -184,6 +193,7 @@ class RegressionTimeDomainS4DenoiseRegressResNetMLP(RegressionArchitecture):
                 "n_layers": regressor_n_layers,
                 "dropout": regressor_dropout,
                 "prenorm": regressor_prenorm,
+                "num_groups": num_groups,
                 "resnet_layers": resnet_layers,
                 "resnet_latent_dim": resnet_latent_dim,
                 "mlp_width": mlp_width,
@@ -331,6 +341,7 @@ try:
             dropout: float = 0.2,
             r_min: float = 0.9,
             theta_max: float = 3.14159265359,
+            num_groups: int = None,
             seed: int = 0,
             sample_rate: float = None,
             kernel_length: float = None,
@@ -345,6 +356,7 @@ try:
                 key=_jr.PRNGKey(seed),
                 r_min=r_min,
                 theta_max=theta_max,
+                num_groups=num_groups,
             )
 
         def __call__(self, x, state, key=None):
@@ -353,6 +365,73 @@ try:
 except ImportError:
 
     class RegressionTimeDomainLinOSSResNetMLPDecoder(JaxArchitecture):
+        """Stub raised when JAX/equinox are not installed."""
+
+        def __init__(self, *args, **kwargs):
+            raise ImportError(
+                "JAX and equinox are required. uv sync --extra jax"
+            )
+
+
+try:
+    import equinox as _eqx2
+    import jax.random as _jr2
+
+    from architectures.networks.linoss_variants import LinOSSDenoiseClassify
+
+    class RegressionTimeDomainLinOSSDenoiseClassify(
+        JaxArchitecture, _eqx2.Module
+    ):
+        """JAX LinOSS seq-to-seq denoiser feeding a LinOSS classifier.
+
+        ``__call__`` returns ``((x_denoised, logits), state)``. Pairs with
+        ``JaxDenoiseClassificationAframe``.
+        """
+
+        model: LinOSSDenoiseClassify
+
+        def __init__(
+            self,
+            num_ifos: int,
+            d_output: int = 1,
+            denoiser_d_model: int = 64,
+            denoiser_d_state: int = 64,
+            denoiser_n_layers: int = 4,
+            denoiser_dropout: float = 0.2,
+            classifier_d_model: int = 64,
+            classifier_d_state: int = 64,
+            classifier_n_layers: int = 4,
+            classifier_dropout: float = 0.2,
+            detach_denoiser: bool = False,
+            r_min: float = 0.9,
+            theta_max: float = 3.14159265359,
+            seed: int = 0,
+            sample_rate: float = None,
+            kernel_length: float = None,
+        ):
+            self.model = LinOSSDenoiseClassify(
+                d_input=num_ifos,
+                d_output=d_output,
+                denoiser_d_model=denoiser_d_model,
+                denoiser_d_state=denoiser_d_state,
+                denoiser_n_layers=denoiser_n_layers,
+                denoiser_dropout=denoiser_dropout,
+                classifier_d_model=classifier_d_model,
+                classifier_d_state=classifier_d_state,
+                classifier_n_layers=classifier_n_layers,
+                classifier_dropout=classifier_dropout,
+                detach_denoiser=detach_denoiser,
+                key=_jr2.PRNGKey(seed),
+                r_min=r_min,
+                theta_max=theta_max,
+            )
+
+        def __call__(self, x, state, key=None):
+            return self.model(x, state, key=key)
+
+except ImportError:
+
+    class RegressionTimeDomainLinOSSDenoiseClassify(JaxArchitecture):
         """Stub raised when JAX/equinox are not installed."""
 
         def __init__(self, *args, **kwargs):

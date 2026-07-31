@@ -1,5 +1,5 @@
 import logging
-from typing import List, Optional
+from typing import Callable, List, Optional
 
 import equinox as eqx
 import jax
@@ -49,9 +49,13 @@ class JaxRegressionAframe(GaussianNLLRegressionAframeCustomLR):
         learning_rate: float = 1e-4,
         ssm_lr: Optional[float] = None,
         weight_decay: float = 0.0,
-        max_steps: int = 500_000,
-        warmup_steps: int = 1000,
         clip_grad_norm: float = 10.0,
+        max_steps: int = 500_000,  # accepted for config compat
+        warmup_steps: int = 1000,  # (warmup now via lr_scheduler)
+        lr_scheduler: Optional[
+            Callable[[torch.optim.Optimizer], object]
+        ] = None,
+        lr_scheduler_interval: str = "epoch",
         seed: int = 42,
         load_from_checkpoint: Optional[str] = None,
         reset_optimizer_on_load: bool = True,
@@ -69,7 +73,8 @@ class JaxRegressionAframe(GaussianNLLRegressionAframeCustomLR):
             ssm_lr=ssm_lr,
             lambda_spread=lambda_spread,
             normalize_input=normalize_input,
-            lr_scheduler=None,
+            lr_scheduler=lr_scheduler,
+            lr_scheduler_interval=lr_scheduler_interval,
             warm_start_ckpt=None,
             pct_lr_ramp=0.0,
         )
@@ -77,8 +82,10 @@ class JaxRegressionAframe(GaussianNLLRegressionAframeCustomLR):
         self.beta_nll = beta_nll
         self.lambda_spread = lambda_spread
 
-        # dummy torch parameter so optimizer.step() advances global_step
+        # dummy torch params (one per lr group) so the S4D-style torch
+        # scheduler + LearningRateMonitor drive/report both learning rates
         self._step_marker = nn.Parameter(torch.zeros(1))
+        self._step_marker_ssm = nn.Parameter(torch.zeros(1))
 
         logger.info(f"JAX devices: {jax.devices()}")
 
@@ -88,33 +95,17 @@ class JaxRegressionAframe(GaussianNLLRegressionAframeCustomLR):
             eqx.is_inexact_array, self.jax_model
         )
 
-        def _sched(peak):
-            return optax.warmup_cosine_decay_schedule(
-                init_value=0.0,
-                peak_value=peak,
-                warmup_steps=warmup_steps,
-                decay_steps=max_steps,
-                end_value=peak * 0.01,
-            )
+        # direction-only adamw (no lr): the per-step, per-group lr comes from
+        # the torch scheduler and is applied inside the jax training step.
+        # weight decay is off for the SSM (mixer) params, matching S4D.
+        def _wd_mask(params):
+            labels = ssm_param_labels(params)
+            return jax.tree_util.tree_map(lambda lab: lab == "other", labels)
 
-        # separate lr for the SSM (LinOSS mixer) params vs everything else
-        self.scheduler = _sched(learning_rate)
-        self.ssm_scheduler = _sched(ssm_lr)
         self.optimizer = optax.chain(
             optax.clip_by_global_norm(clip_grad_norm),
-            optax.multi_transform(
-                {
-                    "ssm": optax.inject_hyperparams(optax.adamw)(
-                        learning_rate=self.ssm_scheduler,
-                        weight_decay=weight_decay,
-                    ),
-                    "other": optax.inject_hyperparams(optax.adamw)(
-                        learning_rate=self.scheduler,
-                        weight_decay=weight_decay,
-                    ),
-                },
-                ssm_param_labels,
-            ),
+            optax.scale_by_adam(),
+            optax.add_decayed_weights(weight_decay, mask=_wd_mask),
         )
         diff_model, _ = eqx.partition(
             self.jax_model, self.jax_model_filter_spec
@@ -139,8 +130,38 @@ class JaxRegressionAframe(GaussianNLLRegressionAframeCustomLR):
         self.rng_key = jr.PRNGKey(seed)
 
     def configure_optimizers(self):
-        # dummy optimizer; the real update is applied in JAX/optax
-        return torch.optim.SGD([self._step_marker], lr=0.0)
+        # dummy torch optimizer whose two param-group lrs are driven by the
+        # same scheduler S4D uses; the real weight update is applied in JAX
+        # (reading these lrs each step). group 0 = other, group 1 = ssm.
+        optimizer = torch.optim.SGD(
+            [
+                {
+                    "params": [self._step_marker],
+                    "lr": self.hparams.learning_rate,
+                },
+                {"params": [self._step_marker_ssm], "lr": self.hparams.ssm_lr},
+            ]
+        )
+        if self._lr_scheduler_factory is None:
+            return optimizer
+        scheduler = self._lr_scheduler_factory(optimizer)
+        return {
+            "optimizer": optimizer,
+            "lr_scheduler": {
+                "scheduler": scheduler,
+                "interval": self.hparams.lr_scheduler_interval,
+            },
+        }
+
+    def on_train_epoch_end(self):
+        # manual optimization: step the lr scheduler ourselves (epoch)
+        sched = self.lr_schedulers()
+        if sched is not None and self.hparams.lr_scheduler_interval == "epoch":
+            sched.step()
+
+    def _current_lrs(self):
+        groups = self.optimizers().param_groups
+        return float(groups[0]["lr"]), float(groups[1]["lr"])
 
     def on_train_batch_end(self, outputs, batch, batch_idx):
         # override the S4D SSM clamp (no torch kernel params here)
@@ -174,6 +195,7 @@ class JaxRegressionAframe(GaussianNLLRegressionAframeCustomLR):
 
         self.rng_key, k = jr.split(self.rng_key)
         keys = jr.split(k, Xj.shape[0])
+        lr_other, lr_ssm = self._current_lrs()
         (
             self.jax_model,
             self.jax_model_state,
@@ -189,6 +211,8 @@ class JaxRegressionAframe(GaussianNLLRegressionAframeCustomLR):
             self.lambda_spread,
             self.opt_state,
             self.optimizer.update,
+            lr_other,
+            lr_ssm,
             keys,
         )
 
@@ -251,18 +275,7 @@ class JaxRegressionAframe(GaussianNLLRegressionAframeCustomLR):
             on_epoch=True,
             prog_bar=True,
         )
-        self.log(
-            "train/lr",
-            float(self.scheduler(self.global_step)),
-            on_step=True,
-            on_epoch=True,
-        )
-        self.log(
-            "train/ssm_lr",
-            float(self.ssm_scheduler(self.global_step)),
-            on_step=True,
-            on_epoch=True,
-        )
+        # lr is reported by LearningRateMonitor, same as the S4D models
 
         opt = self.optimizers()
         opt.step()

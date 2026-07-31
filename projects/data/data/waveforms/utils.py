@@ -100,6 +100,14 @@ def load_psds(
     for fname in fnames:
         strain = TimeSeriesDict.read(fname, path=ifos)
         duration = float(strain[ifos[0]].duration.value)
+        # segments shorter than the FFT length can't produce a PSD
+        # (Welch window would exceed the data); skip them
+        if duration < 1 / df:
+            logging.info(
+                f"Skipping {fname}: {duration:.0f}s is shorter "
+                f"than the {1 / df:.0f}s PSD fft length"
+            )
+            continue
         psd_stack = np.stack(
             [
                 strain[ifo].psd(1 / df, window="hann", method="median").value
@@ -112,6 +120,11 @@ def load_psds(
             weighted_sum += psd_stack * duration
         total_duration += duration
 
+    if weighted_sum is None:
+        raise ValueError(
+            f"No background file in {background} is at least "
+            f"{1 / df:.0f}s long; can't estimate a PSD"
+        )
     psds = torch.tensor(weighted_sum / total_duration, dtype=torch.float64)
     if sample_rate is not None:
         num_bins = int(sample_rate / 2 / df) + 1

@@ -61,6 +61,7 @@ class WarmupCosineAnnealingWarmRestarts(torch.optim.lr_scheduler.LRScheduler):
         T_mult=2,
         eta_min=1e-8,
         warmup_start_factor=0.01,
+        peak_decay=1.0,
         last_epoch=-1,
     ):
         self.warmup_epochs = warmup_epochs
@@ -68,6 +69,9 @@ class WarmupCosineAnnealingWarmRestarts(torch.optim.lr_scheduler.LRScheduler):
         self.T_mult = T_mult
         self.eta_min = eta_min
         self.warmup_start_factor = warmup_start_factor
+        # each restart scales the cosine amplitude by peak_decay**n_restart,
+        # so successive peaks decay (e.g. 0.8 -> base*0.8, base*0.64, ...)
+        self.peak_decay = peak_decay
         super().__init__(optimizer, last_epoch)
 
     def get_lr(self):
@@ -78,21 +82,24 @@ class WarmupCosineAnnealingWarmRestarts(torch.optim.lr_scheduler.LRScheduler):
             ) * e / max(1, self.warmup_epochs)
             return [base_lr * alpha for base_lr in self.base_lrs]
         t = e - self.warmup_epochs
-        T_cur, T_i = self._cosine_position(t)
+        T_cur, T_i, n = self._cosine_position(t)
+        decay = self.peak_decay**n
         return [
             self.eta_min
             + (base_lr - self.eta_min)
+            * decay
             * (1 + math.cos(math.pi * T_cur / T_i))
             / 2
             for base_lr in self.base_lrs
         ]
 
     def _cosine_position(self, t):
-        T_i = self.T_0
+        T_i, n = self.T_0, 0
         while t >= T_i:
             t -= T_i
             T_i *= self.T_mult
-        return t, T_i
+            n += 1
+        return t, T_i, n
 
 
 class GaussianNLLRegressionAframeCustomLR(GaussianNLLRegressionAframe):
@@ -440,10 +447,17 @@ class DenoisedGaussianNLLRegression(GaussianNLLRegressionAframeCustomLR):
 
     def on_train_epoch_start(self):
         e = self.current_epoch
-        mult = self.regress_schedule[0][1]
-        for ep, m in self.regress_schedule:
-            if e >= ep:
-                mult = m
+        sched = self.regress_schedule
+        if e <= sched[0][0]:
+            mult = sched[0][1]
+        elif e >= sched[-1][0]:
+            mult = sched[-1][1]
+        else:
+            # linear interpolation between the two bracketing control points
+            for (e0, m0), (e1, m1) in zip(sched, sched[1:], strict=False):
+                if e0 <= e <= e1:
+                    mult = m0 + (m1 - m0) * (e - e0) / (e1 - e0)
+                    break
         self.lambda_regress = self._base_lambda_regress * mult
         self.log("lambda/regress", self.lambda_regress, on_epoch=True)
         self.log("lambda/denoise", float(self.lambda_denoise), on_epoch=True)
@@ -518,9 +532,19 @@ class DenoisedGaussianNLLRegression(GaussianNLLRegressionAframeCustomLR):
             self.lambda_denoise * loss_denoise
             + self.lambda_regress * loss_regress
         )
-        self.log("train/loss_denoise", loss_denoise, on_epoch=True)
-        self.log("train/loss_regress", loss_regress, on_epoch=True)
-        self.log("train/loss", loss, on_epoch=True, prog_bar=True)
+        self.log(
+            "train/loss_denoise",
+            loss_denoise,
+            on_step=False,
+            on_epoch=True,
+        )
+        self.log(
+            "train/loss_regress",
+            loss_regress,
+            on_step=False,
+            on_epoch=True,
+        )
+        # train/loss is logged by AframeBase.training_step from the return
         return loss
 
     def validation_step(self, batch, _):

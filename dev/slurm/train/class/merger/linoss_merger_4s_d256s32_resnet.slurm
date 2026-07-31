@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --partition=gpu_h200
+#SBATCH --partition=iaifi_gpu
 #SBATCH --job-name=linoss_merger_4s_d256s32_resnet_cls
 #SBATCH --gres=gpu:1
 #SBATCH --mem=127G
@@ -8,7 +8,7 @@
 #SBATCH --output=/n/holystore01/LABS/iaifi_lab/Lab/kyoon/aframe/dev/runs/linoss_merger_4s_d256s32_resnet/train/class/slurm_logs/%x_%j.out
 #SBATCH --error=/n/holystore01/LABS/iaifi_lab/Lab/kyoon/aframe/dev/runs/linoss_merger_4s_d256s32_resnet/train/class/slurm_logs/%x_%j.err
 
-VERSION=test1
+VERSION=test2
 
 REPO=/n/holystore01/LABS/iaifi_lab/Lab/kyoon/aframe
 BASE_NAME=chirp_mass_26-30s_d256_s32_l4_linoss_resnet_regdev

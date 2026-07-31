@@ -29,6 +29,10 @@ trainer:
         monitor: val/mse_chirp_mass
         mode: min
         patience: 100000
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: epoch
+
 model:
   class_path: train.model.jax.JaxRegressionAframe
   init_args:
@@ -57,6 +61,15 @@ model:
     max_steps: 500000
     warmup_steps: 1000
     clip_grad_norm: 10.0
+    lr_scheduler:
+      class_path: train.model.regression_ky.WarmupCosineAnnealingWarmRestarts
+      init_args:
+        warmup_epochs: 1
+        T_0: 140
+        T_mult: 2
+        eta_min: 1.0e-7
+    lr_scheduler_interval: epoch
+
     seed: 42
 
 data:

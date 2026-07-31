@@ -47,6 +47,19 @@ def jax_regression_loss_fn(
     return loss, (new_state, nll, spread, mean, var)
 
 
+def _scale_by_group_lr(updates, labels, lr_other, lr_ssm):
+    """Scale the adamw direction by ``-lr``, using ``lr_ssm`` for LinOSS
+    mixer leaves and ``lr_other`` elsewhere. ``lr_*`` are supplied per step
+    from the torch scheduler, so lr control lives in the same place (and the
+    same ``LearningRateMonitor``) as the S4D models."""
+
+    def scale(u, lab):
+        lr = lr_ssm if lab == "ssm" else lr_other
+        return -lr * u
+
+    return jax.tree_util.tree_map(scale, updates, labels)
+
+
 @eqx.filter_jit
 def jax_apply_regression_training_step(
     model: eqx.Module,
@@ -58,6 +71,8 @@ def jax_apply_regression_training_step(
     lambda_spread: float,
     opt_state,
     opt_update,
+    lr_other: float,
+    lr_ssm: float,
     key: PRNGKeyArray,
 ) -> tuple[eqx.Module, eqx.nn.State, object, dict]:
     diff_model, static_model = eqx.partition(model, model_filter_spec)
@@ -73,7 +88,9 @@ def jax_apply_regression_training_step(
             key,
         )
     )
-    updates, new_opt_state = opt_update(grads, opt_state, diff_model)
+    directions, new_opt_state = opt_update(grads, opt_state, diff_model)
+    labels = ssm_param_labels(diff_model)
+    updates = _scale_by_group_lr(directions, labels, lr_other, lr_ssm)
     new_model = eqx.combine(
         eqx.apply_updates(diff_model, updates), static_model
     )
@@ -133,13 +150,17 @@ def jax_apply_classification_training_step(
     y: Array,
     opt_state,
     opt_update,
+    lr_other: float,
+    lr_ssm: float,
     key: PRNGKeyArray,
 ) -> tuple[eqx.Module, eqx.nn.State, object, dict]:
     diff_model, static_model = eqx.partition(model, model_filter_spec)
     (loss, (new_state, _)), grads = eqx.filter_value_and_grad(
         jax_classification_loss_fn, has_aux=True
     )(diff_model, static_model, state, X, y, key)
-    updates, new_opt_state = opt_update(grads, opt_state, diff_model)
+    directions, new_opt_state = opt_update(grads, opt_state, diff_model)
+    labels = ssm_param_labels(diff_model)
+    updates = _scale_by_group_lr(directions, labels, lr_other, lr_ssm)
     new_model = eqx.combine(
         eqx.apply_updates(diff_model, updates), static_model
     )
@@ -162,3 +183,47 @@ def ssm_param_labels(params):
         )
 
     return jax.tree_util.tree_map_with_path(tag, params)
+
+
+def jax_denoise_cls_loss_fn(
+    diff_model, static_model, state, X, X_clean, y, lambda_denoise, key
+):
+    model = eqx.combine(diff_model, static_model)
+    (x_denoised, logits), new_state = jax_fwd_batch(model, X, state, key)
+    bce = _bce_loss(logits, y.reshape(-1, 1))
+    denoise = jnp.mean((x_denoised - X_clean) ** 2)
+    loss = bce + lambda_denoise * denoise
+    return loss, (new_state, bce, denoise)
+
+
+@eqx.filter_jit
+def jax_apply_denoise_cls_training_step(
+    model,
+    model_filter_spec,
+    state,
+    X,
+    X_clean,
+    y,
+    lambda_denoise,
+    opt_state,
+    opt_update,
+    lr_other,
+    lr_ssm,
+    key,
+):
+    diff_model, static_model = eqx.partition(model, model_filter_spec)
+    (loss, (new_state, bce, denoise)), grads = eqx.filter_value_and_grad(
+        jax_denoise_cls_loss_fn, has_aux=True
+    )(diff_model, static_model, state, X, X_clean, y, lambda_denoise, key)
+    directions, new_opt_state = opt_update(grads, opt_state, diff_model)
+    labels = ssm_param_labels(diff_model)
+    updates = _scale_by_group_lr(directions, labels, lr_other, lr_ssm)
+    new_model = eqx.combine(
+        eqx.apply_updates(diff_model, updates), static_model
+    )
+    return (
+        new_model,
+        new_state,
+        new_opt_state,
+        {"loss": loss, "bce": bce, "denoise": denoise},
+    )

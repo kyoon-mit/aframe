@@ -322,7 +322,20 @@ class Sequence:
         # spot in the corresponding output array
         start = request_id * self.batch_size
         stop = (request_id + 1) * self.batch_size
-        self._sequences[sequence_id][start:stop] = y[:, 0]
+        # the served discriminator may emit multiple channels (e.g.
+        # [mass, sigma]); keep them all. Promote the 1-D buffers to
+        # (size, channels) the first time a multi-channel response arrives, so
+        # the single-channel path stays byte-for-byte unchanged.
+        if y.ndim > 1 and y.shape[1] > 1:
+            if self._sequences[sequence_id].ndim == 1:
+                channels = y.shape[1]
+                for seq_id, buffer in self._sequences.items():
+                    self._sequences[seq_id] = np.zeros(
+                        (buffer.shape[0], channels), dtype=buffer.dtype
+                    )
+            self._sequences[sequence_id][start:stop] = y
+        else:
+            self._sequences[sequence_id][start:stop] = y[:, 0]
 
         # indicate that the first response for
         # this sequence has returned, and possibly

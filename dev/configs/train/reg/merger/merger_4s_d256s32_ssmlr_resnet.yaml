@@ -27,14 +27,6 @@ trainer:
         save_last: true
         filename: 's4d_chirp_mass_mse_{epoch:02d}'
         auto_insert_metric_name: false
-    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
-      init_args:
-        monitor: train/mse_chirp_mass
-        mode: min
-        save_top_k: 1
-        save_last: true
-        filename: 's4d_chirp_mass_mse_{epoch:02d}'
-        auto_insert_metric_name: false
     - class_path: lightning.pytorch.callbacks.EarlyStopping
       init_args:
         monitor: val/mse_chirp_mass
@@ -65,8 +57,8 @@ model:
     y_std: [0.55]
     # test4 (lr 3e-4, restarts) destabilized after ~epoch 99; test5
     # fine-tunes test4's best ckpt gently with no restart in-window
-    learning_rate: 1e-4   # non-SSM parameters
     ssm_lr: 1e-3
+    learning_rate: 1e-4   # non-SSM parameters
     normalize_input: true
     warm_start_ckpt: null
     lambda_spread: 0.2    # 0.3 spent the window-length info gain on spread; buy back mse

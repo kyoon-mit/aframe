@@ -1,9 +1,9 @@
 #!/bin/bash
 #SBATCH --job-name=step0_serve
-#SBATCH --partition=iaifi_gpu          # FULL A100 80GB (not the 20GB MIG), 2 day limit
+#SBATCH --partition=gpu               # full A100 80GB, dedicated node
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
-#SBATCH --mem=64G
+#SBATCH --mem=200G
 #SBATCH --time=2-00:00:00
 #SBATCH --output=/n/holystore01/LABS/iaifi_lab/Lab/kyoon/aframe/slurm/wandb_logs/infer/step0_serve_%j.log
 #

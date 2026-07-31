@@ -170,6 +170,33 @@
       "alpha": 1.0,
       "xlabel": "SNR (L1)",
       "label": "snr (L1)"
+    },
+    "injection_time": {
+      "min": 1256664037.0,
+      "max": 1256798823.0,
+      "bin_size": 1347.8419693803787,
+      "color": "teal",
+      "alpha": 1.0,
+      "xlabel": "injection GPS time [s]",
+      "label": "injection_time"
+    },
+    "shift_h1": {
+      "min": 0.0,
+      "max": 37.0,
+      "bin_size": 1.0,
+      "color": "olive",
+      "alpha": 1.0,
+      "xlabel": "time shift H1 [s]",
+      "label": "shift_h1"
+    },
+    "shift_l1": {
+      "min": 0.0,
+      "max": 37.0,
+      "bin_size": 1.0,
+      "color": "olive",
+      "alpha": 1.0,
+      "xlabel": "time shift L1 [s]",
+      "label": "shift_l1"
     }
   }
 }

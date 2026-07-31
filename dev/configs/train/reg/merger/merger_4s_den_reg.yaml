@@ -27,14 +27,6 @@ trainer:
         save_last: true
         filename: 's4d_chirp_mass_mse_{epoch:02d}'
         auto_insert_metric_name: false
-    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
-      init_args:
-        monitor: train/mse_chirp_mass
-        mode: min
-        save_top_k: 1
-        save_last: true
-        filename: 's4d_chirp_mass_mse_{epoch:02d}'
-        auto_insert_metric_name: false
     - class_path: lightning.pytorch.callbacks.EarlyStopping
       init_args:
         monitor: val/mse_chirp_mass
@@ -54,19 +46,19 @@ model:
         d_output: 2          # chirp_mass mean + variance
         denoiser_d_model: 128
         denoiser_d_state: 64
-        denoiser_n_layers: 4
-        denoiser_dropout: 0.2
+        denoiser_n_layers: 6
+        denoiser_dropout: 0.0
         regressor_d_model: 128
         regressor_d_state: 64
-        regressor_n_layers: 4
-        regressor_dropout: 0.2
+        regressor_n_layers: 6
+        regressor_dropout: 0.0
         regressor_prenorm: false
         resnet_layers: [2, 2, 2]
         resnet_latent_dim: 64
         mlp_width: 64
         mlp_depth: 2
         dt_min: 1.0e-3
-        dt_max: 20.0
+        dt_max: 10.0
         detach_denoiser: false
     param_names:
       - chirp_mass
@@ -77,10 +69,14 @@ model:
     ssm_lr: 1e-2
     normalize_input: true
     warm_start_ckpt: null
-    lambda_spread: 0.2    # 0.3 spent the window-length info gain on spread; buy back mse
-    lambda_denoise: 0.8
+    lambda_spread: 0.2
+    denoiser_loss:
+      class_path: train.losses.MixtureMSESpectralLoss
+      init_args:
+        alpha: 0.5
+    lambda_denoise: 300.0  # match scale
     lambda_regress: 1.0
-    regress_schedule: [[20, 0.0], [100, 1.0]]
+    regress_schedule: [[20, 0.0], [30, 0.5], [90, 0.5], [100, 1.0]]
     weight_decay: 0.01
     lr_scheduler:
       class_path: train.model.regression_ky.WarmupCosineAnnealingWarmRestarts
@@ -106,8 +102,8 @@ data:
     left_pad: 3.5
     right_pad: 0.0
 
-    batch_size: 64
-    batches_per_epoch: 128
+    batch_size: 32
+    batches_per_epoch: 256
     chunk_size: 512
     chunks_per_epoch: 16
     num_files_per_batch: 1

@@ -359,6 +359,7 @@ class SupervisedS4ModelResNetMLPDecoder(
         dt_min: float = 0.001,
         dt_max: float = 0.1,
         prenorm: bool = False,
+        num_groups: Optional[int] = None,
     ) -> None:
         super().__init__(
             d_input=num_ifos,
@@ -370,4 +371,5 @@ class SupervisedS4ModelResNetMLPDecoder(
             dt_min=dt_min,
             dt_max=dt_max,
             prenorm=prenorm,
+            num_groups=num_groups,
         )

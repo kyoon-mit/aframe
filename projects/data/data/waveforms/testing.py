@@ -34,6 +34,9 @@ def testing_waveforms(
     seed: Optional[int] = None,
     pool: Optional[int] = None,
     chunksize: Optional[int] = None,
+    executor=None,
+    psd=None,
+    save_background: bool = False,
 ):
     """
     Generates testing waveforms via rejection sampling
@@ -132,10 +135,12 @@ def testing_waveforms(
     jitter = np.random.uniform(-jitter, jitter, size=num_signals)
     injection_times += jitter
 
-    # calculate psd that will be used for snr calculation
-    df = 1 / waveform_duration
-    logging.info(f"Using background file {psd_file} for psd calculation")
-    psds = utils.load_psds(psd_file, ifos, df=df, sample_rate=sample_rate)
+    # calculate psd that will be used for snr calculation, unless the
+    # caller already provides one (e.g. an average over many segments)
+    if psd is None:
+        df = 1 / waveform_duration
+        logging.info(f"Using background file {psd_file} for psd calculation")
+        psd = utils.load_psds(psd_file, ifos, df=df, sample_rate=sample_rate)
 
     # perform the rejection sampling
     parameters, rejected_params = rejection_sample(
@@ -151,10 +156,11 @@ def testing_waveforms(
         highpass=highpass,
         lowpass=lowpass,
         snr_threshold=snr_threshold,
-        psd=psds,
+        psd=psd,
         max_num_samples=max_num_samples,
         pool=pool,
         chunksize=chunksize,
+        executor=executor,
     )
 
     # create the ResponseSet dataclass based on the passed ifos
@@ -177,9 +183,108 @@ def testing_waveforms(
     rejected_fname = output_dir / "rejected-parameters.hdf5"
     utils.io_with_blocking(rejected_params.write, rejected_fname)
 
+    if save_background:
+        _save_background_and_injected(
+            waveform_fname,
+            response_set,
+            psd_file,
+            ifos,
+            shifts,
+            sample_rate,
+            waveform_duration,
+            right_pad,
+        )
+
     # TODO: compute probability of all parameters against
     # source and all target priors here then save them somehow
     return waveform_fname, rejected_fname
+
+
+def _save_background_and_injected(
+    fname,
+    response_set,
+    strain_file,
+    ifos,
+    shifts,
+    sample_rate,
+    waveform_duration,
+    right_pad,
+):
+    """Append per-event background-only and background+injection windows.
+
+    Reproduces what the inference pipeline sees for this time-slide: each
+    ifo's strain is shifted by its entry in ``shifts`` (shifted index p
+    reads raw index p + shift, matching the offline pipeline), ALL of the
+    slide's signals are injected into that shifted strain at once (so
+    windows include any bleed-over from neighboring injections), and a
+    ``waveform_duration``-long window is cut around every injection with
+    the coalescence ``right_pad`` seconds from the right edge.
+
+    Writes two groups to ``fname``: ``background/<ifo>`` (clean shifted
+    noise) and ``injected/<ifo>`` (same noise plus signals), each of shape
+    ``(num_signals, sample_rate * waveform_duration)``.
+
+    Assumes ``strain_file`` spans the injection times, i.e.
+    testing_waveforms was called with ``start``/``end`` inside a single
+    background segment.
+    """
+    import h5py
+    from scipy.signal import resample_poly
+
+    window_size = int(sample_rate * waveform_duration)
+    # samples from the window start to the coalescence
+    left = int((waveform_duration - right_pad) * sample_rate)
+
+    # read + resample each ifo's strain to the signal sample rate
+    raws = []
+    with h5py.File(strain_file, "r") as f:
+        segment_start = float(f[ifos[0]].attrs["x0"])
+        for ifo in ifos:
+            raw = f[ifo][:]
+            raw_rate = int(round(1 / f[ifo].attrs["dx"]))
+            if raw_rate != int(sample_rate):
+                raw = resample_poly(raw, int(sample_rate), raw_rate)
+            raws.append(raw.astype(np.float64))
+
+    # apply the time-slide: after shifting, index p of every ifo refers
+    # to the same analysis time, with the shifted ifos reading noise from
+    # `shift` seconds later in their raw timeseries
+    shift_samples = [int(s * sample_rate) for s in shifts]
+    max_shift = max(shift_samples)
+    num_valid = min(len(raw) for raw in raws) - max_shift
+    background = np.stack(
+        [
+            raw[shift : shift + num_valid]
+            for raw, shift in zip(raws, shift_samples, strict=False)
+        ]
+    )
+
+    # inject every accepted signal into the full shifted strain in one
+    # pass so neighboring injections bleed into each other's windows,
+    # exactly as they would in the continuous inference strain
+    injected = response_set.inject(background.copy(), segment_start)
+    injected = injected[:, :num_valid]
+
+    num_signals = len(response_set)
+    bg_windows = np.empty((num_signals, len(ifos), window_size))
+    inj_windows = np.empty((num_signals, len(ifos), window_size))
+    for k, t in enumerate(response_set.injection_time):
+        start = int(round((t - segment_start) * sample_rate)) - left
+        if start < 0 or start + window_size > num_valid:
+            raise ValueError(
+                f"injection {k} at t={t:.1f} falls outside the usable "
+                f"span of {strain_file}; save_background needs the "
+                "segment to cover start..end minus the maximum shift."
+            )
+        bg_windows[k] = background[:, start : start + window_size]
+        inj_windows[k] = injected[:, start : start + window_size]
+
+    with h5py.File(fname, "a") as f:
+        bg_group = f.create_group("background")
+        inj_group = f.create_group("injected")
+        for j, ifo in enumerate(ifos):
+            bg_group.create_dataset(ifo.lower(), data=bg_windows[:, j])
+            inj_group.create_dataset(ifo.lower(), data=inj_windows[:, j])
 
 
 parser = ArgumentParser()

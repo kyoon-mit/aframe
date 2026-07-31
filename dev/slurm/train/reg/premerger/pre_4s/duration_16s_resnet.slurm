@@ -10,13 +10,14 @@
 
 # gpu_test verification run. Requires the repo checked out on reg-dev-latest.
 # Bump VERSION below before each new run.
-VERSION=test4
+VERSION=test9
 
 REPO=/n/holystore01/LABS/iaifi_lab/Lab/kyoon/aframe
 BASE_NAME=s4d_pre_4s_dur_16s_resnet
 WANDB_NAME=s4d_pre_4s_dur_16s_resnet
 RUN_DIR=${REPO}/dev/runs/premerger/pre_4s/duration_16s/train/reg/${BASE_NAME}_${VERSION}
 CONFIG=${REPO}/dev/configs/train/reg/premerger/pre_4s/duration_16s_resnet.yaml
+CKPT=${REPO}/dev/runs/premerger/pre_4s/duration_16s/train/reg/s4d_pre_4s_dur_16s_resnet_test7/BNS-PUBLICATION/s4d_pre_4s_dur_16s_resnet_test7/checkpoints/last.ckpt
 
 mkdir -p "${RUN_DIR}/logs"
 source ~/.bash_profile
@@ -28,4 +29,5 @@ uv run --no-sync python -m train fit --config ${CONFIG} \
     --trainer.default_root_dir "${RUN_DIR}" \
     --trainer.logger.name "${WANDB_NAME}_${VERSION}" \
     --trainer.logger.id "${WANDB_NAME}_${VERSION}" \
-    --trainer.logger.save_dir "${RUN_DIR}"
+    --trainer.logger.save_dir "${RUN_DIR}" \
+    --ckpt_path "${CKPT}"

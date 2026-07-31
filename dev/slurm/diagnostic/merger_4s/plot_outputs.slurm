@@ -28,5 +28,5 @@ assert not same and dmax > 0, "sig and bkg are identical -- injection missing!"
 print("OK: sig != bkg")
 PY
 
-.venv/bin/python /n/holystore01/LABS/iaifi_lab/Lab/kyoon/aframe/dev/infer/plot_outputs.py --outdir "$OUTDIR"
+.venv/bin/python /n/holystore01/LABS/iaifi_lab/Lab/kyoon/aframe/dev/infer/diagnostic/plot_outputs.py --outdir "$OUTDIR"
 echo "PLOTS_DONE_OK"

@@ -1,4 +1,5 @@
 import io
+import json
 import os
 import shutil
 from typing import Optional, Union, Literal
@@ -297,8 +298,37 @@ def _label(key: str) -> str:
     return VAR_LABELS.get(key, key)
 
 
+_PLOT_CFG_PATH = (
+    "/n/holystore01/LABS/iaifi_lab/Lab/kyoon/aframe/dev/configs/"
+    "plot_configs.json"
+)
+try:
+    with open(_PLOT_CFG_PATH) as _f:
+        _PLOT_SYMBOLS = {
+            k: v["label"]
+            for k, v in json.load(_f)["parameters"].items()
+            if "label" in v
+        }
+except (OSError, ValueError, KeyError):
+    _PLOT_SYMBOLS = {}
+
+
+def _sym(key: str) -> str:
+    """Units-free symbol (titles, z-score, sigma subscript). Taken straight
+    from plot_configs.json's ``label`` -- no unit stripping needed."""
+    return _PLOT_SYMBOLS.get(key, _label(key))
+
+
+def _hat(key: str) -> str:
+    """Predicted-quantity symbol: a hat over the base symbol."""
+    sym = _sym(key)
+    if r"\mathcal{M}" in sym:
+        return sym.replace(r"\mathcal{M}", r"\hat{\mathcal{M}}")
+    return "$\\hat{" + sym.strip("$") + "}$"
+
+
 def _sig_label(key: str) -> str:
-    inner = _label(key).strip("$")
+    inner = _sym(key).strip("$")
     return rf"$\sigma_{{{inner}}}$"
 
 
@@ -380,10 +410,12 @@ def _vec_to_angles(vec: np.ndarray):
 
 
 class PlotParamEstCallback(Callback):
-    def __init__(self, save_dir: str | Path = ""):
+    def __init__(self, save_dir: str | Path = "", dist_label: str = ""):
         super().__init__()
         self._save_dir_override = Path(save_dir) if save_dir else None
         self.save_dir = self._save_dir_override or Path(".")
+        # e.g. "powerlaw" / "uniform" -- appended to the pred-vs-true title
+        self.dist_label = dist_label
 
         self.target_variables: list[str] = []
         self.observed_variables: list[str] = []
@@ -489,6 +521,16 @@ class PlotParamEstCallback(Callback):
                 y_sigma = self._unnormalize_sigma(
                     y_sigma, self.target_variables
                 )
+            if y_pred_bg is not None and y_pred_bg.shape[1] == len(
+                self.target_variables
+            ):
+                y_pred_bg = self._unnormalize_values(
+                    y_pred_bg, self.target_variables
+                )
+            if y_sigma_bg is not None:
+                y_sigma_bg = self._unnormalize_sigma(
+                    y_sigma_bg, self.target_variables
+                )
 
         self.save_dir.mkdir(parents=True, exist_ok=True)
 
@@ -498,7 +540,9 @@ class PlotParamEstCallback(Callback):
         if is_sky:
             self._run_sky(y_true, y_pred, snr)
         else:
-            self._run_param_est(y_true, y_pred, y_sigma, snr)
+            self._run_param_est(
+                y_true, y_pred, y_sigma, snr, y_pred_bg, y_sigma_bg
+            )
             if y_sigma_bg is not None:
                 self._run_background(y_pred_bg, y_sigma_bg)
                 if y_sigma is not None:
@@ -531,13 +575,27 @@ class PlotParamEstCallback(Callback):
             return z_observed[:, list(self.observed_variables).index("snr")]
         return None
 
-    def _run_param_est(self, y_true, y_pred, y_sigma, snr):  # noqa: C901
+    def _run_param_est(  # noqa: C901
+        self, y_true, y_pred, y_sigma, snr, y_pred_bg=None, y_sigma_bg=None
+    ):
         vars_ = self.target_variables
         true_d = {v: y_true[:, i] for i, v in enumerate(vars_)}
         pred_d = {v: y_pred[:, i] for i, v in enumerate(vars_)}
         sigma_d = (
             {v: y_sigma[:, i] for i, v in enumerate(vars_)}
             if y_sigma is not None
+            else {}
+        )
+        # background (noise-only) predictions on the same events -- for the
+        # bkg-only pred-vs-true panel
+        pred_bg_d = (
+            {v: y_pred_bg[:, i] for i, v in enumerate(vars_)}
+            if y_pred_bg is not None
+            else {}
+        )
+        sigma_bg_d = (
+            {v: y_sigma_bg[:, i] for i, v in enumerate(vars_)}
+            if y_sigma_bg is not None
             else {}
         )
 
@@ -568,73 +626,32 @@ class PlotParamEstCallback(Callback):
         )
         figs, names = [], []
 
-        def stats_text(t, p, s=None):
-            res = p - t
-            den = np.where(np.abs(t) > 1e-12, np.abs(t), 1.0)
-            rel = np.abs(res / den)
-            L = [
-                f"N      = {len(t)}",
-                f"MAE    = {np.mean(np.abs(res)):.4f}",
-                f"RMSE   = {np.sqrt(np.mean(res**2)):.4f}",
-                f"bias   = {np.mean(res):+.4f}",
-                f"medres = {np.median(res):+.4f}",
-                f"stdres = {np.std(res):.4f}",
-                (
-                    f"R      = {np.corrcoef(t, p)[0, 1]:.4f}"
-                    if len(t) > 1
-                    else "R = n/a"
-                ),
-                f"med|rel|= {100 * np.median(rel):.2f}%",
-            ]
-            for c in (0.01, 0.02, 0.05, 0.10):
-                L.append(
-                    f"<{int(c * 100):>2d}%   = {100 * np.mean(rel < c):.1f}%"
-                )
-            if s is not None:
-                z = res / (np.asarray(s) + 1e-12)
-                L += [
-                    f"<sig>  = {np.mean(s):.4f}",
-                    f"z mean = {np.mean(z):+.2f}",
-                    f"z std  = {np.std(z):.2f}",
-                    f"|z|<1  = {100 * np.mean(np.abs(z) < 1):.1f}%",
-                    f"|z|<2  = {100 * np.mean(np.abs(z) < 2):.1f}%",
-                ]
-            return "\n".join(L)
-
         def pred_vs_true_ax(ax, t, p, s, lims, edges, title):
+            # band = median prediction +/- the model's predicted sigma
+            # (1sigma, 2sigma) per true bin -- NOT empirical percentiles
             centers = 0.5 * (edges[:-1] + edges[1:])
             med = np.full(len(centers), np.nan)
-            q16 = np.full(len(centers), np.nan)
-            q84 = np.full(len(centers), np.nan)
-            q2 = np.full(len(centers), np.nan)
-            q97 = np.full(len(centers), np.nan)
+            sig = np.full(len(centers), np.nan)
             for i, (lo, hi) in enumerate(
                 zip(edges[:-1], edges[1:], strict=False)
             ):
                 m = (t >= lo) & (t < hi)
                 if m.sum() < 2:
                     continue
-                pb = p[m]
-                med[i] = np.median(pb)
-                q16[i], q84[i] = np.percentile(pb, [16, 84])
-                q2[i], q97[i] = np.percentile(pb, [2.5, 97.5])
+                med[i] = np.median(p[m])
+                if s is not None:
+                    sig[i] = np.median(s[m])
             ok = ~np.isnan(med)
-            ax.fill_between(
-                centers[ok],
-                q2[ok],
-                q97[ok],
-                color="steelblue",
-                alpha=0.18,
-                label="95%",
-            )
-            ax.fill_between(
-                centers[ok],
-                q16[ok],
-                q84[ok],
-                color="steelblue",
-                alpha=0.35,
-                label="68%",
-            )
+            if s is not None:
+                bok = ok & ~np.isnan(sig)
+                ax.fill_between(
+                    centers[bok],
+                    (med - sig)[bok],
+                    (med + sig)[bok],
+                    color="steelblue",
+                    alpha=0.35,
+                    label=r"$1\sigma$",
+                )
             ax.plot(
                 centers[ok], med[ok], color="steelblue", lw=1.6, label="Median"
             )
@@ -643,22 +660,6 @@ class PlotParamEstCallback(Callback):
             ax.set_ylim(lims)
             ax.set_aspect("equal", adjustable="box")
             ax.set_title(title, fontsize=10)
-            ax.text(
-                0.03,
-                0.97,
-                stats_text(t, p, s),
-                transform=ax.transAxes,
-                ha="left",
-                va="top",
-                fontsize=6.5,
-                family="monospace",
-                bbox={
-                    "boxstyle": "round",
-                    "fc": "white",
-                    "ec": "0.7",
-                    "alpha": 0.85,
-                },
-            )
             ax.legend(frameon=False, fontsize=8, loc="lower right")
 
         for v in vars_ext:
@@ -682,6 +683,9 @@ class PlotParamEstCallback(Callback):
                 ]
             else:
                 bands = [("all", np.ones(len(tr), bool), "all")]
+            dist_tag = f" ({self.dist_label})" if self.dist_label else ""
+            pr_bg = np.asarray(pred_bg_d[v]) if v in pred_bg_d else None
+            s_bg = np.asarray(sigma_bg_d[v]) if v in sigma_bg_d else None
             for blab, bm, suffix in bands:
                 if bm.sum() < 2:
                     continue
@@ -694,25 +698,48 @@ class PlotParamEstCallback(Callback):
                     ss,
                     lims,
                     edges,
-                    f"{_label(v)} - {blab}",
+                    f"{blab}{dist_tag}",
                 )
-                ax.set_xlabel("True " + _label(v))
-                ax.set_ylabel("Pred " + _label(v))
+                ax.set_xlabel(_sym(v))
+                ax.set_ylabel(_hat(v))
                 fig.tight_layout()
                 figs.append(fig)
                 names.append(f"{v}_pred_vs_true_{suffix}")
 
-            # 3) z-score histogram (counts) + fitted Gaussian + stats.
+                # same panel, background (noise-only) predictions
+                if pr_bg is not None:
+                    fig, ax = plt.subplots(figsize=(5.5, 5.5))
+                    pred_vs_true_ax(
+                        ax,
+                        tr[bm],
+                        pr_bg[bm],
+                        s_bg[bm] if s_bg is not None else None,
+                        lims,
+                        edges,
+                        f"{blab}{dist_tag} (bkg)",
+                    )
+                    ax.set_xlabel(_sym(v))
+                    ax.set_ylabel(_hat(v))
+                    fig.tight_layout()
+                    figs.append(fig)
+                    names.append(f"{v}_pred_vs_true_{suffix}_bkg")
+
+            # 3) z-score histogram (counts) + fitted Gaussian.
             if s_all is not None:
                 z = (pr - tr) / (s_all + 1e-12)
                 z = z[np.isfinite(z)]
+                zbins = np.arange(-5.0, 5.0 + 0.25, 0.25)
                 fig, ax = plt.subplots(figsize=(6, 4.5))
-                _c, ze, _ = ax.hist(
-                    z, bins=60, color="steelblue", alpha=0.6, label="z-score"
+                ax.hist(
+                    z,
+                    bins=zbins,
+                    color="steelblue",
+                    alpha=0.6,
+                    label="z-score",
                 )
                 mu, sd = float(np.mean(z)), float(np.std(z))
-                xs = np.linspace(ze[0], ze[-1], 400)
-                bw = ze[1] - ze[0]
+                xs = np.linspace(-5.0, 5.0, 400)
+                bw = 0.25
                 ax.plot(
                     xs,
                     z.size
@@ -731,29 +758,9 @@ class PlotParamEstCallback(Callback):
                     alpha=0.7,
                     label="N(0, 1)",
                 )
-                txt = (
-                    f"mean = {mu:+.2f}\nstd  = {sd:.2f}\n"
-                    f"|z|<1 = {100 * np.mean(np.abs(z) < 1):.1f}% (68)\n"
-                    f"|z|<2 = {100 * np.mean(np.abs(z) < 2):.1f}% (95)\n"
-                    f"|z|<3 = {100 * np.mean(np.abs(z) < 3):.1f}% (99.7)"
-                )
-                ax.text(
-                    0.03,
-                    0.97,
-                    txt,
-                    transform=ax.transAxes,
-                    ha="left",
-                    va="top",
-                    fontsize=7,
-                    family="monospace",
-                    bbox={
-                        "boxstyle": "round",
-                        "fc": "white",
-                        "ec": "0.7",
-                        "alpha": 0.85,
-                    },
-                )
-                ax.set_xlabel(f"{_label(v)} z-score")
+                ax.set_xlim(-5, 5)
+                ax.set_xticks(range(-5, 6))
+                ax.set_xlabel(f"{_sym(v)} z-score")
                 ax.set_ylabel("Counts")
                 ax.legend(frameon=False, fontsize=8, loc="upper right")
                 figs.append(fig)
@@ -765,7 +772,9 @@ class PlotParamEstCallback(Callback):
             snr_a, snr_b = int(snr_bins[0]), int(snr_bins[-1])
             snr_centers = 0.5 * (snr_bins[:-1] + snr_bins[1:])
             cuts = [0.01, 0.02, 0.05, 0.10]
-            cmap = plt.cm.viridis
+            # viridis-ish blues/greens for 1/2/5%, light orange for 10%
+            # (avoid the harsh viridis yellow at the top end)
+            cut_colors = ["#3b528b", "#21918c", "#5ec962", "#f4a259"]
             for v in vars_ext:
                 tr = np.asarray(true_d[v])
                 pr = np.asarray(pred_d[v])
@@ -786,13 +795,14 @@ class PlotParamEstCallback(Callback):
                         frac[ok],
                         marker="o",
                         ms=3,
-                        color=cmap(j / (len(cuts) - 1)),
+                        color=cut_colors[j],
                         label=f"{int(cut * 100)}%",
                     )
                 ax.set_xlabel(_label("snr"))
                 ax.set_ylabel("% within cutoff")
                 ax.set_ylim(0, 100)
-                ax.set_title(_label(v))
+                dist_tag = f" ({self.dist_label})" if self.dist_label else ""
+                ax.set_title(f"SNR {snr_a}-{snr_b}{dist_tag}")
                 ax.legend(
                     frameon=False,
                     fontsize=9,
@@ -1018,3 +1028,218 @@ class PlotParamEstCallback(Callback):
             fig.savefig(out, dpi=400, bbox_inches="tight")
             plt.close(fig)
             print(f"Saved {out}")
+
+
+class EMA(Callback):
+    """Exponential moving average of model weights.
+
+    Keeps a shadow copy of every trainable parameter, updated each training
+    step as ``shadow = decay*shadow + (1-decay)*param``. Validation (and the
+    checkpoint saved at validation end) use the shadow weights, so the
+    monitored metric and the best checkpoint reflect the averaged model. Live
+    training weights are restored on the next train batch. The shadow is
+    stored in the checkpoint so it survives resume.
+
+    JAX/equinox models are skipped (their weights live outside torch params).
+
+    Args:
+        decay: EMA decay. Higher = slower/smoother (0.999-0.9999 typical).
+    """
+
+    def __init__(self, decay: float = 0.999):
+        super().__init__()
+        if not 0.0 < decay < 1.0:
+            raise ValueError(f"decay must be in (0, 1), got {decay}")
+        self.decay = decay
+        self.shadow: dict[str, torch.Tensor] = {}
+        self._backup: dict[str, torch.Tensor] = {}
+
+    def _is_jax(self, pl_module) -> bool:
+        return hasattr(pl_module, "jax_model")
+
+    def on_fit_start(self, trainer, pl_module) -> None:
+        if self._is_jax(pl_module):
+            return
+        if self.shadow:
+            # shadow restored from a checkpoint loads on cpu; move it onto
+            # the module device so the in-place ema update matches params
+            self.shadow = {
+                name: t.to(pl_module.device) for name, t in self.shadow.items()
+            }
+            return
+        self.shadow = {
+            name: p.detach().clone()
+            for name, p in pl_module.named_parameters()
+            if p.requires_grad
+        }
+
+    @torch.no_grad()
+    def on_train_batch_end(
+        self, trainer, pl_module, outputs, batch, batch_idx
+    ) -> None:
+        if not self.shadow:
+            return
+        for name, p in pl_module.named_parameters():
+            if name in self.shadow:
+                self.shadow[name].mul_(self.decay).add_(
+                    p.detach(), alpha=1.0 - self.decay
+                )
+
+    def _load_shadow(self, pl_module) -> None:
+        self._backup = {}
+        for name, p in pl_module.named_parameters():
+            if name in self.shadow:
+                self._backup[name] = p.detach().clone()
+                p.data.copy_(self.shadow[name])
+
+    def _restore(self, pl_module) -> None:
+        for name, p in pl_module.named_parameters():
+            if name in self._backup:
+                p.data.copy_(self._backup[name])
+        self._backup = {}
+
+    def on_validation_epoch_start(self, trainer, pl_module) -> None:
+        if self.shadow:
+            self._load_shadow(pl_module)
+
+    def on_train_batch_start(
+        self, trainer, pl_module, batch, batch_idx
+    ) -> None:
+        # restore live weights after validation swapped in the shadow
+        if self._backup:
+            self._restore(pl_module)
+
+    def on_save_checkpoint(self, trainer, pl_module, checkpoint) -> None:
+        if self.shadow:
+            checkpoint["ema_shadow"] = self.shadow
+
+    def on_load_checkpoint(self, trainer, pl_module, checkpoint) -> None:
+        if "ema_shadow" in checkpoint:
+            self.shadow = checkpoint["ema_shadow"]
+
+
+class ClassificationTestCallback(Callback):
+    """Detection diagnostics for a classifier on ``trainer.test()``.
+
+    Collects the per-batch logit ``score`` + ``label`` (1 = injected,
+    0 = background) + ``snr`` from ``test_step`` and, at epoch end, writes:
+      - ROC (TPR vs FPR, linear + log-log)
+      - detection efficiency vs SNR at fixed background FPR (1e-3/1e-2/1e-1)
+      - a raw ``class_test_scores.csv``.
+    """
+
+    _FPRS = [1e-3, 1e-2, 1e-1]
+    _FPR_COLORS = ["#3b528b", "#21918c", "#f4a259"]
+
+    def __init__(self, save_dir: str | Path = "", dist_label: str = ""):
+        super().__init__()
+        self.save_dir = Path(save_dir) if save_dir else Path(".")
+        self.dist_label = dist_label
+        self._score: list[torch.Tensor] = []
+        self._label: list[torch.Tensor] = []
+        self._snr: list[torch.Tensor] = []
+
+    def on_test_start(self, trainer, pl_module):
+        self._score.clear()
+        self._label.clear()
+        self._snr.clear()
+
+    def on_test_batch_end(self, trainer, pl_module, outputs, batch, batch_idx):
+        if not outputs:
+            return
+        self._score.append(outputs["score"])
+        self._label.append(outputs["label"])
+        if "snr" in outputs:
+            self._snr.append(outputs["snr"])
+
+    def on_test_epoch_end(self, trainer, pl_module):
+        if not self._score:
+            return
+        score = torch.cat(self._score).numpy()
+        label = torch.cat(self._label).numpy().astype(int)
+        snr = torch.cat(self._snr).numpy() if self._snr else None
+        self.save_dir.mkdir(parents=True, exist_ok=True)
+
+        pd.DataFrame(
+            {
+                "score": score,
+                "label": label,
+                "snr": snr if snr is not None else np.nan,
+            }
+        ).to_csv(self.save_dir / "class_test_scores.csv", index=False)
+
+        tag = f" ({self.dist_label})" if self.dist_label else ""
+        self._roc(score, label, tag)
+        if snr is not None:
+            self._eff_vs_snr(score, label, snr, tag)
+
+    def _roc(self, score, label, tag):
+        order = np.argsort(-score)
+        lab = label[order]
+        tp = np.cumsum(lab)
+        fp = np.cumsum(1 - lab)
+        n_pos, n_neg = int(lab.sum()), int((1 - lab).sum())
+        if n_pos == 0 or n_neg == 0:
+            return
+        tpr = tp / n_pos
+        fpr = fp / n_neg
+
+        for logx, name in [(False, "roc"), (True, "roc_loglog")]:
+            fig, ax = plt.subplots(figsize=(5.5, 5))
+            ax.plot(fpr, tpr, color="steelblue", lw=1.8)
+            if logx:
+                ax.set_xscale("log")
+                ax.set_yscale("log")
+                ax.set_xlim(1e-4, 1)
+            else:
+                ax.plot([0, 1], [0, 1], color="gray", ls=":", lw=1.0)
+                ax.set_xlim(0, 1)
+                ax.set_ylim(0, 1)
+            ax.set_xlabel("False positive rate")
+            ax.set_ylabel("True positive rate")
+            ax.set_title(f"ROC{tag}")
+            ax.grid(alpha=0.3)
+            fig.tight_layout()
+            fig.savefig(self.save_dir / f"{name}.png", dpi=140)
+            plt.close(fig)
+
+    def _eff_vs_snr(self, score, label, snr, tag):
+        bkg = score[label == 0]
+        sig = score[label == 1]
+        sig_snr = snr[label == 1]
+        good = np.isfinite(sig_snr)
+        sig, sig_snr = sig[good], sig_snr[good]
+        if len(bkg) == 0 or len(sig) == 0:
+            return
+        a, b = int(np.floor(sig_snr.min())), int(np.ceil(sig_snr.max()))
+        bins = np.arange(a, b + 2, 2)
+        centers = 0.5 * (bins[:-1] + bins[1:])
+
+        fig, ax = plt.subplots(figsize=(6.5, 4))
+        for fpr, color in zip(self._FPRS, self._FPR_COLORS, strict=False):
+            thr = np.quantile(bkg, 1 - fpr)
+            eff = np.full(len(centers), np.nan)
+            for i, (lo, hi) in enumerate(
+                zip(bins[:-1], bins[1:], strict=False)
+            ):
+                m = (sig_snr >= lo) & (sig_snr < hi)
+                if m.sum() > 0:
+                    eff[i] = 100.0 * (sig[m] > thr).mean()
+            ok = ~np.isnan(eff)
+            ax.plot(
+                centers[ok],
+                eff[ok],
+                marker="o",
+                ms=3,
+                color=color,
+                label=f"FPR {fpr:g}",
+            )
+        ax.set_xlabel("SNR")
+        ax.set_ylabel("Detection efficiency [%]")
+        ax.set_ylim(0, 100)
+        ax.set_title(f"SNR {a}-{b}{tag}")
+        ax.legend(frameon=False, fontsize=9, loc="lower right")
+        ax.grid(alpha=0.3)
+        fig.tight_layout()
+        fig.savefig(self.save_dir / "efficiency_vs_snr.png", dpi=140)
+        plt.close(fig)
