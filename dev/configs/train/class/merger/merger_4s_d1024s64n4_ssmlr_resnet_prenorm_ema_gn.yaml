@@ -1,36 +1,36 @@
-seed_everything: 20260627
+seed_everything: 20260808
 
 trainer:
   accelerator: auto
   devices: auto
   max_epochs: 100000
-  check_val_every_n_epoch: 2
+  check_val_every_n_epoch: 10
   gradient_clip_val: 1.0
-  log_every_n_steps: 20
+  log_every_n_steps: 50
   enable_progress_bar: true
-  default_root_dir: /n/holystore01/LABS/iaifi_lab/Lab/kyoon/aframe/dev/runs/resnet34_reg/train/reg/resnet34_reg_regdev
+  default_root_dir: /n/holystore01/LABS/iaifi_lab/Lab/kyoon/aframe/dev/runs/merger_4s_d1024s64n4_ssmlr_resnet_prenorm_ema/train/class/merger_4s_d1024s64n4_ssmlr_resnet_prenorm_ema_regdev
 
   logger:
     - class_path: train.callbacks.AframeWandbLogger
       init_args:
-        name: resnet34_reg_regdev
-        id:   resnet34_reg_regdev
-        save_dir: /n/holystore01/LABS/iaifi_lab/Lab/kyoon/aframe/dev/runs/resnet34_reg/train/reg/resnet34_reg_regdev
-        project: BNS-PUBLICATION
+        name: merger_4s_d1024s64n4_ssmlr_resnet_prenorm_ema_gn
+        id:   merger_4s_d1024s64n4_ssmlr_resnet_prenorm_ema_gn
+        save_dir: /n/holystore01/LABS/iaifi_lab/Lab/kyoon/aframe/dev/runs/merger_4s_d1024s64n4_ssmlr_resnet_prenorm_ema/train/class/merger_4s_d1024s64n4_ssmlr_resnet_prenorm_ema_regdev
+        project: BNS-PUBLICATION-CLASS
 
   callbacks:
     - class_path: lightning.pytorch.callbacks.ModelCheckpoint
       init_args:
-        monitor: val/mse_chirp_mass
-        mode: min
+        monitor: validation/TimeSlideAUROC
+        mode: max
         save_top_k: 3
         save_last: true
-        filename: 'resnet34_chirp_mass_mse_{epoch:02d}'
+        filename: 's4d_cls_auroc_{epoch:02d}'
         auto_insert_metric_name: false
     - class_path: lightning.pytorch.callbacks.EarlyStopping
       init_args:
-        monitor: val/mse_chirp_mass
-        mode: min
+        monitor: validation/TimeSlideAUROC
+        mode: max
         patience: 100000
     - class_path: lightning.pytorch.callbacks.LearningRateMonitor
       init_args:
@@ -40,32 +40,45 @@ trainer:
         decay: 0.999
 
 model:
-  class_path: train.model.regression_ky.GaussianNLLRegressionAframeCustomLR
+  class_path: train.model.supervised_ky.SupervisedAframeS4CustomLR
   init_args:
     arch:
-      class_path: architectures.regression.RegressionTimeDomainResNet
+      class_path: architectures.supervised.SupervisedS4ModelResNetMLPDecoder
       init_args:
-        num_params: 2        # chirp_mass mean + variance
-        layers: [3, 4, 6, 3]
-        kernel_size: 3
-    param_names:
-      - chirp_mass
-    beta_nll: 0.3
-    y_mean: [1.80]
-    y_std: [0.55]
+        num_ifos: 2
+        d_output: 1
+        d_model: 1024
+        d_state: 64
+        n_layers: 4
+        dropout: 0.2
+        dt_min: 1.0e-3
+        dt_max: 5.0
+        prenorm: true
+        num_groups: 32
+    metric:
+      class_path: train.metrics.TimeSlideAUROC
+      init_args:
+        max_fpr: 1e-3
+        pool_length: 50
+    metric_full:
+      class_path: train.metrics.TimeSlideAUROC
+      init_args:
+        max_fpr: 1.0
+        pool_length: 50
     learning_rate: 1e-4
-    ssm_lr: 1e-4
+    ssm_lr: 1e-3
     normalize_input: true
     warm_start_ckpt: null
-    lambda_spread: 0.2
+    pct_lr_ramp: 0.0
     weight_decay: 0.01
     lr_scheduler:
       class_path: train.model.regression_ky.WarmupCosineAnnealingWarmRestarts
       init_args:
-        warmup_epochs: 1
-        T_0: 140
-        T_mult: 2
-        eta_min: 1.0e-7
+        warmup_epochs: 5
+        T_0: 100
+        T_mult: 1
+        eta_min: 1.0e-6
+        peak_decay: 0.8
     lr_scheduler_interval: epoch
 
 data:
@@ -80,10 +93,10 @@ data:
     left_pad: 3.5
     right_pad: 0.0
 
-    batch_size: 256
-    batches_per_epoch: 256
-    chunk_size: 2048
-    chunks_per_epoch: 32      # 32 * 2048 = 65536 = batch_size * batches_per_epoch
+    batch_size: 64
+    batches_per_epoch: 64
+    chunk_size: 256
+    chunks_per_epoch: 8
     num_files_per_batch: 1
 
     fduration: 1.0
@@ -91,12 +104,12 @@ data:
     psd_length: 20.0
     highpass: 20
 
-    waveform_prob: 1.0
+    waveform_prob: 0.75
     swap_prob: 0.0
     mute_prob: 0.0
-    max_num_workers: 8
+    max_num_workers: 16
 
-    num_valid_views: 1
+    num_valid_views: 4
     valid_stride: 25
     valid_livetime: 210000
 
@@ -104,13 +117,13 @@ data:
       class_path: train.augmentations.SnrSampler
       init_args:
         constant_params:
-          index: -2
+          index: -2.23
           maximum: 100.0
         start_params:
-          minimum: 4.0
+          minimum: 15.0
         end_params:
           minimum: 4.0
-        decay_steps: 100
+        decay_steps: 1280
 
     param_transforms:
       - class_path: train.transforms.ChirpMass
