@@ -24,33 +24,64 @@ Run (GPU):
 """
 
 import argparse
+import importlib
 import os
 
 import h5py
 import numpy as np
 import pandas as pd
+import scipy.signal
 import torch
 import torch.nn as nn
+import yaml
 
 from ml4gw.transforms import Whiten
 from ml4gw.nn.ssm.s4d import S4Model
 from utils.preprocessing import PsdEstimator
 
 
-def load_net(ckpt_path, device):
-    """Rebuild the bare S4Model + output-norm stats straight from the ckpt."""
+def _build_from_class_path(class_path, init_args):
+    module_name, cls_name = class_path.rsplit(".", 1)
+    cls = getattr(importlib.import_module(module_name), cls_name)
+    return cls(**init_args)
+
+
+def load_net(ckpt_path, device, config_path=None):
+    """Rebuild the model + output-norm stats from the ckpt.
+
+    If ``config_path`` (the run's saved ``config.yaml``) is given, the
+    architecture is instantiated exactly as trained (``model.arch``) --
+    handles any arch (plain S4D, ResNet/MLP decoder, GroupNorm, ...), not
+    just bare S4Model. Falls back to bare S4Model when no config is given,
+    for backwards compatibility with older bare-S4D checkpoints.
+    """
     checkpoint = torch.load(ckpt_path, map_location="cpu", weights_only=False)
     hparams = checkpoint["hyper_parameters"]
-    net = S4Model(
-        d_input=hparams["d_input"],
-        d_output=hparams["d_output"],
-        d_model=hparams["d_model"],
-        d_state=hparams["d_state"],
-        n_layers=hparams["n_layers"],
-        dropout=hparams["dropout"],
-        dt_min=hparams.get("dt_min", 1e-3),
-        dt_max=hparams.get("dt_max", 1.0),
-    )
+
+    if config_path is not None:
+        with open(config_path) as f:
+            cfg = yaml.safe_load(f)
+        arch_cfg = cfg["model"]["init_args"]["arch"]
+        init_args = dict(arch_cfg.get("init_args", {}))
+        if "num_ifos" not in init_args:
+            # CLI-linked from data.num_ifos at parse time, not saved in
+            # the arch section -- recover it from data.ifos instead
+            init_args["num_ifos"] = len(cfg["data"]["init_args"]["ifos"])
+        net = _build_from_class_path(arch_cfg["class_path"], init_args)
+        d_output = init_args["d_output"]
+    else:
+        net = S4Model(
+            d_input=hparams["d_input"],
+            d_output=hparams["d_output"],
+            d_model=hparams["d_model"],
+            d_state=hparams["d_state"],
+            n_layers=hparams["n_layers"],
+            dropout=hparams["dropout"],
+            dt_min=hparams.get("dt_min", 1e-3),
+            dt_max=hparams.get("dt_max", 1.0),
+        )
+        d_output = hparams["d_output"]
+
     state_dict = {
         key[len("model.") :]: value
         for key, value in checkpoint["state_dict"].items()
@@ -59,7 +90,7 @@ def load_net(ckpt_path, device):
     net.load_state_dict(state_dict, strict=True)
     net.eval().to(device)
 
-    n_vars = hparams["d_output"] // 2
+    n_vars = d_output // 2
     y_mean = float(np.atleast_1d(checkpoint["state_dict"]["y_mean"])[0])
     y_std = float(np.atleast_1d(checkpoint["state_dict"]["y_std"])[0])
     normalize_input = bool(hparams.get("normalize_input", False))
@@ -68,7 +99,7 @@ def load_net(ckpt_path, device):
 
 # defaults: merger_4s id2 model + pre-made sig/bkg file
 CKPT = "/n/holystore01/LABS/iaifi_lab/Lab/kyoon/MODEL/aframe/kyoon-dev/BNS-PUBLICATION/merger_4s/chirp_mass_snr_8_50_60-64s_d64_s64_l4_on_disk_id2/checkpoints/s4d_chirp_mass_mse_4023.ckpt"  # noqa: E501
-DATA = "/n/holystore01/LABS/iaifi_lab/Lab/kyoon/DATA/aframe_data/test/waveforms_sig_bkg_50k.hdf5"  # noqa: E501
+DATA = "/n/holystore01/LABS/iaifi_lab/Lab/kyoon/DATA/aframe_data/diagnostic/diagnostic.hdf5"  # noqa: E501
 KERNEL, FDUR, PSD_LEN, FFTLEN, HIGHPASS = 4.0, 1.0, 20.0, 2.0, 20.0
 WINDOW_SEC = PSD_LEN + FDUR + KERNEL  # 25 s context window fed to the model
 # kernel right edge = window_start + this
@@ -82,7 +113,23 @@ def parse_args():
     )
     parser.add_argument("--outdir", required=True)
     parser.add_argument("--ckpt", default=CKPT)
+    parser.add_argument(
+        "--config",
+        default=None,
+        help="run's saved config.yaml; builds model.arch exactly as "
+        "trained (any architecture). Omit only for legacy bare-S4Model "
+        "checkpoints.",
+    )
     parser.add_argument("--data", default=DATA, help="pre-made sig/bkg hdf5")
+    parser.add_argument(
+        "--model-sample-rate",
+        type=float,
+        default=None,
+        help="rate the model was trained at; if it differs from the data "
+        "file's native rate, windows are decimated before scoring "
+        "(default: read from --config's data.init_args.sample_rate, or "
+        "the file's own rate if no --config given)",
+    )
     parser.add_argument(
         "--max-strains",
         type=int,
@@ -110,16 +157,39 @@ def main():
     torch.set_grad_enabled(False)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    net, n_vars, y_mean, y_std, normalize_input = load_net(args.ckpt, device)
+    net, n_vars, y_mean, y_std, normalize_input = load_net(
+        args.ckpt, device, config_path=args.config
+    )
     softplus = nn.Softplus()
 
     with h5py.File(args.data, "r") as h5:
-        sample_rate = float(h5.attrs["sample_rate"])
+        sample_rate = float(h5.attrs["sample_rate"])  # native rate of the file
         duration = float(h5.attrs["duration"])
         right_pad = float(h5.attrs["right_pad"])
         n_strains = int(h5.attrs["length"])
         segment_len = int(round(duration * sample_rate))
         merger_idx = int(round((duration - right_pad) * sample_rate))
+
+        model_sample_rate = args.model_sample_rate
+        if model_sample_rate is None and args.config is not None:
+            with open(args.config) as f:
+                model_sample_rate = float(
+                    yaml.safe_load(f)["data"]["init_args"]["sample_rate"]
+                )
+        if model_sample_rate is None:
+            model_sample_rate = sample_rate
+        decim = round(sample_rate / model_sample_rate)
+        if abs(decim - sample_rate / model_sample_rate) > 1e-6:
+            raise ValueError(
+                f"file rate {sample_rate} is not an integer multiple of "
+                f"model rate {model_sample_rate}"
+            )
+        if decim != 1:
+            print(
+                f"decimating {sample_rate}Hz -> {model_sample_rate}Hz "
+                f"(factor {decim}) before scoring",
+                flush=True,
+            )
 
         params = h5["parameters"]
         snr = params["snr"][:]
@@ -135,9 +205,13 @@ def main():
         chirp_src = chirp_det / (1 + redshift)
 
         psd_estimator = PsdEstimator(
-            KERNEL + FDUR, sample_rate, FFTLEN, average="median", fast=True
+            KERNEL + FDUR,
+            model_sample_rate,
+            FFTLEN,
+            average="median",
+            fast=True,
         ).to(device)
-        whiten = Whiten(FDUR, sample_rate, HIGHPASS, None).to(device)
+        whiten = Whiten(FDUR, model_sample_rate, HIGHPASS, None).to(device)
 
         edges = np.arange(args.edge_min, args.edge_max + 1e-9, args.edge_step)
         n_edges = len(edges)
@@ -164,7 +238,11 @@ def main():
         )
 
         def score(windows):
-            """(B, 2, window_len) strain -> physical (mean, sigma) per row."""
+            """(B, 2, window_len) native-rate strain -> (mean, sigma)."""
+            if decim != 1:
+                windows = scipy.signal.decimate(
+                    windows, decim, axis=-1, ftype="fir"
+                ).copy()
             batch = torch.from_numpy(windows).float().to(device)
             batch, psds = psd_estimator(batch)
             batch = whiten(batch, psds)

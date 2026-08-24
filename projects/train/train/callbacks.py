@@ -706,8 +706,12 @@ class PlotParamEstCallback(Callback):
                 figs.append(fig)
                 names.append(f"{v}_pred_vs_true_{suffix}")
 
-                # same panel, background (noise-only) predictions
-                if pr_bg is not None:
+                # same panel, background (noise-only) predictions -- only
+                # valid when bkg rows are paired 1:1 with sig rows (same
+                # true values); the on-the-fly waveform_prob<1 dataloader
+                # draws sig/bkg from unrelated rows with different counts,
+                # so bm (sized to sig) can't index pr_bg (sized to bkg)
+                if pr_bg is not None and len(pr_bg) == len(tr):
                     fig, ax = plt.subplots(figsize=(5.5, 5.5))
                     pred_vs_true_ax(
                         ax,
@@ -1243,3 +1247,233 @@ class ClassificationTestCallback(Callback):
         fig.tight_layout()
         fig.savefig(self.save_dir / "efficiency_vs_snr.png", dpi=140)
         plt.close(fig)
+
+
+class DenoiserEvolutionCallback(Callback):
+    """Log per-epoch denoiser reconstruction on a fixed batch.
+
+    Adapted for the aframe denoiser: the model returns ``(x_denoised, out)``
+    (only ``x_denoised`` is plotted), and the clean target lives in the train
+    batch ``(X, X_clean, y, params)``, so a fixed reference batch is captured
+    from the train dataloader once and reused every epoch. Each validation
+    epoch draws target vs prediction (vs noisy input) per example and ifo,
+    logged to wandb under one stable key (media step-slider) and to disk;
+    frames are assembled into a GIF at fit end.
+
+    Tensors are ``(B, C, L)`` (C = n_ifos).
+    """
+
+    def __init__(
+        self,
+        n_examples: int = 3,
+        every_n_epochs: int = 1,
+        sample_rate: Optional[float] = 256.0,
+        window_begin: float = 0.0,
+        plot_window: Optional[tuple] = None,
+        show_input: bool = True,
+        out_dir: Optional[str] = None,
+        gif_fps: int = 4,
+        max_gif_frames: int = 200,
+    ):
+        super().__init__()
+        self.n_examples = n_examples
+        self.every_n_epochs = every_n_epochs
+        self.sample_rate = sample_rate
+        self.window_begin = window_begin
+        self.plot_window = tuple(plot_window) if plot_window else None
+        self.show_input = show_input
+        self.out_dir = Path(out_dir) if out_dir else None
+        self.gif_fps = gif_fps
+        self.max_gif_frames = max_gif_frames
+        self._fixed_batch = None
+        self._frame_paths = []
+
+    def on_fit_start(self, trainer, pl_module) -> None:
+        if self.out_dir is None:
+            self.out_dir = Path(trainer.log_dir or ".") / "denoiser_evolution"
+        self.out_dir.mkdir(parents=True, exist_ok=True)
+
+    def on_train_batch_start(
+        self, trainer, pl_module, batch, batch_idx
+    ) -> None:
+        """Capture the first post-augmentation batch once.
+
+        aframe injects/whitens on-GPU in ``on_after_batch_transfer``, so the
+        training batch here is ``(X, X_clean, y, params)`` -- the noisy input
+        and clean target -- unlike the raw dataloader output.
+        """
+        if self._fixed_batch is not None:
+            return
+        if not (isinstance(batch, (tuple, list)) and len(batch) >= 2):
+            return
+        X, X_clean = batch[0], batch[1]
+        if not (torch.is_tensor(X) and torch.is_tensor(X_clean)):
+            return
+        n = min(self.n_examples, X.shape[0])
+        self._fixed_batch = (
+            X[:n].detach().clone(),
+            X_clean[:n].detach().clone(),
+        )
+
+    def on_validation_epoch_end(self, trainer, pl_module) -> None:
+        if trainer.sanity_checking:
+            return
+        if trainer.current_epoch % self.every_n_epochs != 0:
+            return
+        if self._fixed_batch is None:
+            return
+
+        noisy, target = self._fixed_batch
+        was_training = pl_module.training
+        pl_module.eval()
+        with torch.no_grad():
+            pred = pl_module(noisy)
+            if isinstance(pred, (tuple, list)):
+                pred = pred[0]  # x_denoised
+        if was_training:
+            pl_module.train()
+
+        fig = self._draw(
+            noisy.float().cpu().numpy(),
+            target.float().cpu().numpy(),
+            pred.float().cpu().numpy(),
+            epoch=trainer.current_epoch,
+        )
+        self.out_dir.mkdir(parents=True, exist_ok=True)
+        path = self.out_dir / f"epoch_{trainer.current_epoch:04d}.png"
+        fig.savefig(path, dpi=110, bbox_inches="tight")
+        self._frame_paths.append(path)
+
+        if isinstance(trainer.logger, WandbLogger):
+            import wandb
+
+            trainer.logger.experiment.log(
+                {"denoiser/evolution": wandb.Image(fig)},
+                step=trainer.global_step,
+            )
+        plt.close(fig)
+
+    def _assemble_gif(self, frame_paths, gif_name):
+        from PIL import Image
+
+        paths = [p for p in frame_paths if p.exists()]
+        if len(paths) < 2:
+            return None
+        if len(paths) > self.max_gif_frames:
+            idx = np.linspace(0, len(paths) - 1, self.max_gif_frames)
+            paths = [paths[int(i)] for i in idx]
+        frames = [
+            Image.open(p).convert("P", palette=Image.ADAPTIVE) for p in paths
+        ]
+        gif_path = self.out_dir / gif_name
+        frames[0].save(
+            gif_path,
+            save_all=True,
+            append_images=frames[1:],
+            duration=int(1000 / self.gif_fps),
+            loop=0,
+        )
+        return gif_path
+
+    def on_fit_end(self, trainer, pl_module) -> None:
+        if not self._frame_paths:
+            return
+        gif_path = self._assemble_gif(self._frame_paths, "evolution.gif")
+        if gif_path and isinstance(trainer.logger, WandbLogger):
+            import wandb
+
+            trainer.logger.experiment.log(
+                {
+                    "denoiser/evolution_gif": wandb.Video(
+                        str(gif_path), fps=self.gif_fps
+                    )
+                }
+            )
+
+    def _time_axis(self, length):
+        if self.sample_rate:
+            t = self.window_begin + np.arange(length) / self.sample_rate
+            return t, "time [s]"
+        return np.arange(length), "sample"
+
+    def _fft(self, x):
+        fs = self.sample_rate or 1.0
+        mag = np.abs(np.fft.rfft(x))
+        freqs = np.fft.rfftfreq(x.shape[0], d=1.0 / fs)
+        return freqs[1:], np.maximum(mag[1:], 1e-30)
+
+    def _draw(self, noisy, target, pred, epoch):
+        """noisy/target/pred: (N, C, L). Returns a Figure."""
+        n_ex, n_ifos, length = target.shape
+        sr = self.sample_rate or 1.0
+        xlabel = "time to merger [s]" if self.sample_rate else "sample"
+        lo, hi = 0, length
+        if self.plot_window and self.sample_rate:
+            begin, end = self.plot_window
+            lo = max(0, int((begin - self.window_begin) * self.sample_rate))
+            hi = min(length, int((end - self.window_begin) * self.sample_rate))
+        sl = slice(lo, hi)
+
+        n_rows = n_ex * n_ifos
+        fig, axes = plt.subplots(
+            n_rows, 2, figsize=(14, 4.4 * n_rows), squeeze=False
+        )
+        for e in range(n_ex):
+            for k in range(n_ifos):
+                row = e * n_ifos + k
+                # merger = peak amplitude of the clean target; t=0 there,
+                # so pre-merger is negative (relative time to coalescence)
+                merger_idx = int(np.argmax(np.abs(target[e, k])))
+                t = (np.arange(length) - merger_idx) / sr
+                mse = float(np.mean((pred[e, k, sl] - target[e, k, sl]) ** 2))
+                ax = axes[row][0]
+                if self.show_input:
+                    ax.plot(
+                        t[sl],
+                        noisy[e, k, sl],
+                        lw=0.5,
+                        color="0.6",
+                        alpha=0.45,
+                        label="noisy input",
+                    )
+                ax.plot(
+                    t[sl], target[e, k, sl], lw=0.9, color="k", label="target"
+                )
+                ax.plot(
+                    t[sl],
+                    pred[e, k, sl],
+                    lw=0.9,
+                    color="tab:red",
+                    label="prediction",
+                )
+                ax.set_ylabel(f"ex {e} / ifo {k}")
+                ax.set_title(f"MSE = {mse:.3e}", fontsize=8, loc="right")
+                if row == 0:
+                    ax.legend(fontsize=7, ncol=3, loc="upper left")
+                if row == n_rows - 1:
+                    ax.set_xlabel(xlabel)
+
+                axf = axes[row][1]
+                if self.show_input:
+                    f, m = self._fft(noisy[e, k, sl])
+                    axf.loglog(
+                        f,
+                        m,
+                        lw=0.6,
+                        color="0.6",
+                        alpha=0.45,
+                        label="noisy input",
+                    )
+                f, m = self._fft(target[e, k, sl])
+                axf.loglog(f, m, lw=0.9, color="k", label="target")
+                f, m = self._fft(pred[e, k, sl])
+                axf.loglog(f, m, lw=0.9, color="tab:red", label="prediction")
+                axf.set_ylabel("|rfft|")
+                if row == 0:
+                    axf.set_title("abs(rfft) magnitude", fontsize=9)
+                    axf.legend(fontsize=7, loc="upper right")
+                if row == n_rows - 1:
+                    axf.set_xlabel("frequency [Hz]")
+        fig.suptitle(f"epoch {epoch}", fontsize=12)
+        fig.tight_layout(rect=[0, 0, 1, 0.98])
+        return fig

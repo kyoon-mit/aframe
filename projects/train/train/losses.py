@@ -1,6 +1,184 @@
+import math
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
+LOSS_FUNCTIONS = (
+    "mse",
+    "mae",
+    "rmse",
+    "huber",
+    "smooth_l1",
+    "smae",
+    "logcosh",
+)
+
+
+def loss_helper(
+    loss: str,
+    pred: torch.Tensor,
+    target: torch.Tensor,
+    delta: float = 1.0,
+) -> torch.Tensor:
+    """Scalar discrepancy between two tensors, selected by name.
+
+    All options are means over every element, so they stay comparable in
+    magnitude and can be swapped without retuning the mixing weight. See
+    LOSS_FUNCTIONS for the choices; ``delta`` is the huber/smooth_l1
+    transition point (ignored otherwise).
+    """
+    if loss == "mse":
+        return F.mse_loss(pred, target)
+    if loss == "mae":
+        return F.l1_loss(pred, target)
+    if loss == "rmse":
+        # clamp keeps the sqrt gradient finite when the error reaches zero
+        return F.mse_loss(pred, target).clamp_min(1e-12).sqrt()
+    if loss == "huber":
+        return F.huber_loss(pred, target, delta=delta)
+    if loss in ("smooth_l1", "smae"):
+        return F.smooth_l1_loss(pred, target, beta=delta)
+    if loss == "logcosh":
+        # log(cosh(d)) as |d| + log1p(exp(-2|d|)) - log(2); no overflow
+        d = (pred - target).abs()
+        return (d + torch.log1p(torch.exp(-2.0 * d)) - math.log(2.0)).mean()
+    raise ValueError(f"Unknown loss {loss!r}. Choose one of {LOSS_FUNCTIONS}.")
+
+
+class DynamicMixtureLoss(nn.Module):
+    """Mixture of a time-domain and a frequency-domain denoiser loss.
+
+    Aframe tensors are ``(B, C, L)``, so the FFT runs over the last dim ``L``.
+    ``alpha`` is externally mutable so the training task can schedule it
+    epoch-by-epoch (0 = pure spectral, 1 = pure time-domain).
+
+    Args:
+        alpha: initial weight for the time term. Updated in place each epoch.
+        density: divide each term by the same discrepancy against a zero
+            prediction, turning both into dimensionless "error relative to
+            predicting nothing" so alpha=0.5 really means equal weight.
+        time_loss: time-domain discrepancy, one of LOSS_FUNCTIONS.
+        spectral_loss: 'mse' (default) compares |FFT| directly; 'msle'
+            compares log(|FFT| + log_floor) to compress dynamic range so loud
+            bins stop dominating; any LOSS_FUNCTIONS name applies that
+            discrepancy to plain magnitudes.
+        log_floor: floor inside the log for 'msle'.
+        huber_delta: transition point for 'huber'/'smooth_l1', both terms.
+    """
+
+    def __init__(
+        self,
+        alpha: float = 0.5,
+        density: bool = True,
+        time_loss: str = "mse",
+        spectral_loss: str = "mse",
+        log_floor: float = 1e-3,
+        huber_delta: float = 1.0,
+        lambda_smooth: float = 0.0,
+        smooth_loss: str = "mse",
+    ):
+        super().__init__()
+        if not 0.0 <= alpha <= 1.0:
+            raise ValueError(f"alpha must be in [0, 1], got {alpha}")
+        if smooth_loss not in ("mse", "l1"):
+            raise ValueError(
+                f"smooth_loss must be 'mse' or 'l1', got {smooth_loss!r}"
+            )
+        if time_loss not in LOSS_FUNCTIONS:
+            raise ValueError(
+                f"time_loss must be one of {LOSS_FUNCTIONS}, got {time_loss!r}"
+            )
+        if spectral_loss not in LOSS_FUNCTIONS + ("msle",):
+            raise ValueError(
+                f"spectral_loss must be 'msle' or one of {LOSS_FUNCTIONS}, "
+                f"got {spectral_loss!r}"
+            )
+        if log_floor <= 0.0:
+            raise ValueError(f"log_floor must be > 0, got {log_floor}")
+        if huber_delta <= 0.0:
+            raise ValueError(f"huber_delta must be > 0, got {huber_delta}")
+        self.alpha = alpha  # mutable; updated each epoch by the task
+        self.density = density
+        self.time_loss = time_loss
+        self.spectral_loss = spectral_loss
+        self.log_floor = log_floor
+        self.huber_delta = huber_delta
+        self.lambda_smooth = lambda_smooth
+        self.smooth_loss = smooth_loss
+
+    def _term(
+        self, loss: str, pred: torch.Tensor, target: torch.Tensor
+    ) -> torch.Tensor:
+        """One term of the mixture, optionally made dimensionless."""
+        value = loss_helper(loss, pred, target, self.huber_delta)
+        if self.density:
+            scale = loss_helper(
+                loss, torch.zeros_like(target), target, self.huber_delta
+            )
+            value = value / scale.clamp_min(1e-8)
+        return value
+
+    def forward(
+        self, pred: torch.Tensor, target: torch.Tensor
+    ) -> torch.Tensor:
+        """pred, target: (B, C, L). Returns scalar loss."""
+        time_term = self._term(self.time_loss, pred, target)
+
+        pred_mag = torch.fft.rfft(pred, dim=-1).abs()
+        target_mag = torch.fft.rfft(target, dim=-1).abs()
+        target_mag_raw = target_mag  # keep before msle overwrites it
+
+        if self.spectral_loss == "msle":
+            pred_mag = torch.log(pred_mag + self.log_floor)
+            target_mag = torch.log(target_mag + self.log_floor)
+            spectral_term = self._term("mse", pred_mag, target_mag)
+        else:
+            spectral_term = self._term(
+                self.spectral_loss, pred_mag, target_mag
+            )
+
+        mix = self.alpha * time_term + (1.0 - self.alpha) * spectral_term
+
+        # spectral roughness term: target |FFT| is smooth in freq, but a
+        # ragged input makes pred jump bin-to-bin. Work in log-magnitude
+        # (scale-free across the many orders |FFT| spans), take the adjacent-
+        # bin difference (the slope / raggedness, level cancels), and match
+        # pred's raggedness to target's -- only EXCESS jag is penalized, real
+        # target structure is left alone.
+        smooth_term = pred_mag.new_zeros(())
+        if self.lambda_smooth > 0.0:
+            log_pred = torch.log(
+                torch.fft.rfft(pred, dim=-1).abs() + self.log_floor
+            )
+            log_target = torch.log(target_mag_raw + self.log_floor)
+            d_pred = log_pred[..., 1:] - log_pred[..., :-1]
+            d_target = log_target[..., 1:] - log_target[..., :-1]
+            diff = d_pred - d_target
+            rough = (
+                diff.pow(2).mean()
+                if self.smooth_loss == "mse"
+                else diff.abs().mean()
+            )
+            if self.density:
+                # normalize by pred's OWN roughness -> "fraction of pred jag
+                # that is excess". Bounded ~[0,1] and O(1) regardless of how
+                # smooth the target is (dividing by target roughness blows up
+                # when the target is smooth).
+                scale = (
+                    d_pred.pow(2).mean()
+                    if self.smooth_loss == "mse"
+                    else d_pred.abs().mean()
+                ).detach()  # scale only -> model can't game the denominator
+                rough = rough / scale.clamp_min(1e-8)
+            smooth_term = rough
+
+        # expose raw components (pre-alpha) so the task can log them and
+        # pick alpha / lambda_smooth from their relative scale
+        self.last_time_term = time_term.detach()
+        self.last_spectral_term = spectral_term.detach()
+        self.last_smooth_term = smooth_term.detach()
+        return mix + self.lambda_smooth * smooth_term
 
 
 class CorrelationDenoiseLoss(nn.Module):

@@ -1,4 +1,4 @@
-seed_everything: 20260819
+seed_everything: 20260612
 
 trainer:
   accelerator: auto
@@ -43,7 +43,7 @@ model:
       class_path: architectures.supervised.SupervisedS4ModelResNetMLPDecoder
       init_args:
         num_ifos: 2
-        d_output: 4          # chirp_mass mean + variance
+        d_output: 2          # chirp_mass mean + variance
         d_model: 256
         d_state: 32
         n_layers: 4
@@ -53,7 +53,6 @@ model:
         num_groups: 32       # group norm over d_model channels (8 ch/group)
     param_names:
       - chirp_mass
-      - mass_ratio
     beta_nll: 0.3
     y_mean: [1.80]
     y_std: [0.55]
@@ -99,7 +98,7 @@ data:
     waveform_prob: 1.0
     swap_prob: 0.0
     mute_prob: 0.0
-    max_num_workers: 16
+    max_num_workers: 8
 
     num_valid_views: 1
     valid_stride: 25
@@ -109,12 +108,12 @@ data:
       class_path: train.augmentations.SnrSampler
       init_args:
         constant_params:
-          index: -0.0001
+          index: -3
           maximum: 100.0
         start_params:
-          minimum: 20.0     # from scratch: ramp curriculum 20 -> 4
+          minimum: 20.0     # from scratch: ramp curriculum 20 -> 7
         end_params:
-          minimum: 4.0
+          minimum: 7.0
         decay_steps: 4096
 
     param_transforms:

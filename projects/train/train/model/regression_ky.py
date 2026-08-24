@@ -544,6 +544,42 @@ class DenoisedGaussianNLLRegression(GaussianNLLRegressionAframeCustomLR):
             on_step=False,
             on_epoch=True,
         )
+        # scaled contributions to the total, so their sum == train/loss:
+        # tells you directly whether the denoiser or regressor dominates
+        self.log(
+            "train/contrib_denoise",
+            self.lambda_denoise * loss_denoise,
+            on_step=False,
+            on_epoch=True,
+        )
+        self.log(
+            "train/contrib_regress",
+            self.lambda_regress * loss_regress,
+            on_step=False,
+            on_epoch=True,
+        )
+        # DynamicMixtureLoss sub-terms (raw, pre-alpha): use their ratio to
+        # pick alpha so time and spectral terms are comparably weighted
+        if hasattr(self.denoiser_loss, "last_time_term"):
+            self.log(
+                "train/denoise_time",
+                self.denoiser_loss.last_time_term,
+                on_step=False,
+                on_epoch=True,
+            )
+            self.log(
+                "train/denoise_spectral",
+                self.denoiser_loss.last_spectral_term,
+                on_step=False,
+                on_epoch=True,
+            )
+        if hasattr(self.denoiser_loss, "last_smooth_term"):
+            self.log(
+                "train/denoise_smooth",
+                self.denoiser_loss.last_smooth_term,
+                on_step=False,
+                on_epoch=True,
+            )
         # train/loss is logged by AframeBase.training_step from the return
         return loss
 
