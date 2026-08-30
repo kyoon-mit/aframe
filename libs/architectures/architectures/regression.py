@@ -208,6 +208,64 @@ class RegressionTimeDomainS4DenoiseRegressResNetMLP(
         return self.model(X)
 
 
+class ClassificationTimeDomainS4DenoiseClassifyResNet(
+    MultiTaskArchitecture, SupervisedArchitecture
+):
+    """S4D seq-to-seq denoiser feeding a PLAIN ResNet1D classifier head.
+
+    Unlike ``RegressionTimeDomainS4DenoiseRegressResNetMLP``, the head here
+    is a bare ``ResNet1D`` (conv only, no second S4D stack) -- cheaper and
+    matches a "denoise with S4D, classify with a plain resnet" split.
+    ``forward`` returns ``(x_denoised, logit)``. Pairs with
+    ``DenoisedClassification``.
+    """
+
+    def __init__(
+        self,
+        num_ifos: int,
+        denoiser_d_model: int = 128,
+        denoiser_d_state: int = 64,
+        denoiser_n_layers: int = 4,
+        denoiser_dropout: float = 0.2,
+        denoiser_prenorm: bool = False,
+        num_groups: Optional[int] = None,
+        dt_min: float = 1e-3,
+        dt_max: float = 0.1,
+        detach_denoiser: bool = False,
+        resnet_layers: list[int] = (2, 2, 2),
+        resnet_kernel_size: int = 3,
+        resnet_norm_layer: Optional[NormLayer] = None,
+    ) -> None:
+        super().__init__()
+        self.model = S4ModelDenoiseRegress(
+            denoiser=S4ModelSeq2Seq,
+            regressor=ResNet1D,
+            denoiser_params={
+                "d_input": num_ifos,
+                "d_output": num_ifos,
+                "d_model": denoiser_d_model,
+                "d_state": denoiser_d_state,
+                "n_layers": denoiser_n_layers,
+                "dropout": denoiser_dropout,
+                "prenorm": denoiser_prenorm,
+                "num_groups": num_groups,
+                "dt_min": dt_min,
+                "dt_max": dt_max,
+            },
+            regressor_params={
+                "in_channels": num_ifos,
+                "layers": list(resnet_layers),
+                "classes": 1,  # single detection logit
+                "kernel_size": resnet_kernel_size,
+                "norm_layer": resnet_norm_layer,
+            },
+            detach_denoiser=detach_denoiser,
+        )
+
+    def forward(self, X: torch.Tensor):
+        return self.model(X)
+
+
 class MultiTaskTimeDomainResNet(MultiTaskArchitecture):
     """
     Shared ResNet1D backbone with separate classification and regression heads.

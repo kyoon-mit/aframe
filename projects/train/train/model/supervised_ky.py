@@ -46,6 +46,9 @@ class SupervisedAframeS4CustomLR(SupervisedAframeS4):
         warm_start_ckpt: Optional[str] = None,
         pauc_weight: float = 0.0,
         pauc_fpr_frac: float = 0.05,
+        log_dt_min: float = -11.5,
+        log_dt_max: float = 2.3,
+        log_a_max: float = 4.6,
         **kwargs,
     ):
         super().__init__(*args, **kwargs)
@@ -54,6 +57,9 @@ class SupervisedAframeS4CustomLR(SupervisedAframeS4):
             "normalize_input",
             "pauc_weight",
             "pauc_fpr_frac",
+            "log_dt_min",
+            "log_dt_max",
+            "log_a_max",
         )
         self._lr_scheduler_factory = lr_scheduler
         if warm_start_ckpt is not None:
@@ -71,7 +77,11 @@ class SupervisedAframeS4CustomLR(SupervisedAframeS4):
         return loss
 
     def on_train_batch_end(self, outputs, batch, batch_idx):
-        clamp_ssm_params(self)
+        clamp_ssm_params(
+            self,
+            log_dt_bounds=(self.hparams.log_dt_min, self.hparams.log_dt_max),
+            log_a_max=self.hparams.log_a_max,
+        )
 
     def test_step(self, batch, _):
         """Per-batch detection scores for ClassificationTestCallback.
@@ -201,11 +211,19 @@ class DenoisedClassification(SupervisedAframeS4CustomLR):
         *args,
         denoiser_loss: Optional[torch.nn.Module] = None,
         lambda_denoise: float = 1.0,
+        lambda_bce: float = 1.0,
+        bce_schedule: Optional[list] = None,
         **kwargs,
     ):
         super().__init__(*args, **kwargs)
         self.denoiser_loss = denoiser_loss or torch.nn.MSELoss()
         self.lambda_denoise = lambda_denoise
+        # base weight; the schedule multiplies it 0->1 over training
+        self._base_lambda_bce = lambda_bce
+        self.lambda_bce = lambda_bce
+        # step schedule: (epoch, multiplier), applied at/after each epoch;
+        # default = denoiser-only for 30 epochs, then joint
+        self.bce_schedule = sorted(bce_schedule or [(0, 0.0), (30, 1.0)])
 
     def _norm(self, X):
         if self.hparams.normalize_input:
@@ -216,16 +234,39 @@ class DenoisedClassification(SupervisedAframeS4CustomLR):
         _, logit = self.model(self._norm(X))
         return logit
 
+    def on_train_epoch_start(self):
+        e = self.current_epoch
+        sched = self.bce_schedule
+        if e <= sched[0][0]:
+            mult = sched[0][1]
+        elif e >= sched[-1][0]:
+            mult = sched[-1][1]
+        else:
+            for (e0, m0), (e1, m1) in zip(sched, sched[1:], strict=False):
+                if e0 <= e <= e1:
+                    mult = m0 + (m1 - m0) * (e - e0) / (e1 - e0)
+                    break
+        self.lambda_bce = self._base_lambda_bce * mult
+        self.log("lambda/bce", self.lambda_bce, on_epoch=True)
+        self.log("lambda/denoise", float(self.lambda_denoise), on_epoch=True)
+
     def train_step(self, batch):
         X, X_clean, y, _ = batch
         x_denoised, logit = self.model(self._norm(X))
         bce = torch.nn.functional.binary_cross_entropy_with_logits(logit, y)
         denoise = self.denoiser_loss(x_denoised, X_clean)
-        loss = bce + self.lambda_denoise * denoise
+        loss = self.lambda_bce * bce + self.lambda_denoise * denoise
         if self.hparams.pauc_weight > 0:
             loss = loss + self.hparams.pauc_weight * soft_pauc_loss(
                 logit, y, self.hparams.pauc_fpr_frac
             )
         self.log("train/bce", bce, on_step=False, on_epoch=True)
         self.log("train/loss_denoise", denoise, on_step=False, on_epoch=True)
+        if hasattr(self.denoiser_loss, "alpha"):
+            self.log(
+                "denoiser_loss/alpha",
+                float(self.denoiser_loss.alpha),
+                on_step=False,
+                on_epoch=True,
+            )
         return loss

@@ -157,6 +157,9 @@ class GaussianNLLRegressionAframeCustomLR(GaussianNLLRegressionAframe):
         # required by AframeBase but unused here (OneCycle is replaced by
         # lr_scheduler); defaulted so configs may omit it
         pct_lr_ramp: float = 0.0,
+        log_dt_min: float = -11.5,
+        log_dt_max: float = 2.3,
+        log_a_max: float = 4.6,
         **kwargs,
     ):
         super().__init__(*args, pct_lr_ramp=pct_lr_ramp, **kwargs)
@@ -165,13 +168,20 @@ class GaussianNLLRegressionAframeCustomLR(GaussianNLLRegressionAframe):
             "lambda_spread",
             "lr_scheduler_interval",
             "normalize_input",
+            "log_dt_min",
+            "log_dt_max",
+            "log_a_max",
         )
         self._lr_scheduler_factory = lr_scheduler
         if warm_start_ckpt is not None:
             load_compatible_weights(self, warm_start_ckpt)
 
     def on_train_batch_end(self, outputs, batch, batch_idx):
-        clamp_ssm_params(self)
+        clamp_ssm_params(
+            self,
+            log_dt_bounds=(self.hparams.log_dt_min, self.hparams.log_dt_max),
+            log_a_max=self.hparams.log_a_max,
+        )
 
     def forward(self, X):
         # divide each whitened channel by its own std (kyoon-dev
@@ -430,6 +440,7 @@ class DenoisedGaussianNLLRegression(GaussianNLLRegressionAframeCustomLR):
         lambda_denoise: float = 0.5,
         lambda_regress: float = 0.5,
         regress_schedule: Optional[List[Tuple]] = None,
+        alpha_schedule: Optional[dict] = None,
         **kwargs,
     ):
         super().__init__(*args, **kwargs)
@@ -444,6 +455,10 @@ class DenoisedGaussianNLLRegression(GaussianNLLRegressionAframeCustomLR):
         self.regress_schedule = sorted(
             regress_schedule or [(0, 0.0), (30, 1.0)]
         )
+        # denoiser_loss.alpha schedule: {mode, start, end, start_epoch,
+        # end_epoch}. mode = constant/linear/cosine. Only applies when
+        # denoiser_loss exposes a mutable .alpha (e.g. DynamicMixtureLoss).
+        self.alpha_schedule = alpha_schedule
 
     def on_train_epoch_start(self):
         e = self.current_epoch
@@ -461,6 +476,25 @@ class DenoisedGaussianNLLRegression(GaussianNLLRegressionAframeCustomLR):
         self.lambda_regress = self._base_lambda_regress * mult
         self.log("lambda/regress", self.lambda_regress, on_epoch=True)
         self.log("lambda/denoise", float(self.lambda_denoise), on_epoch=True)
+
+        if self.alpha_schedule is not None and hasattr(
+            self.denoiser_loss, "alpha"
+        ):
+            s = self.alpha_schedule
+            mode = s.get("mode", "constant")
+            a0, a1 = s.get("start", 0.5), s.get("end", 0.5)
+            e0, e1 = s.get("start_epoch", 0), s.get("end_epoch", 0)
+            if mode == "constant" or e >= e1:
+                alpha = a1 if e >= e1 else a0
+            elif e <= e0:
+                alpha = a0
+            else:
+                frac = (e - e0) / (e1 - e0)
+                if mode == "cosine":
+                    frac = 0.5 * (1 - math.cos(math.pi * frac))
+                alpha = a0 + (a1 - a0) * frac
+            self.denoiser_loss.alpha = alpha
+            self.log("denoiser_loss/alpha", alpha, on_epoch=True)
 
     def _log_regression_metrics(self, mean, var, targets, y_norm):
         """Mirror the parent train_step's train/* metric set."""
