@@ -154,6 +154,11 @@ class SupervisedAframeS4CustomLR(SupervisedAframeS4):
 
         ssm_params, other_params = [], []
         for name, p in self.model.named_parameters():
+            # a frozen denoiser must stay out of the optimizer entirely:
+            # AdamW's weight decay would keep shrinking its weights even
+            # with no gradient
+            if not p.requires_grad:
+                continue
             leaf = name.rsplit(".", 1)[-1]
             if leaf in self.SSM_PARAM_NAMES:
                 ssm_params.append(p)
@@ -213,6 +218,8 @@ class DenoisedClassification(SupervisedAframeS4CustomLR):
         lambda_denoise: float = 1.0,
         lambda_bce: float = 1.0,
         bce_schedule: Optional[list] = None,
+        denoiser_ckpt: Optional[str] = None,
+        freeze_denoiser: bool = False,
         **kwargs,
     ):
         super().__init__(*args, **kwargs)
@@ -224,6 +231,73 @@ class DenoisedClassification(SupervisedAframeS4CustomLR):
         # step schedule: (epoch, multiplier), applied at/after each epoch;
         # default = denoiser-only for 30 epochs, then joint
         self.bce_schedule = sorted(bce_schedule or [(0, 0.0), (30, 1.0)])
+
+        # two-stage training: load a denoiser trained on its own by the
+        # Denoiser task, then hold it fixed while the classifier learns
+        self.freeze_denoiser = freeze_denoiser
+        if denoiser_ckpt is not None:
+            self._load_denoiser(denoiser_ckpt)
+        if freeze_denoiser:
+            self._freeze_denoiser()
+
+    @property
+    def denoiser(self):
+        """The denoiser submodule, wherever the architecture keeps it.
+
+        ``ClassificationTimeDomainS4DenoiseClassifyResNet`` wraps an
+        ``S4ModelDenoiseRegress`` in its own ``.model``, so the denoiser
+        sits one level deeper than in architectures that hold it directly.
+        """
+        if hasattr(self.model, "denoiser"):
+            return self.model.denoiser
+        return self.model.model.denoiser
+
+    def _load_denoiser(self, ckpt_path):
+        """Copy denoiser weights out of a standalone Denoiser checkpoint.
+
+        The standalone task stores them under ``model.model.*`` (task ->
+        TimeDomainS4Denoiser -> S4ModelSeq2Seq), while here the same stack
+        lives at ``model.denoiser.*``, so the prefix is rewritten and only
+        shape-matching tensors are taken.
+        """
+        ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=False)
+        source = ckpt.get("state_dict", ckpt)
+        target = self.denoiser.state_dict()
+        compatible, skipped = {}, []
+        for key, value in source.items():
+            name = key
+            for prefix in ("model.model.", "model.denoiser.", "model."):
+                if name.startswith(prefix):
+                    name = name[len(prefix) :]
+                    break
+            if name in target and target[name].shape == value.shape:
+                compatible[name] = value
+            else:
+                skipped.append(key)
+        missing = [k for k in target if k not in compatible]
+        self.denoiser.load_state_dict(compatible, strict=False)
+        self._logger.info(
+            f"Loaded denoiser from {ckpt_path}: {len(compatible)} tensors, "
+            f"skipped {len(skipped)}, left {len(missing)} fresh {missing}"
+        )
+
+    def _freeze_denoiser(self):
+        for param in self.denoiser.parameters():
+            param.requires_grad = False
+        self.denoiser.eval()
+        self._logger.info("Denoiser frozen; training classifier head only")
+
+    def train(self, mode: bool = True):
+        """Keep the frozen denoiser in eval mode.
+
+        Lightning calls ``train()`` on the whole task at each epoch, which
+        would otherwise switch the frozen denoiser's dropout back on and
+        make the classifier chase a moving input.
+        """
+        super().train(mode)
+        if self.freeze_denoiser:
+            self.denoiser.eval()
+        return self
 
     def _norm(self, X):
         if self.hparams.normalize_input:
