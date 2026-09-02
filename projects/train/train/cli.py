@@ -5,6 +5,20 @@ from train.callbacks import WandbSaveConfig
 from train.data import BaseAframeDataset
 from train.model import AframeBase
 
+# torch >= 2.6 defaults torch.load to weights_only=True, which refuses to
+# unpickle the loss and prior objects our checkpoints carry in their saved
+# hyperparameters. Checkpoints here are our own training output, so allow
+# full unpickling; without this, --ckpt_path fails for resume and test.
+_torch_load = torch.load
+
+
+def _torch_load_full(*args, **kwargs):
+    kwargs.setdefault("weights_only", False)
+    return _torch_load(*args, **kwargs)
+
+
+torch.load = _torch_load_full
+
 
 class AframeCLI(LightningCLI):
     def __init__(self, *args, **kwargs):

@@ -10,3 +10,5 @@ from .time_domain import (
     DenoisingTimeDomainSupervisedAframeDataset,
     HeterodyneTimeDomainSupervisedAframeDataset,
 )
+
+from .denoiser import DenoiserOnlyAframeDataset

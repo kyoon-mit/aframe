@@ -46,24 +46,35 @@ def loss_helper(
     raise ValueError(f"Unknown loss {loss!r}. Choose one of {LOSS_FUNCTIONS}.")
 
 
-class DynamicMixtureLoss(nn.Module):
+class ScheduledMixtureLoss(nn.Module):
     """Mixture of a time-domain and a frequency-domain denoiser loss.
 
     Aframe tensors are ``(B, C, L)``, so the FFT runs over the last dim ``L``.
     ``alpha`` is externally mutable so the training task can schedule it
     epoch-by-epoch (0 = pure spectral, 1 = pure time-domain).
 
+    Both terms are computed per row and then averaged, so every signal
+    carries equal weight regardless of its SNR. When ``density`` is set, each
+    row's error is divided by that row's own "error of predicting zero"
+    before averaging -- mean(err_row / scale_row), not
+    mean(err_row) / mean(scale_row).
+
     Args:
         alpha: initial weight for the time term. Updated in place each epoch.
-        density: divide each term by the same discrepancy against a zero
-            prediction, turning both into dimensionless "error relative to
-            predicting nothing" so alpha=0.5 really means equal weight.
+        density: if True, divide each row's error by that row's discrepancy
+            against a zero prediction, making both terms dimensionless
+            "error relative to predicting nothing" so alpha=0.5 is equal
+            weight. If False, no scaling; rely on alpha for balance.
         time_loss: time-domain discrepancy, one of LOSS_FUNCTIONS.
         spectral_loss: 'mse' (default) compares |FFT| directly; 'msle'
             compares log(|FFT| + log_floor) to compress dynamic range so loud
             bins stop dominating; any LOSS_FUNCTIONS name applies that
             discrepancy to plain magnitudes.
         log_floor: floor inside the log for 'msle'.
+        log_base: base of the logarithm for 'msle'. Changing it rescales the
+            spectral term by 1/ln(base)**2 -- base 10 makes it ~5.3x smaller
+            than natural log -- so it shifts where alpha balances the two
+            terms rather than changing the shape of either.
         huber_delta: transition point for 'huber'/'smooth_l1', both terms.
     """
 
@@ -73,18 +84,13 @@ class DynamicMixtureLoss(nn.Module):
         density: bool = True,
         time_loss: str = "mse",
         spectral_loss: str = "mse",
-        log_floor: float = 1e-3,
+        log_floor: float = 1e-6,
+        log_base: float = 10.0,
         huber_delta: float = 1.0,
-        lambda_smooth: float = 0.0,
-        smooth_loss: str = "mse",
     ):
         super().__init__()
         if not 0.0 <= alpha <= 1.0:
             raise ValueError(f"alpha must be in [0, 1], got {alpha}")
-        if smooth_loss not in ("mse", "l1"):
-            raise ValueError(
-                f"smooth_loss must be 'mse' or 'l1', got {smooth_loss!r}"
-            )
         if time_loss not in LOSS_FUNCTIONS:
             raise ValueError(
                 f"time_loss must be one of {LOSS_FUNCTIONS}, got {time_loss!r}"
@@ -96,6 +102,8 @@ class DynamicMixtureLoss(nn.Module):
             )
         if log_floor <= 0.0:
             raise ValueError(f"log_floor must be > 0, got {log_floor}")
+        if log_base <= 1.0:
+            raise ValueError(f"log_base must be > 1, got {log_base}")
         if huber_delta <= 0.0:
             raise ValueError(f"huber_delta must be > 0, got {huber_delta}")
         self.alpha = alpha  # mutable; updated each epoch by the task
@@ -103,82 +111,55 @@ class DynamicMixtureLoss(nn.Module):
         self.time_loss = time_loss
         self.spectral_loss = spectral_loss
         self.log_floor = log_floor
+        self.log_base = log_base
+        self._log_base_scale = math.log(log_base)
         self.huber_delta = huber_delta
-        self.lambda_smooth = lambda_smooth
-        self.smooth_loss = smooth_loss
 
-    def _term(
-        self, loss: str, pred: torch.Tensor, target: torch.Tensor
+    def _row_term(
+        self, pred: torch.Tensor, target: torch.Tensor
     ) -> torch.Tensor:
-        """One term of the mixture, optionally made dimensionless."""
-        value = loss_helper(loss, pred, target, self.huber_delta)
+        """Per-row MSE, optionally divided per row by the row's own
+        error-of-predicting-zero, then averaged over the batch.
+
+        pred, target: (..., L). Reduces over every dim but the batch, so a
+        (B, C, L) or (B, C, F) input gives one number per (B, C) pair.
+        """
+        err = (pred - target).pow(2).mean(dim=tuple(range(1, target.ndim)))
         if self.density:
-            scale = loss_helper(
-                loss, torch.zeros_like(target), target, self.huber_delta
+            scale = (
+                target.pow(2)
+                .mean(dim=tuple(range(1, target.ndim)))
+                .clamp_min(1e-9)
             )
-            value = value / scale.clamp_min(1e-8)
-        return value
+            err = err / scale
+        return err.mean()
 
     def forward(
         self, pred: torch.Tensor, target: torch.Tensor
     ) -> torch.Tensor:
         """pred, target: (B, C, L). Returns scalar loss."""
-        time_term = self._term(self.time_loss, pred, target)
+        time_term = self._row_term(pred, target)
 
         pred_mag = torch.fft.rfft(pred, dim=-1).abs()
         target_mag = torch.fft.rfft(target, dim=-1).abs()
-        target_mag_raw = target_mag  # keep before msle overwrites it
 
         if self.spectral_loss == "msle":
-            pred_mag = torch.log(pred_mag + self.log_floor)
-            target_mag = torch.log(target_mag + self.log_floor)
-            spectral_term = self._term("mse", pred_mag, target_mag)
-        else:
-            spectral_term = self._term(
-                self.spectral_loss, pred_mag, target_mag
+            # log_b(x) = ln(x) / ln(b)
+            pred_mag = (
+                torch.log(pred_mag + self.log_floor) / self._log_base_scale
             )
+            target_mag = (
+                torch.log(target_mag + self.log_floor) / self._log_base_scale
+            )
+        spectral_term = self._row_term(pred_mag, target_mag)
 
         mix = self.alpha * time_term + (1.0 - self.alpha) * spectral_term
 
-        # spectral roughness term: target |FFT| is smooth in freq, but a
-        # ragged input makes pred jump bin-to-bin. Work in log-magnitude
-        # (scale-free across the many orders |FFT| spans), take the adjacent-
-        # bin difference (the slope / raggedness, level cancels), and match
-        # pred's raggedness to target's -- only EXCESS jag is penalized, real
-        # target structure is left alone.
-        smooth_term = pred_mag.new_zeros(())
-        if self.lambda_smooth > 0.0:
-            log_pred = torch.log(
-                torch.fft.rfft(pred, dim=-1).abs() + self.log_floor
-            )
-            log_target = torch.log(target_mag_raw + self.log_floor)
-            d_pred = log_pred[..., 1:] - log_pred[..., :-1]
-            d_target = log_target[..., 1:] - log_target[..., :-1]
-            diff = d_pred - d_target
-            rough = (
-                diff.pow(2).mean()
-                if self.smooth_loss == "mse"
-                else diff.abs().mean()
-            )
-            if self.density:
-                # normalize by pred's OWN roughness -> "fraction of pred jag
-                # that is excess". Bounded ~[0,1] and O(1) regardless of how
-                # smooth the target is (dividing by target roughness blows up
-                # when the target is smooth).
-                scale = (
-                    d_pred.pow(2).mean()
-                    if self.smooth_loss == "mse"
-                    else d_pred.abs().mean()
-                ).detach()  # scale only -> model can't game the denominator
-                rough = rough / scale.clamp_min(1e-8)
-            smooth_term = rough
-
         # expose raw components (pre-alpha) so the task can log them and
-        # pick alpha / lambda_smooth from their relative scale
+        # pick alpha from their relative scale
         self.last_time_term = time_term.detach()
         self.last_spectral_term = spectral_term.detach()
-        self.last_smooth_term = smooth_term.detach()
-        return mix + self.lambda_smooth * smooth_term
+        return mix
 
 
 class CorrelationDenoiseLoss(nn.Module):

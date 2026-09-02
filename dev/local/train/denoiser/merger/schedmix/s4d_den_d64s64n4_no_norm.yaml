@@ -1,0 +1,23 @@
+# log_floor 1e-3, no normalization (density=false)
+#
+# Per-row time and spectral MSE. density scales each row by its own
+# error-of-predicting-zero. Overrides base.yaml; run via run_denoiser.sh.
+
+trainer:
+  default_root_dir: /home/kyoon/SSM-BNS/aframe/dev/runs/denoiser_4s/train/merger/schedmix/s4d_den_d64s64n4_no_norm
+  logger:
+    init_args:
+      name: schedmix/s4d_den_d64s64n4_no_norm
+      id: schedmix-s4d_den_d64s64n4_no_norm
+      save_dir: /home/kyoon/SSM-BNS/aframe/dev/runs/denoiser_4s/train/merger/schedmix/s4d_den_d64s64n4_no_norm
+
+model:
+  init_args:
+    denoiser_loss:
+      class_path: train.losses.ScheduledMixtureLoss
+      init_args:
+        alpha: 0.5
+        density: false
+        time_loss: mse
+        spectral_loss: msle
+        log_floor: 1e-3

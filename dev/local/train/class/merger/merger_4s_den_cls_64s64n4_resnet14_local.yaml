@@ -61,7 +61,7 @@ model:
         resnet_layers: [2, 2, 2]   # resnet14 convention, PLAIN resnet (no S4D)
         resnet_kernel_size: 3
     denoiser_loss:
-      class_path: train.losses.DynamicMixtureLoss
+      class_path: train.losses.ScheduledMixtureLoss
       init_args:
         alpha: 0.5
         density: true

@@ -1353,6 +1353,66 @@ class DenoiserEvolutionCallback(Callback):
             )
         plt.close(fig)
 
+    def on_test_start(self, trainer, pl_module) -> None:
+        if self.out_dir is None:
+            self.out_dir = Path(trainer.log_dir or ".") / "denoiser_evolution"
+        self.out_dir.mkdir(parents=True, exist_ok=True)
+        self._test_batch = None
+
+    def on_test_batch_start(
+        self, trainer, pl_module, batch, batch_idx, dataloader_idx=0
+    ) -> None:
+        """Capture one post-augmentation test batch."""
+        if getattr(self, "_test_batch", None) is not None:
+            return
+        if not (isinstance(batch, (tuple, list)) and len(batch) >= 2):
+            return
+        X, X_clean = batch[0], batch[1]
+        if not (torch.is_tensor(X) and torch.is_tensor(X_clean)):
+            return
+        n = min(self.n_examples, X.shape[0])
+        self._test_batch = (
+            X[:n].detach().clone(),
+            X_clean[:n].detach().clone(),
+        )
+
+    def on_test_end(self, trainer, pl_module) -> None:
+        """Draw the same time / frequency panels on the test batch.
+
+        With ``waveform_prob=0`` the clean target is identically zero, so
+        this shows what the denoiser emits from noise alone.
+        """
+        batch = getattr(self, "_test_batch", None)
+        if batch is None:
+            return
+
+        noisy, target = batch
+        was_training = pl_module.training
+        pl_module.eval()
+        with torch.no_grad():
+            pred = pl_module(noisy)
+            if isinstance(pred, (tuple, list)):
+                pred = pred[0]
+        if was_training:
+            pl_module.train()
+
+        fig = self._draw(
+            noisy.float().cpu().numpy(),
+            target.float().cpu().numpy(),
+            pred.float().cpu().numpy(),
+            epoch=trainer.current_epoch,
+        )
+        self.out_dir.mkdir(parents=True, exist_ok=True)
+        path = self.out_dir / "test.png"
+        fig.savefig(path, dpi=110, bbox_inches="tight")
+        print(f"[DenoiserEvolutionCallback] wrote {path}")
+
+        if isinstance(trainer.logger, WandbLogger):
+            import wandb
+
+            trainer.logger.experiment.log({"denoiser/test": wandb.Image(fig)})
+        plt.close(fig)
+
     def _assemble_gif(self, frame_paths, gif_name):
         from PIL import Image
 
@@ -1422,8 +1482,13 @@ class DenoiserEvolutionCallback(Callback):
             for k in range(n_ifos):
                 row = e * n_ifos + k
                 # merger = peak amplitude of the clean target; t=0 there,
-                # so pre-merger is negative (relative time to coalescence)
-                merger_idx = int(np.argmax(np.abs(target[e, k])))
+                # so pre-merger is negative (relative time to coalescence).
+                # With no injection the target is all zeros and has no
+                # merger, so fall back to absolute time from kernel start.
+                if np.any(target[e, k]):
+                    merger_idx = int(np.argmax(np.abs(target[e, k])))
+                else:
+                    merger_idx = 0
                 t = (np.arange(length) - merger_idx) / sr
                 mse = float(np.mean((pred[e, k, sl] - target[e, k, sl]) ** 2))
                 ax = axes[row][0]

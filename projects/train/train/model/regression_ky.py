@@ -457,7 +457,7 @@ class DenoisedGaussianNLLRegression(GaussianNLLRegressionAframeCustomLR):
         )
         # denoiser_loss.alpha schedule: {mode, start, end, start_epoch,
         # end_epoch}. mode = constant/linear/cosine. Only applies when
-        # denoiser_loss exposes a mutable .alpha (e.g. DynamicMixtureLoss).
+        # denoiser_loss exposes a mutable .alpha (e.g. ScheduledMixtureLoss).
         self.alpha_schedule = alpha_schedule
 
     def on_train_epoch_start(self):
@@ -592,7 +592,7 @@ class DenoisedGaussianNLLRegression(GaussianNLLRegressionAframeCustomLR):
             on_step=False,
             on_epoch=True,
         )
-        # DynamicMixtureLoss sub-terms (raw, pre-alpha): use their ratio to
+        # ScheduledMixtureLoss sub-terms (raw, pre-alpha): use their ratio to
         # pick alpha so time and spectral terms are comparably weighted
         if hasattr(self.denoiser_loss, "last_time_term"):
             self.log(
@@ -604,13 +604,6 @@ class DenoisedGaussianNLLRegression(GaussianNLLRegressionAframeCustomLR):
             self.log(
                 "train/denoise_spectral",
                 self.denoiser_loss.last_spectral_term,
-                on_step=False,
-                on_epoch=True,
-            )
-        if hasattr(self.denoiser_loss, "last_smooth_term"):
-            self.log(
-                "train/denoise_smooth",
-                self.denoiser_loss.last_smooth_term,
                 on_step=False,
                 on_epoch=True,
             )

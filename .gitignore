@@ -6,3 +6,5 @@
 **/id_rsa
 **/*.hdf5
 **/*.ipynb
+dev/runs/
+denoiser_evolution/

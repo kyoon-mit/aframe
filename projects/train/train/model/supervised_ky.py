@@ -250,6 +250,35 @@ class DenoisedClassification(SupervisedAframeS4CustomLR):
         self.log("lambda/bce", self.lambda_bce, on_epoch=True)
         self.log("lambda/denoise", float(self.lambda_denoise), on_epoch=True)
 
+    def test_step(self, batch, _):
+        """Detection scores plus denoiser reconstruction on test batches.
+
+        The denoising dataset emits ``(X, X_clean, y, params)``, one element
+        wider than the parent's test batch, so the unpacking is overridden
+        here. Denoiser RMS is reported alongside the ranking statistic: with
+        ``waveform_prob=0`` the clean target is identically zero, so
+        ``denoised_rms`` is whatever the denoiser produces from noise alone.
+        """
+        X, X_clean, y, params = batch
+        x_denoised, logit = self.model(self._norm(X))
+        score = logit.reshape(-1)
+
+        denoised_rms = x_denoised.pow(2).mean(dim=-1).sqrt()
+        target_rms = X_clean.pow(2).mean(dim=-1).sqrt()
+        self.log("test/denoised_rms", denoised_rms.mean())
+        self.log("test/target_rms", target_rms.mean())
+        self.log("test/denoise_loss", self.denoiser_loss(x_denoised, X_clean))
+
+        out = {
+            "score": score.detach().cpu(),
+            "label": y.reshape(-1).detach().cpu(),
+            "denoised_rms": denoised_rms.detach().cpu(),
+            "target_rms": target_rms.detach().cpu(),
+        }
+        if isinstance(params, dict) and "snr" in params:
+            out["snr"] = params["snr"].reshape(-1).detach().cpu()
+        return out
+
     def train_step(self, batch):
         X, X_clean, y, _ = batch
         x_denoised, logit = self.model(self._norm(X))

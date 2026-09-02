@@ -14,3 +14,5 @@ from .supervised import (
     SupervisedTimeSpectrogramResNet,
     SupervisedHeterodyneTimeDomainResNet,
 )
+
+from .denoiser import TimeDomainS4Denoiser

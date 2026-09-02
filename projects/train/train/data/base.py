@@ -770,12 +770,12 @@ class BaseAframeDataset(pl.LightningDataModule):
             or self.batches_per_epoch,
         )
 
-    def train_dataloader(
+    def strain_dataloader(
         self,
         fnames: Optional[Sequence[str]] = None,
         batches_per_epoch: Optional[int] = None,
     ) -> torch.utils.data.DataLoader:
-        # build our strain dataset and dataloader
+        """Background strain loader. Override to change how it is built."""
         dataset = Hdf5TimeSeriesDataset(
             fnames if fnames is not None else self.train_fnames,
             channels=self.hparams.ifos,
@@ -785,18 +785,28 @@ class BaseAframeDataset(pl.LightningDataModule):
             coincident=False,
             num_files_per_batch=self.hparams.num_files_per_batch,
         )
-
-        pin_memory = isinstance(
-            self.trainer.accelerator, pl.accelerators.CUDAAccelerator
-        )
         self._logger.debug(
             f"Using {self.num_workers} workers for strain data loading"
         )
-        dataloader = torch.utils.data.DataLoader(
+        return torch.utils.data.DataLoader(
             dataset,
             num_workers=self.num_workers,
-            pin_memory=pin_memory,
+            pin_memory=self.pin_memory,
         )
+
+    @property
+    def pin_memory(self) -> bool:
+        return isinstance(
+            self.trainer.accelerator, pl.accelerators.CUDAAccelerator
+        )
+
+    def train_dataloader(
+        self,
+        fnames: Optional[Sequence[str]] = None,
+        batches_per_epoch: Optional[int] = None,
+    ) -> torch.utils.data.DataLoader:
+        dataloader = self.strain_dataloader(fnames, batches_per_epoch)
+        pin_memory = self.pin_memory
 
         # If we're not loading waveforms from disk, just return
         # the background dataloader
