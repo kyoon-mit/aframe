@@ -1,0 +1,153 @@
+seed_everything: 20260622
+
+trainer:
+  accelerator: auto
+  devices: auto
+  max_epochs: 100000
+  check_val_every_n_epoch: 10
+  log_every_n_steps: 50
+  enable_progress_bar: true
+  default_root_dir: /n/holystore01/LABS/iaifi_lab/Lab/kyoon/aframe/dev/runs/linoss_den_reg_cls/train/class/linoss_den_reg_cls_regdev
+
+  logger:
+    - class_path: train.callbacks.AframeWandbLogger
+      init_args:
+        name: linoss_den_reg_cls_regdev
+        id:   linoss_den_reg_cls_regdev
+        save_dir: /n/holystore01/LABS/iaifi_lab/Lab/kyoon/aframe/dev/runs/linoss_den_reg_cls/train/class/linoss_den_reg_cls_regdev
+        project: BNS-PUBLICATION-CLASS
+
+  callbacks:
+    - class_path: train.utils.jax.save_model.JAXCheckpointManager
+      init_args:
+        monitor: validation/TimeSlideAUROC
+        mode: max
+        save_top_k: 3
+        save_last: true
+    - class_path: lightning.pytorch.callbacks.EarlyStopping
+      init_args:
+        monitor: validation/TimeSlideAUROC
+        mode: max
+        patience: 100000
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: epoch
+
+model:
+  class_path: train.model.jax.JaxDenoiseClassificationAframe
+  init_args:
+    arch:
+      class_path: architectures.regression.RegressionTimeDomainLinOSSDenoiseClassify
+      init_args:
+        num_ifos: 2
+        d_output: 1
+        denoiser_d_model: 128
+        denoiser_d_state: 64
+        denoiser_n_layers: 4
+        denoiser_dropout: 0.0
+        classifier_d_model: 256
+        classifier_d_state: 64
+        classifier_n_layers: 6
+        classifier_dropout: 0.0
+        detach_denoiser: false
+        r_min: 0.9
+        theta_max: 3.14159265359
+        seed: 0
+    metric:
+      class_path: train.metrics.TimeSlideAUROC
+      init_args:
+        max_fpr: 1e-3
+        pool_length: 50
+    metric_full:
+      class_path: train.metrics.TimeSlideAUROC
+      init_args:
+        max_fpr: 1.0
+        pool_length: 50
+    normalize_input: true
+    lambda_denoise: 10.0
+    learning_rate: 1e-3
+    ssm_lr: 1e-2
+    weight_decay: 0.01
+    clip_grad_norm: 1.0
+    lr_scheduler:
+      class_path: train.model.regression_ky.WarmupCosineAnnealingWarmRestarts
+      init_args:
+        warmup_epochs: 10
+        T_0: 100
+        T_mult: 2
+        eta_min: 5.0e-5
+        peak_decay: 0.8
+    lr_scheduler_interval: epoch
+
+    seed: 42
+
+data:
+  class_path: train.data.supervised.DenoisingTimeDomainSupervisedAframeDataset
+  init_args:
+    background_dir: /n/holystore01/LABS/iaifi_lab/Lab/kyoon/DATA/O3a_H1_L1_2048Hz
+    waveforms_dir: /n/holystore01/LABS/iaifi_lab/Lab/kyoon/DATA/aframe_data/train
+    ifos: [H1, L1]
+    sample_rate: 2048
+
+    kernel_length: 4.0
+    left_pad: 3.5
+    right_pad: 0.0
+
+    batch_size: 64
+    batches_per_epoch: 256
+    chunk_size: 2000
+    chunks_per_epoch: 25
+    num_files_per_batch: 1
+
+    fduration: 1.0
+    fftlength: 2.0
+    psd_length: 20.0
+    highpass: 20
+
+    waveform_prob: 0.5
+    swap_prob: 0.0
+    mute_prob: 0.0
+    max_num_workers: 16
+
+    num_valid_views: 4
+    valid_stride: 25
+    valid_livetime: 210000
+
+    snr_sampler:
+      class_path: train.augmentations.SnrSampler
+      init_args:
+        constant_params:
+          index: -2.5
+          maximum: 60.0
+        start_params:
+          minimum: 15.0
+        end_params:
+          minimum: 4.0
+        decay_steps: 5120
+
+    param_transforms:
+      - class_path: train.transforms.ChirpMass
+
+    waveform_sampler:
+      class_path: train.data.waveforms.WaveformLoader
+      init_args:
+        ifos: [H1, L1]
+        sample_rate: 2048
+        num_val_waveforms: 8192
+        val_waveform_file: /n/holystore01/LABS/iaifi_lab/Lab/kyoon/DATA/aframe_data/val/end_o3_ratesandpops_bns_snr4.hdf5
+        training_waveform_path: /n/holystore01/LABS/iaifi_lab/Lab/kyoon/DATA/aframe_data/train/end_o3_ratesandpops_bns_uniform_chirp.hdf5
+
+    dec:
+      class_path: ml4gw.distributions.Cosine
+    psi:
+      class_path: torch.distributions.Uniform
+      init_args:
+        low: 0.0
+        high: 3.14159
+        validate_args: false
+    phi:
+      class_path: torch.distributions.Uniform
+      init_args:
+        low: -3.14159
+        high: 3.14159
+        validate_args: false

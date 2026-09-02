@@ -1,0 +1,27 @@
+# infer config for the S4D merger_4s id2 model (Triton python-backend serve).
+#
+# Geometry MUST match the exported repo (export_s4d_merger_4s.yaml), NOT the
+# offline regression_infer run: the snapshotter/whitener are frozen to
+# inference_sampling_rate=16, batch_size=128, psd_length=20, fduration=1.
+#
+# background_fname, shifts, and the Triton address are supplied per-task on the
+# CLI by merger_s4.slurm (jsonargparse does NOT expand ${VAR} inside YAML).
+
+client:
+  model_name: aframe-stream             # the exported ensemble
+  model_version: -1
+  batch_size: 128
+  # address: set on CLI --client.address ${AFRAME_TRITON_IP}:8001
+
+data:
+  injection_set_fname: /n/holystore01/LABS/iaifi_lab/Lab/kyoon/DATA/aframe_data/test/end_o3_ratesandpops_bns_snr4.hdf5
+  ifos: [H1, L1]
+  inference_sampling_rate: 16
+  batch_size: 128
+  # triton_address: set on CLI --data.triton_address ${AFRAME_TRITON_IP}:8001
+
+postprocessor:
+  psd_length: 20.0
+  fduration: 1.0
+  integration_window_length: 1.0
+  cluster_window_length: 0.5

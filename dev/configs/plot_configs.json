@@ -1,0 +1,202 @@
+{
+  "parameters": {
+    "chirp_mass": {
+      "min": 0.8,
+      "max": 3.0,
+      "bin_size": 0.01,
+      "color": "purple",
+      "alpha": 1.0,
+      "xlabel": "Chirp Mass $[M_\\odot]$",
+      "label": "$\\mathcal{M}_c$"
+    },
+    "mass_ratio": {
+      "min": 0.0,
+      "max": 1.0,
+      "bin_size": 0.01,
+      "color": "green",
+      "alpha": 1.0,
+      "xlabel": "Mass Ratio",
+      "label": "$q$"
+    },
+    "mass_1": {
+      "min": 0.8,
+      "max": 3.0,
+      "bin_size": 0.01,
+      "color": "blue",
+      "alpha": 1.0,
+      "xlabel": "Primary Mass $[M_\\odot]$",
+      "label": "$m_1$"
+    },
+    "mass_2": {
+      "min": 0.8,
+      "max": 3.0,
+      "bin_size": 0.01,
+      "color": "blue",
+      "alpha": 1.0,
+      "xlabel": "Secondary Mass $[M_\\odot]$",
+      "label": "$m_2$"
+    },
+    "a_1": {
+      "min": 0.0,
+      "max": 0.4,
+      "bin_size": 0.008,
+      "color": "blue",
+      "alpha": 1.0,
+      "xlabel": "Primary Dimensionless Spin Magnitude",
+      "label": "$a_1$"
+    },
+    "a_2": {
+      "min": 0.0,
+      "max": 0.4,
+      "bin_size": 0.008,
+      "color": "blue",
+      "alpha": 1.0,
+      "xlabel": "Secondary Dimensionless Spin Magnitude",
+      "label": "$a_2$"
+    },
+    "dec": {
+      "min": -1.57,
+      "max": 1.57,
+      "bin_size": 0.0628,
+      "color": "blue",
+      "alpha": 1.0,
+      "xlabel": "Declination [rad]",
+      "label": "$\\delta$"
+    },
+    "phase": {
+      "min": 0.0,
+      "max": 6.29,
+      "bin_size": 0.1258,
+      "color": "blue",
+      "alpha": 1.0,
+      "xlabel": "Orbital Phase [rad]",
+      "label": "$\\phi$"
+    },
+    "phi_12": {
+      "min": 0.0,
+      "max": 6.29,
+      "bin_size": 0.1258,
+      "color": "blue",
+      "alpha": 1.0,
+      "xlabel": "Azimuthal Angle Between Spins [rad]",
+      "label": "$\\phi_{12}$"
+    },
+    "phi_jl": {
+      "min": 0.0,
+      "max": 6.29,
+      "bin_size": 0.1258,
+      "color": "blue",
+      "alpha": 1.0,
+      "xlabel": "Precession Angle [rad]",
+      "label": "$\\phi_{JL}$"
+    },
+    "psi": {
+      "min": 0.0,
+      "max": 3.15,
+      "bin_size": 0.063,
+      "color": "blue",
+      "alpha": 1.0,
+      "xlabel": "Polarization Angle [rad]",
+      "label": "$\\psi$"
+    },
+    "ra": {
+      "min": 0.0,
+      "max": 6.29,
+      "bin_size": 0.1258,
+      "color": "blue",
+      "alpha": 1.0,
+      "xlabel": "Right Ascension [rad]",
+      "label": "$\\alpha$"
+    },
+    "redshift": {
+      "min": 0.0,
+      "max": 0.15,
+      "bin_size": 0.003,
+      "color": "blue",
+      "alpha": 1.0,
+      "xlabel": "Redshift",
+      "label": "$z$"
+    },
+    "theta_jn": {
+      "min": 0.0,
+      "max": 3.14,
+      "bin_size": 0.0628,
+      "color": "blue",
+      "alpha": 1.0,
+      "xlabel": "Inclination Angle [rad]",
+      "label": "$\\theta_{\\mathrm{jn}}$"
+    },
+    "tilt_1": {
+      "min": 0.0,
+      "max": 3.14,
+      "bin_size": 0.0628,
+      "color": "blue",
+      "alpha": 1.0,
+      "xlabel": "Primary Spin Tilt Angle [rad]",
+      "label": "$\\theta_1$"
+    },
+    "tilt_2": {
+      "min": 0.0,
+      "max": 3.14,
+      "bin_size": 0.0628,
+      "color": "blue",
+      "alpha": 1.0,
+      "xlabel": "Secondary Spin Tilt Angle [rad]",
+      "label": "$\\theta_2$"
+    },
+    "snr": {
+      "min": 0.0,
+      "max": 55.0,
+      "bin_size": 1,
+      "color": "darkblue",
+      "alpha": 1.0,
+      "xlabel": "SNR (combined)",
+      "label": "snr (combined)"
+    },
+    "snr_h1": {
+      "min": 0.0,
+      "max": 55.0,
+      "bin_size": 1,
+      "color": "darkblue",
+      "alpha": 1.0,
+      "xlabel": "SNR (H1)",
+      "label": "snr (H1)"
+    },
+    "snr_l1": {
+      "min": 0.0,
+      "max": 55.0,
+      "bin_size": 1,
+      "color": "darkblue",
+      "alpha": 1.0,
+      "xlabel": "SNR (L1)",
+      "label": "snr (L1)"
+    },
+    "injection_time": {
+      "min": 1256664037.0,
+      "max": 1256798823.0,
+      "bin_size": 1347.8419693803787,
+      "color": "teal",
+      "alpha": 1.0,
+      "xlabel": "injection GPS time [s]",
+      "label": "injection_time"
+    },
+    "shift_h1": {
+      "min": 0.0,
+      "max": 37.0,
+      "bin_size": 1.0,
+      "color": "olive",
+      "alpha": 1.0,
+      "xlabel": "time shift H1 [s]",
+      "label": "shift_h1"
+    },
+    "shift_l1": {
+      "min": 0.0,
+      "max": 37.0,
+      "bin_size": 1.0,
+      "color": "olive",
+      "alpha": 1.0,
+      "xlabel": "time shift L1 [s]",
+      "label": "shift_l1"
+    }
+  }
+}
