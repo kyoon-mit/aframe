@@ -10,11 +10,6 @@
 # Submit as an array 0..NSHARD-1; shard k streams BRLIST[k::NSHARD].
 # Required env: NSHARD REPO RESULTS CONFIG BRLIST  (REPO/RESULTS are TS-relative,
 # BRLIST is an ABSOLUTE path on SHARED fs -- never node-local /tmp).
-# Optional env: CACHE_REL -- if set and a per-branch injections.hdf5 exists
-# there (see step0_cache.slurm), step1 loads it via injection_set_fname
-# override instead of the full injection set. Avoids the ~10+min fancy-index
-# HDF5 read per branch eating scarce gpu_test time; see
-# project_sv_pipeline_gotchas / the co_shard-cpu-split note.
 #SBATCH --job-name=sv_coshard
 #SBATCH --partition=gpu_test
 #SBATCH --gres=gpu:1
@@ -50,15 +45,9 @@ for ((k=SHARD; k<${#BR[@]}; k+=NSHARD)); do
   line=$(sed -n "$((idx+1))p" "$JOBDIR/branches.txt")
   bg=$(echo "$line"|cut -d' ' -f1); sh=$(echo "$line"|cut -d' ' -f2)
   echo "shard $SHARD -> branch $idx"
-  INJECT_OVERRIDE=()
-  if [ -n "${CACHE_REL:-}" ] && [ -s "$TS/$CACHE_REL/branch_$idx/injections.hdf5" ]; then
-    TRUE_INJECT=$(grep -A2 'injection_set_fname:' "$CONFIG" | head -1 | sed 's/.*injection_set_fname:\s*//')
-    INJECT_OVERRIDE=(--data.injection_set_fname "$TS/$CACHE_REL/branch_$idx/injections.hdf5" \
-                      --true_injection_set_fname "$TRUE_INJECT")
-  fi
   uv run python "$STEPS/step1_raw_scores.py" \
     --config "$CONFIG" --client.address "$ADDR" --data.triton_address "$ADDR" \
-    --data.background_fname "$bg" --data.shifts "$sh" "${INJECT_OVERRIDE[@]}" \
+    --data.background_fname "$bg" --data.shifts "$sh" \
     --outdir "$TS/$RESULTS/branch_$idx" || echo "branch $idx FAILED"
 done
 kill $SPID 2>/dev/null

@@ -103,17 +103,6 @@ def save_raw_scores(
 
 def main():
     parser = build_parser()
-    parser.add_argument(
-        "--true_injection_set_fname",
-        default=None,
-        help=(
-            "Provenance override: the ORIGINAL injection set this run's "
-            "data.injection_set_fname was cached/extracted from (see "
-            "step0_cache_injections.py). Recorded in timeseries.hdf5 "
-            "instead of the (possibly cached) --data.injection_set_fname, "
-            "so provenance still points at the real source."
-        ),
-    )
     cfg = parser.parse_args()
 
     # capture the postprocessor/data settings before the classes are built,
@@ -128,9 +117,7 @@ def main():
         "cluster_window_length": float(
             cfg.postprocessor.cluster_window_length
         ),
-        "injection_set_fname": str(
-            cfg.true_injection_set_fname or cfg.data.injection_set_fname
-        ),
+        "injection_set_fname": str(cfg.data.injection_set_fname),
     }
     output_dir = cfg.outdir
     os.makedirs(output_dir, exist_ok=True)

@@ -103,17 +103,9 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--dir", required=True, help="dir with the CSVs")
     ap.add_argument("--dist", default="", help="powerlaw/uniform title tag")
-    ap.add_argument(
-        "--snr_max",
-        type=float,
-        default=None,
-        help="drop rows with snr above this before plotting (e.g. 50)",
-    )
     args = ap.parse_args()
 
     sig = pd.read_csv(os.path.join(args.dir, "param_est_results.csv"))
-    if args.snr_max is not None and "snr" in sig:
-        sig = sig[sig["snr"] <= args.snr_max].reset_index(drop=True)
     t = sig["chirp_mass_true"].to_numpy()
     p = sig["chirp_mass_pred"].to_numpy()
     s = sig["sigma_chirp_mass_pred"].to_numpy()
