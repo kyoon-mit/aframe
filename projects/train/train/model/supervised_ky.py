@@ -373,3 +373,90 @@ class DenoisedClassification(SupervisedAframeS4CustomLR):
                 on_epoch=True,
             )
         return loss
+
+
+class StagedDenoisedClassification(DenoisedClassification):
+    """Denoise first, then freeze the denoiser and train the classifier.
+
+    One run, two phases, with the switch at ``freeze_epoch``:
+
+    * before it, ``lambda_bce`` is zero, so only the denoiser trains, and
+      the datamodule injects into every sample (``waveform_prob=1.0``)
+      since a background-only row teaches a denoiser nothing;
+    * from it onward the denoiser is frozen and the classifier trains,
+      and ``waveform_prob`` drops to ``classify_waveform_prob`` so the
+      classifier sees the background rows it needs to separate signal
+      from noise.
+
+    Freezing is three separate things, not just ``requires_grad``: the
+    parameters are also dropped from the optimizer, since AdamW weight
+    decay would keep shrinking them with no gradient, and the denoiser is
+    kept in eval mode so its dropout does not leave the classifier
+    chasing a moving input.
+
+    ``bce_schedule`` is derived from ``freeze_epoch`` rather than given
+    separately, so the two can never disagree about when the handover is.
+
+    Args:
+        freeze_epoch: epoch at which the denoiser freezes and the
+            classifier starts training.
+        denoise_waveform_prob: injection probability while denoising.
+        classify_waveform_prob: injection probability once classifying.
+    """
+
+    def __init__(
+        self,
+        *args,
+        freeze_epoch: int = 300,
+        denoise_waveform_prob: float = 1.0,
+        classify_waveform_prob: float = 0.5,
+        **kwargs,
+    ):
+        # BCE is off until the freeze epoch, then full weight. Two points
+        # one epoch apart make it a step rather than a ramp.
+        kwargs.setdefault(
+            "bce_schedule",
+            [[0, 0.0], [freeze_epoch - 1, 0.0], [freeze_epoch, 1.0]],
+        )
+        super().__init__(*args, **kwargs)
+        self.freeze_epoch = freeze_epoch
+        self.denoise_waveform_prob = denoise_waveform_prob
+        self.classify_waveform_prob = classify_waveform_prob
+
+    @property
+    def classifying(self) -> bool:
+        return self.current_epoch >= self.freeze_epoch
+
+    def _set_waveform_prob(self, prob: float) -> None:
+        """Retarget the datamodule's injection rate.
+
+        ``inject`` reads ``waveform_prob`` from hparams on every batch, so
+        setting it here takes effect from the next batch on.
+        """
+        datamodule = getattr(self.trainer, "datamodule", None)
+        if datamodule is None:
+            return
+        if datamodule.hparams.waveform_prob != prob:
+            datamodule.hparams.waveform_prob = prob
+            self._logger.info(f"waveform_prob set to {prob}")
+
+    def on_train_epoch_start(self):
+        super().on_train_epoch_start()
+
+        if self.classifying:
+            self._set_waveform_prob(self.classify_waveform_prob)
+            # freeze once, on the first classifier epoch
+            if not self.freeze_denoiser:
+                self.freeze_denoiser = True
+                self._freeze_denoiser()
+                # the optimizer still holds the now-frozen tensors, so
+                # rebuild it to drop them and their weight decay
+                self.trainer.strategy.setup_optimizers(self.trainer)
+                self._logger.info(
+                    f"epoch {self.current_epoch}: denoiser frozen, "
+                    "classifier training"
+                )
+        else:
+            self._set_waveform_prob(self.denoise_waveform_prob)
+
+        self.log("stage/classifying", float(self.classifying), on_epoch=True)
