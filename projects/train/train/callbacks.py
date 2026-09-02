@@ -43,6 +43,13 @@ class AframeWandbLogger(WandbLogger):
         prefix: str = "",
         checkpoint_name: Optional[str] = None,
     ):
+        # wandb decides where to put its run data with
+        # os.access(save_dir, W_OK), which is False for a directory that
+        # does not exist yet. Lightning creates save_dir, but only after
+        # the logger is built, so on a fresh run wandb would report
+        # "wasn't writable", fall back to the node's /tmp, and lose the
+        # local run data when the job ends. Create it first.
+        Path(save_dir).mkdir(parents=True, exist_ok=True)
         super().__init__(
             name=name,
             save_dir=save_dir,
