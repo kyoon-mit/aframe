@@ -16,3 +16,4 @@ from .supervised import (
 )
 
 from .denoiser import TimeDomainS4Denoiser
+from .spline_denoiser import SplineS4Denoiser

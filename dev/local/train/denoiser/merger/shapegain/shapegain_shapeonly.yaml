@@ -1,0 +1,21 @@
+# Shape-dominated control: gain and time anchors nearly off.
+# Isolates how much correlation the architecture can reach when nothing
+# pulls on amplitude, giving the ceiling on rho for this model size.
+
+trainer:
+  default_root_dir: /home/kyoon/SSM-BNS/aframe/dev/runs/denoiser_4s/train/merger/shapegain/shapegain_shapeonly
+  logger:
+    init_args:
+      name: claude_shapegain_shapeonly
+      id: claude-shapegain_shapeonly
+      save_dir: /home/kyoon/SSM-BNS/aframe/dev/runs/denoiser_4s/train/merger/shapegain/shapegain_shapeonly
+
+model:
+  init_args:
+    denoiser_loss:
+      class_path: train.losses.ShapeGainLoss
+      init_args:
+        lambda_gain: 0.05
+        lambda_time: 0.1
+        lambda_bkg: 1.0
+        sig_thresh: 0.5

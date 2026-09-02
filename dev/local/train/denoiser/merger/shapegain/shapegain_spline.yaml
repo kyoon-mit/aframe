@@ -1,0 +1,42 @@
+# Shape/gain objective with a B-spline output basis.
+#
+# The output is a weighted sum of cubic B-splines with knots every 16 samples,
+# so a one-sample window-edge impulse (the measured failure of the magnitude
+# spectrum losses) cannot be represented at all: a least-squares projection of
+# such an impulse onto this basis leaves 88% residual. Also cuts the output
+# dimension from 8192 to 515 coefficients per channel, which is the variance
+# reduction that should show up as smoother training.
+
+trainer:
+  default_root_dir: /home/kyoon/SSM-BNS/aframe/dev/runs/denoiser_4s/train/merger/shapegain/shapegain_spline
+  logger:
+    init_args:
+      name: claude_shapegain_spline
+      id: claude-shapegain_spline
+      save_dir: /home/kyoon/SSM-BNS/aframe/dev/runs/denoiser_4s/train/merger/shapegain/shapegain_spline
+
+model:
+  init_args:
+    arch:
+      class_path: architectures.spline_denoiser.SplineS4Denoiser
+      init_args:
+        num_ifos: 2
+        kernel_length: 4.0
+        sample_rate: 2048
+        stride: 16
+        d_model: 64
+        d_state: 64
+        n_layers: 4
+        dropout: 0.2
+        prenorm: false
+        num_groups: 32
+        dt_min: 1e-4
+        dt_max: 10.0
+
+    denoiser_loss:
+      class_path: train.losses.ShapeGainLoss
+      init_args:
+        lambda_gain: 0.3
+        lambda_time: 1.0
+        lambda_bkg: 1.0
+        sig_thresh: 0.5

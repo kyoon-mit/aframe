@@ -108,6 +108,9 @@ class Denoiser(AframeBase):
         for attribute, name in (
             ("last_time_term", "den_time_loss"),
             ("last_spectral_term", "den_freq_loss"),
+            ("last_shape_term", "den_shape_loss"),
+            ("last_gain_term", "den_gain_loss"),
+            ("last_bkg_term", "den_bkg_loss"),
         ):
             value = getattr(self.denoiser_loss, attribute, None)
             if value is not None:
@@ -142,6 +145,35 @@ class Denoiser(AframeBase):
             self.log(f"{stage}/target_rms", target_rms)
             # signed: positive means the denoiser is over-predicting
             self.log(f"{stage}/diff_pred_target_rms", pred_rms - target_rms)
+
+            # Loss-independent reconstruction quality. rho is the number that
+            # actually says whether the waveform was recovered: it is scale
+            # free and phase sensitive, so an edge impulse or a shrunken copy
+            # both score near zero. gain is the realised amplitude ratio, and
+            # early_frac says how much power sits at the leading window edge
+            # (the failure mode of the magnitude-spectrum losses).
+            p = denoised.reshape(denoised.shape[0], -1)
+            t = X_clean.reshape(X_clean.shape[0], -1)
+            tt = t.pow(2).sum(-1)
+            sig = tt.sqrt() > 0.5
+            if sig.any():
+                ps, ts = p[sig], t[sig]
+                pn = ps.pow(2).sum(-1).sqrt()
+                tn = ts.pow(2).sum(-1).sqrt()
+                self.log(
+                    f"{stage}/rho",
+                    ((ps * ts).sum(-1) / (pn * tn).clamp_min(1e-12)).mean(),
+                )
+                self.log(f"{stage}/gain", (pn / tn.clamp_min(1e-12)).mean())
+            n_early = max(1, denoised.shape[-1] // 20)
+            energy = denoised.pow(2).sum(-2)
+            self.log(
+                f"{stage}/early_frac",
+                (
+                    energy[..., :n_early].sum(-1)
+                    / energy.sum(-1).clamp_min(1e-12)
+                ).mean(),
+            )
 
         return loss
 
@@ -181,20 +213,29 @@ class Denoiser(AframeBase):
             else:
                 other_params.append(parameter)
 
-        optimizer = torch.optim.AdamW(
-            [
-                {
-                    "params": other_params,
-                    "lr": lr,
-                    "weight_decay": self.hparams.weight_decay,
-                },
-                {
-                    "params": ssm_params,
-                    "lr": self.hparams.ssm_lr,
-                    "weight_decay": 0.0,
-                },
-            ]
-        )
+        param_groups = [
+            {
+                "params": other_params,
+                "lr": lr,
+                "weight_decay": self.hparams.weight_decay,
+            },
+            {
+                "params": ssm_params,
+                "lr": self.hparams.ssm_lr,
+                "weight_decay": 0.0,
+            },
+        ]
+
+        # A loss may carry its own parameters (ShapeGainLoss with
+        # learn_weights uses free log-variances). They live outside
+        # self.model, so add them explicitly or they would never be updated.
+        loss_params = list(self.denoiser_loss.parameters())
+        if loss_params:
+            param_groups.append(
+                {"params": loss_params, "lr": lr, "weight_decay": 0.0}
+            )
+
+        optimizer = torch.optim.AdamW(param_groups)
 
         if self._lr_scheduler_factory is not None:
             scheduler = self._lr_scheduler_factory(optimizer)

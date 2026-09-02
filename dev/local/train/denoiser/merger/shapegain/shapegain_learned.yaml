@@ -1,0 +1,22 @@
+# Learned uncertainty weighting: s_k are free parameters.
+# loss = sum_k exp(-s_k) * term_k + s_k. The +s_k regulariser prevents the
+# trivial s_k -> inf solution. Removes the need to hand-tune the weights.
+
+trainer:
+  default_root_dir: /home/kyoon/SSM-BNS/aframe/dev/runs/denoiser_4s/train/merger/shapegain/shapegain_learned
+  logger:
+    init_args:
+      name: claude_shapegain_learned
+      id: claude-shapegain_learned
+      save_dir: /home/kyoon/SSM-BNS/aframe/dev/runs/denoiser_4s/train/merger/shapegain/shapegain_learned
+
+model:
+  init_args:
+    denoiser_loss:
+      class_path: train.losses.ShapeGainLoss
+      init_args:
+        lambda_gain: 0.3
+        lambda_time: 1.0
+        lambda_bkg: 1.0
+        sig_thresh: 0.5
+        learn_weights: true

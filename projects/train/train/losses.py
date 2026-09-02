@@ -162,6 +162,127 @@ class ScheduledMixtureLoss(nn.Module):
         return mix
 
 
+class ShapeGainLoss(nn.Module):
+    """Scale-free shape term plus an explicit gain term.
+
+    Written against a measured failure of the magnitude-spectrum mixture: the
+    trained ``ScheduledMixtureLoss`` models put ~98% of their output power in
+    the first 5% of the kernel, with correlation to the target consistent with
+    zero, because ``|FFT|`` discards phase and so cannot tell a chirp from a
+    window-edge impulse. Two independent quantities are therefore supervised:
+
+    ``shape``  1 - rho, where rho is the normalized inner product between
+        prediction and target over (channel, time). Phase sensitive, so an
+        edge impulse cannot satisfy it, and scale invariant, so it cannot be
+        reduced by shrinking the output.
+    ``gain``   (log c*)**2, where c* is the least-squares rescaling of the
+        prediction onto the target. Zero exactly at the right amplitude and
+        indifferent to shape, so it does not fight the shape term.
+
+    A small absolute time-domain anchor (``lambda_time``) keeps the output on
+    an absolute scale. Rows whose target is essentially empty (background,
+    ``||target|| < sig_thresh``) are excluded from shape and gain, which are
+    undefined there, and are instead driven to zero by ``lambda_bkg``.
+
+    Args:
+        lambda_gain: weight on the gain term. Larger forces amplitude harder;
+            some shrinkage is statistically correct at low SNR, so this is the
+            knob for that trade-off.
+        lambda_time: weight on the plain per-row MSE anchor.
+        lambda_bkg: weight on the mean square of the prediction for noise-only
+            rows. Only active when the batch contains such rows.
+        sig_thresh: ||target|| below which a row counts as noise-only.
+        learn_weights: if True, replace the fixed weights above with learned
+            uncertainty weighting (Kendall et al.): each term k is scaled by
+            exp(-s_k) and regularized by +s_k, with s_k a free parameter. The
+            +s_k prevents the trivial s_k -> +inf solution. lambda_* then act
+            as the initial relative scales.
+        eps: numerical floor.
+    """
+
+    TERMS = ("shape", "gain", "time", "bkg")
+
+    def __init__(
+        self,
+        lambda_gain: float = 0.3,
+        lambda_time: float = 1.0,
+        lambda_bkg: float = 1.0,
+        sig_thresh: float = 0.5,
+        learn_weights: bool = False,
+        eps: float = 1e-8,
+    ):
+        super().__init__()
+        for name, value in (
+            ("lambda_gain", lambda_gain),
+            ("lambda_time", lambda_time),
+            ("lambda_bkg", lambda_bkg),
+        ):
+            if value < 0.0:
+                raise ValueError(f"{name} must be >= 0, got {value}")
+        if sig_thresh < 0.0:
+            raise ValueError(f"sig_thresh must be >= 0, got {sig_thresh}")
+        self.lambda_gain = lambda_gain
+        self.lambda_time = lambda_time
+        self.lambda_bkg = lambda_bkg
+        self.sig_thresh = sig_thresh
+        self.learn_weights = learn_weights
+        self.eps = eps
+        if learn_weights:
+            # s_k = log(sigma_k**2); init so exp(-s_k) matches the fixed
+            # weights, keeping the two modes comparable at step 0
+            init = [
+                -math.log(max(w, 1e-6))
+                for w in (1.0, lambda_gain, lambda_time, lambda_bkg)
+            ]
+            self.log_var = nn.Parameter(torch.tensor(init))
+
+    def forward(
+        self, pred: torch.Tensor, target: torch.Tensor
+    ) -> torch.Tensor:
+        """pred, target: (B, C, L). Returns scalar loss."""
+        p = pred.reshape(pred.shape[0], -1)
+        t = target.reshape(target.shape[0], -1)
+
+        pt = (p * t).sum(-1)
+        pp = p.pow(2).sum(-1)
+        tt = t.pow(2).sum(-1)
+
+        sig = tt.sqrt() > self.sig_thresh
+        zero = pred.new_zeros(())
+
+        if sig.any():
+            rho = pt[sig] / (pp[sig].sqrt() * tt[sig].sqrt() + self.eps)
+            shape_term = (1.0 - rho).mean()
+            # c* = <p,t>/<p,p>, the best rescale of pred onto target
+            c_star = pt[sig] / pp[sig].clamp_min(self.eps)
+            gain_term = torch.log(c_star.clamp_min(self.eps)).pow(2).mean()
+        else:
+            shape_term = zero
+            gain_term = zero
+
+        time_term = (p - t).pow(2).mean(-1).mean()
+        if (~sig).any():
+            bkg_term = p[~sig].pow(2).mean()
+        else:
+            bkg_term = zero
+
+        terms = torch.stack([shape_term, gain_term, time_term, bkg_term])
+        if self.learn_weights:
+            total = (torch.exp(-self.log_var) * terms + self.log_var).sum()
+        else:
+            weights = terms.new_tensor(
+                [1.0, self.lambda_gain, self.lambda_time, self.lambda_bkg]
+            )
+            total = (weights * terms).sum()
+
+        # exposed for logging, matching the names the task looks for
+        self.last_shape_term = shape_term.detach()
+        self.last_gain_term = gain_term.detach()
+        self.last_time_term = time_term.detach()
+        self.last_bkg_term = bkg_term.detach()
+        return total
+
+
 class CorrelationDenoiseLoss(nn.Module):
     """Scale-invariant matched-filter denoiser loss.
 

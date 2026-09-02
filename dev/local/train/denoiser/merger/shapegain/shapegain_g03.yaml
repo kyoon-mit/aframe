@@ -1,0 +1,21 @@
+# Baseline shape/gain: fixed weights, moderate gain pressure.
+# Tests whether a phase-sensitive scale-free shape term alone removes the
+# edge-impulse failure mode of the magnitude-spectrum losses.
+
+trainer:
+  default_root_dir: /home/kyoon/SSM-BNS/aframe/dev/runs/denoiser_4s/train/merger/shapegain/shapegain_g03
+  logger:
+    init_args:
+      name: claude_shapegain_g03
+      id: claude-shapegain_g03
+      save_dir: /home/kyoon/SSM-BNS/aframe/dev/runs/denoiser_4s/train/merger/shapegain/shapegain_g03
+
+model:
+  init_args:
+    denoiser_loss:
+      class_path: train.losses.ShapeGainLoss
+      init_args:
+        lambda_gain: 0.3
+        lambda_time: 1.0
+        lambda_bkg: 1.0
+        sig_thresh: 0.5

@@ -1,0 +1,21 @@
+# Stronger amplitude pressure (lambda_gain 1.0).
+# Exact recovery needs gain 1; this asks how hard amplitude can be forced
+# before it starts costing shape at low SNR.
+
+trainer:
+  default_root_dir: /home/kyoon/SSM-BNS/aframe/dev/runs/denoiser_4s/train/merger/shapegain/shapegain_g10
+  logger:
+    init_args:
+      name: claude_shapegain_g10
+      id: claude-shapegain_g10
+      save_dir: /home/kyoon/SSM-BNS/aframe/dev/runs/denoiser_4s/train/merger/shapegain/shapegain_g10
+
+model:
+  init_args:
+    denoiser_loss:
+      class_path: train.losses.ShapeGainLoss
+      init_args:
+        lambda_gain: 1.0
+        lambda_time: 1.0
+        lambda_bkg: 1.0
+        sig_thresh: 0.5
