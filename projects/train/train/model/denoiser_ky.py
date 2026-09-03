@@ -183,22 +183,10 @@ class Denoiser(AframeBase):
         return loss
 
     def _accumulate_term_gradients(self, denoised, X_clean) -> None:
-        """Measure each loss term's gradient norm wrt the prediction.
+        """Accumulate each loss term's gradient norm for this epoch.
 
-        Which term actually drives the update is not visible from the term
-        values: a mixture is led by whichever term has the larger gradient,
-        and for a time-vs-spectral mixture that balance moves with waveform
-        amplitude, which the SNR curriculum changes during a run.
-
-        Measured on every ``log_grad_every`` batch and accumulated, then
-        averaged once per epoch by ``on_train_epoch_end``. A single batch is
-        far too noisy to read: the spectral gradient norm has been measured
-        to vary by more than its own size between batches.
-
-        Each term's norm is logged on its own. Their relative size is the
-        question of interest, but leaving them separate keeps the choice of
-        how to summarise it (arithmetic or geometric mean of the ratio, say)
-        open at analysis time rather than fixing it here.
+        Runs on every ``log_grad_every`` batch; ``on_train_epoch_end``
+        averages and logs the totals as ``grad/<term>``.
         """
         if self.global_step % self.hparams.log_grad_every:
             return

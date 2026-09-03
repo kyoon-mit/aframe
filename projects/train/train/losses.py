@@ -47,11 +47,9 @@ def loss_helper(
 
 
 class TermStashMixin:
-    """Stash per-term loss values for logging, optionally keeping the graph.
+    """Stash per-term loss values as ``last_<name>_term`` attributes.
 
-    Terms are detached by default, since they are logged rather than
-    backpropagated. ``term_gradient_norms`` flips ``keep_term_graph`` for a
-    single call so each term can be differentiated separately.
+    Detached unless ``keep_term_graph`` is set.
     """
 
     keep_term_graph = False
@@ -71,17 +69,11 @@ def term_gradient_norms(
     pred: torch.Tensor,
     target: torch.Tensor,
 ) -> dict:
-    """Gradient norm of each loss term wrt the prediction.
+    """Gradient norm of each loss term with respect to the prediction.
 
-    Term values do not say which term drives the update; gradient norms do.
-    For a time-vs-spectral mixture that balance moves with waveform
-    amplitude, which the SNR curriculum changes mid-run.
-
-    Differentiates wrt the prediction, not the parameters: it is what the
-    terms share, and costs one backward through the loss only.
-
-    Picks up any ``last_<name>_term`` attribute. Returns
-    ``{name_value, name_gradnorm}``; empty if the loss exposes no terms.
+    Reads every ``last_<name>_term`` attribute the loss stashes and
+    differentiates each separately. Returns ``{<name>_value,
+    <name>_gradnorm}``, or ``{}`` if the loss stashes no terms.
     """
     prediction = pred.detach().clone().requires_grad_(True)
     target = target.detach()

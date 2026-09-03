@@ -1551,3 +1551,82 @@ class DenoiserEvolutionCallback(Callback):
         fig.suptitle(f"epoch {epoch}", fontsize=12)
         fig.tight_layout(rect=[0, 0, 1, 0.98])
         return fig
+
+
+class ReferenceEventCallback(DenoiserEvolutionCallback):
+    """Plot the denoiser on a fixed set of events loaded from an HDF5 file.
+
+    The parent class captures whichever batch training happens to hand it,
+    so the events change from run to run and the resulting plots cannot be
+    compared across variants. This one reads a curated file instead, built
+    by DATA/aframe/plot/scripts/build_plot_events.py, so every run plots the
+    same signals: several signal-to-noise ratios, one injection on a glitch,
+    and one background-only stretch.
+
+    The file supplies ``noisy`` and ``clean`` arrays of shape
+    ``(events, ifos, samples)`` plus a ``names`` list and a ``sample_rate``
+    attribute. Everything else, drawing and logging included, is inherited.
+
+    Args:
+        events_file: HDF5 file holding the reference events.
+        every_n_epochs: epochs between plots.
+        out_dir: where to write frames; defaults to the trainer log dir.
+    """
+
+    def __init__(
+        self,
+        events_file: str,
+        every_n_epochs: int = 1,
+        out_dir: Optional[str] = None,
+        show_input: bool = True,
+        gif_fps: int = 4,
+        max_gif_frames: int = 200,
+    ):
+        super().__init__(
+            n_examples=0,
+            every_n_epochs=every_n_epochs,
+            sample_rate=None,
+            show_input=show_input,
+            out_dir=out_dir,
+            gif_fps=gif_fps,
+            max_gif_frames=max_gif_frames,
+        )
+        self.events_file = events_file
+        self.names = None
+
+    def on_fit_start(self, trainer, pl_module) -> None:
+        super().on_fit_start(trainer, pl_module)
+        with h5py.File(self.events_file) as handle:
+            noisy = torch.tensor(handle["noisy"][:], dtype=torch.float32)
+            clean = torch.tensor(handle["clean"][:], dtype=torch.float32)
+            self.names = [name.decode() for name in handle["names"][:]]
+            self.sample_rate = float(handle.attrs["sample_rate"])
+        device = pl_module.device
+        self._fixed_batch = (noisy.to(device), clean.to(device))
+        self.n_examples = noisy.shape[0]
+        print(
+            f"[ReferenceEventCallback] {noisy.shape[0]} events from "
+            f"{self.events_file}: {', '.join(self.names)}"
+        )
+
+    def on_train_batch_start(
+        self, trainer, pl_module, batch, batch_idx
+    ) -> None:
+        """The reference batch comes from disk, so ignore training batches."""
+        return
+
+    def _draw(self, noisy, target, pred, epoch):
+        """Draw as the parent does, then name each row by its event."""
+        fig = super()._draw(noisy, target, pred, epoch)
+        if not self.names:
+            return fig
+        n_ifos = target.shape[1]
+        # the parent lays out one row per (event, ifo) pair, event-major,
+        # and puts the time panel and the frequency panel side by side, so
+        # the time axes are every other entry of fig.axes
+        time_axes = fig.axes[: 2 * len(self.names) * n_ifos : 2]
+        for row, ax in enumerate(time_axes):
+            event, ifo = divmod(row, n_ifos)
+            if event < len(self.names):
+                ax.set_ylabel(f"{self.names[event]} / ifo {ifo}")
+        return fig
