@@ -83,37 +83,51 @@ def term_gradient_norms(
     Picks up any ``last_<name>_term`` attribute. Returns
     ``{name_value, name_gradnorm}``; empty if the loss exposes no terms.
     """
-    p = pred.detach().clone().requires_grad_(True)
-    t = target.detach()
+    prediction = pred.detach().clone().requires_grad_(True)
+    target = target.detach()
 
-    # Terms are stashed detached (they are logged, not backpropagated), so
-    # ask the loss to keep them attached for this one call. A loss that does
-    # not support it yields values only, and the norms are simply absent.
-    keep = getattr(loss_fn, "keep_term_graph", None)
-    if keep is None:
+    # Terms are stashed detached, since they exist to be logged and holding
+    # their graphs would leak memory every step. Flip the flag for this one
+    # call so they can be differentiated, then restore it. A loss without
+    # the mixin has nothing to flip, so return nothing.
+    previous = getattr(loss_fn, "keep_term_graph", None)
+    if previous is None:
         return {}
-    was, loss_fn.keep_term_graph = keep, True
+    loss_fn.keep_term_graph = True
     try:
-        loss_fn(p, t)
+        loss_fn(prediction, target)
         terms = {
-            a[len("last_") : -len("_term")]: getattr(loss_fn, a)
-            for a in dir(loss_fn)
-            if a.startswith("last_") and a.endswith("_term")
-        }
-        out = {}
-        live = [(n, v) for n, v in terms.items()
-                if torch.is_tensor(v) and v.requires_grad]
-        for i, (name, value) in enumerate(live):
-            out[f"{name}_value"] = float(value.detach())
-            (g,) = torch.autograd.grad(
-                value, p, retain_graph=i < len(live) - 1, allow_unused=True
+            attribute[len("last_") : -len("_term")]: getattr(
+                loss_fn, attribute
             )
-            out[f"{name}_gradnorm"] = 0.0 if g is None else float(g.norm())
+            for attribute in dir(loss_fn)
+            if attribute.startswith("last_") and attribute.endswith("_term")
+        }
+        stats = {}
+        differentiable = [
+            (name, value)
+            for name, value in terms.items()
+            if torch.is_tensor(value) and value.requires_grad
+        ]
+        for index, (name, value) in enumerate(differentiable):
+            stats[f"{name}_value"] = float(value.detach())
+            # the graph is shared across terms, so keep it until the last one
+            (gradient,) = torch.autograd.grad(
+                value,
+                prediction,
+                retain_graph=index < len(differentiable) - 1,
+                allow_unused=True,
+            )
+            stats[f"{name}_gradnorm"] = (
+                0.0 if gradient is None else float(gradient.norm())
+            )
+        # a term that carries no gradient (an inactive branch, say) still has
+        # a value worth logging
         for name, value in terms.items():
-            out.setdefault(f"{name}_value", float(value.detach()))
+            stats.setdefault(f"{name}_value", float(value.detach()))
     finally:
-        loss_fn.keep_term_graph = was
-    return out
+        loss_fn.keep_term_graph = previous
+    return stats
 
 
 class ScheduledMixtureLoss(TermStashMixin, nn.Module):
