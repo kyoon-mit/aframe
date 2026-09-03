@@ -46,7 +46,77 @@ def loss_helper(
     raise ValueError(f"Unknown loss {loss!r}. Choose one of {LOSS_FUNCTIONS}.")
 
 
-class ScheduledMixtureLoss(nn.Module):
+class TermStashMixin:
+    """Stash per-term loss values for logging, optionally keeping the graph.
+
+    Terms are detached by default, since they are logged rather than
+    backpropagated. ``term_gradient_norms`` flips ``keep_term_graph`` for a
+    single call so each term can be differentiated separately.
+    """
+
+    keep_term_graph = False
+
+    def _stash(self, **terms) -> None:
+        for name, value in terms.items():
+            setattr(
+                self,
+                f"last_{name}_term",
+                value if self.keep_term_graph else value.detach(),
+            )
+
+
+@torch.enable_grad()
+def term_gradient_norms(
+    loss_fn: nn.Module,
+    pred: torch.Tensor,
+    target: torch.Tensor,
+) -> dict:
+    """Gradient norm of each loss term wrt the prediction.
+
+    Term values do not say which term drives the update; gradient norms do.
+    For a time-vs-spectral mixture that balance moves with waveform
+    amplitude, which the SNR curriculum changes mid-run.
+
+    Differentiates wrt the prediction, not the parameters: it is what the
+    terms share, and costs one backward through the loss only.
+
+    Picks up any ``last_<name>_term`` attribute. Returns
+    ``{name_value, name_gradnorm}``; empty if the loss exposes no terms.
+    """
+    p = pred.detach().clone().requires_grad_(True)
+    t = target.detach()
+
+    # Terms are stashed detached (they are logged, not backpropagated), so
+    # ask the loss to keep them attached for this one call. A loss that does
+    # not support it yields values only, and the norms are simply absent.
+    keep = getattr(loss_fn, "keep_term_graph", None)
+    if keep is None:
+        return {}
+    was, loss_fn.keep_term_graph = keep, True
+    try:
+        loss_fn(p, t)
+        terms = {
+            a[len("last_") : -len("_term")]: getattr(loss_fn, a)
+            for a in dir(loss_fn)
+            if a.startswith("last_") and a.endswith("_term")
+        }
+        out = {}
+        live = [(n, v) for n, v in terms.items()
+                if torch.is_tensor(v) and v.requires_grad]
+        for i, (name, value) in enumerate(live):
+            out[f"{name}_value"] = float(value.detach())
+            (g,) = torch.autograd.grad(
+                value, p, retain_graph=i < len(live) - 1, allow_unused=True
+            )
+            out[f"{name}_gradnorm"] = 0.0 if g is None else float(g.norm())
+        for name, value in terms.items():
+            out.setdefault(f"{name}_value", float(value.detach()))
+    finally:
+        loss_fn.keep_term_graph = was
+    return out
+
+
+class ScheduledMixtureLoss(TermStashMixin, nn.Module):
     """Mixture of a time-domain and a frequency-domain denoiser loss.
 
     Aframe tensors are ``(B, C, L)``, so the FFT runs over the last dim ``L``.
@@ -157,12 +227,11 @@ class ScheduledMixtureLoss(nn.Module):
 
         # expose raw components (pre-alpha) so the task can log them and
         # pick alpha from their relative scale
-        self.last_time_term = time_term.detach()
-        self.last_spectral_term = spectral_term.detach()
+        self._stash(time=time_term, spectral=spectral_term)
         return mix
 
 
-class ShapeGainLoss(nn.Module):
+class ShapeGainLoss(TermStashMixin, nn.Module):
     """Scale-free shape term plus an explicit gain term.
 
     Written against a measured failure of the magnitude-spectrum mixture: the
@@ -276,14 +345,12 @@ class ShapeGainLoss(nn.Module):
             total = (weights * terms).sum()
 
         # exposed for logging, matching the names the task looks for
-        self.last_shape_term = shape_term.detach()
-        self.last_gain_term = gain_term.detach()
-        self.last_time_term = time_term.detach()
-        self.last_bkg_term = bkg_term.detach()
+        self._stash(shape=shape_term, gain=gain_term,
+                    time=time_term, bkg=bkg_term)
         return total
 
 
-class ApproximateRecoveryLoss(nn.Module):
+class ApproximateRecoveryLoss(TermStashMixin, nn.Module):
     """Shape/gain objective weighted toward where the signal actually is.
 
     Exact recovery is not reachable in the SNR 4-8 regime: with the whole-
@@ -396,10 +463,8 @@ class ApproximateRecoveryLoss(nn.Module):
             + self.lambda_time * time_term
             + self.lambda_bkg * bkg_term
         )
-        self.last_shape_term = shape_term.detach()
-        self.last_gain_term = gain_term.detach()
-        self.last_time_term = time_term.detach()
-        self.last_bkg_term = bkg_term.detach()
+        self._stash(shape=shape_term, gain=gain_term,
+                    time=time_term, bkg=bkg_term)
         return total
 
 

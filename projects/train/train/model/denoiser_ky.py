@@ -61,6 +61,7 @@ class Denoiser(AframeBase):
         log_a_max: float = 4.6,
         pct_lr_ramp: float = 0.0,
         verbose: bool = False,
+        log_grad_every: int = 0,
     ) -> None:
         super().__init__(
             arch=arch,
@@ -78,6 +79,7 @@ class Denoiser(AframeBase):
             "log_dt_min",
             "log_dt_max",
             "log_a_max",
+            "log_grad_every",
         )
 
     def forward(self, X: torch.Tensor) -> torch.Tensor:
@@ -175,7 +177,43 @@ class Denoiser(AframeBase):
                 ).mean(),
             )
 
+        every = self.hparams.log_grad_every
+        if every and stage == "train" and self.global_step % every == 0:
+            self._log_term_gradients(denoised, X_clean)
+
         return loss
+
+    def _log_term_gradients(self, denoised, X_clean) -> None:
+        """Log each loss term's gradient norm wrt the prediction.
+
+        Which term actually drives the update is not visible from the term
+        values: a mixture can be dominated by whichever term has the larger
+        gradient, and for a time-vs-spectral mixture that balance moves with
+        waveform amplitude, which the SNR curriculum changes during a run.
+        Measuring it on the real batches settles the question that synthetic
+        amplitude sweeps can only bracket.
+        """
+        from train.losses import term_gradient_norms
+
+        stats = term_gradient_norms(
+            self.denoiser_loss, denoised, X_clean
+        )
+        if not stats:
+            return
+        for key, value in stats.items():
+            if key.endswith("_gradnorm"):
+                self.log(f"grad/{key[: -len('_gradnorm')]}", value)
+        norms = {
+            k[: -len("_gradnorm")]: v
+            for k, v in stats.items()
+            if k.endswith("_gradnorm") and v > 0
+        }
+        # log every pairwise ratio, so "which term leads" is directly
+        # readable rather than inferred from two separate curves
+        names = sorted(norms)
+        for i, a in enumerate(names):
+            for b in names[i + 1 :]:
+                self.log(f"grad/ratio_{b}_over_{a}", norms[b] / norms[a])
 
     def train_step(self, batch) -> torch.Tensor:
         """AframeBase.training_step delegates here and logs train/loss."""
