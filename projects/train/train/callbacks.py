@@ -1310,9 +1310,18 @@ class DenoiserEvolutionCallback(Callback):
         if not (torch.is_tensor(X) and torch.is_tensor(X_clean)):
             return
         n = min(self.n_examples, X.shape[0])
+        # Prefer rows that actually carry an injection. With waveform_prob
+        # below 1 the batch contains noise-only rows whose target is all
+        # zeros, and taking the first n blindly can select nothing but those,
+        # producing plots that show a flat target and say nothing about
+        # reconstruction. Rank by target energy and keep the loudest.
+        energy = X_clean.detach().pow(2).sum(dim=tuple(range(1, X_clean.ndim)))
+        idx = torch.argsort(energy, descending=True)[:n]
+        if energy[idx].max() <= 0:
+            idx = torch.arange(n, device=X.device)
         self._fixed_batch = (
-            X[:n].detach().clone(),
-            X_clean[:n].detach().clone(),
+            X[idx].detach().clone(),
+            X_clean[idx].detach().clone(),
         )
 
     def on_validation_epoch_end(self, trainer, pl_module) -> None:

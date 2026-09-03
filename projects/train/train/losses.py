@@ -283,6 +283,126 @@ class ShapeGainLoss(nn.Module):
         return total
 
 
+class ApproximateRecoveryLoss(nn.Module):
+    """Shape/gain objective weighted toward where the signal actually is.
+
+    Exact recovery is not reachable in the SNR 4-8 regime: with the whole-
+    window correlation at rho ~ 0.2, the measured gain sits at ~0.2 as well,
+    which is the Wiener optimum c* = rho rather than a defect. Approximate
+    recovery is the reachable goal, and it needs a different emphasis:
+
+    ``energy_weight`` weights each sample's shape contribution by the local
+        energy of the target, so the loss stops spending capacity on the long
+        quiet stretch before the merger, where there is nothing to recover
+        and the model can only add noise. Whole-window rho dilutes exactly
+        this distinction.
+    ``calibrate_gain`` divides the prediction by its own realised gain before
+        the shape comparison. Because a correct minimum-variance estimator
+        shrinks by a known factor, the scale can be restored after the fact;
+        this makes the shape term indifferent to a systematic shrink instead
+        of fighting it.
+
+    For detection and parameter estimation a scale error is nearly free while
+    a phase error is fatal, so shape carries the objective and gain is kept
+    only as a weak anchor.
+
+    Args:
+        lambda_gain: weight on the (log gain)**2 term. Deliberately small.
+        lambda_time: weight on the plain MSE anchor.
+        lambda_bkg: weight on driving noise-only rows to zero.
+        energy_weight: if True, weight the shape term by target local energy.
+        smooth_ms: width in milliseconds of the smoothing applied to the
+            target energy envelope before it is used as a weight.
+        calibrate_gain: if True, remove the realised gain before comparing
+            shape, so shrinkage does not penalise an otherwise good fit.
+        sig_thresh: ||target|| below which a row counts as noise only.
+        sample_rate: needed to convert smooth_ms into samples.
+        eps: numerical floor.
+    """
+
+    def __init__(
+        self,
+        lambda_gain: float = 0.05,
+        lambda_time: float = 0.1,
+        lambda_bkg: float = 1.0,
+        energy_weight: bool = True,
+        smooth_ms: float = 50.0,
+        calibrate_gain: bool = True,
+        sig_thresh: float = 0.5,
+        sample_rate: float = 2048.0,
+        eps: float = 1e-8,
+    ):
+        super().__init__()
+        self.lambda_gain = lambda_gain
+        self.lambda_time = lambda_time
+        self.lambda_bkg = lambda_bkg
+        self.energy_weight = energy_weight
+        self.calibrate_gain = calibrate_gain
+        self.sig_thresh = sig_thresh
+        self.eps = eps
+        self.kernel = max(1, int(smooth_ms * 1e-3 * sample_rate) | 1)
+
+    def _envelope(self, target: torch.Tensor) -> torch.Tensor:
+        """Smoothed per-sample energy of the target, normalised to mean one."""
+        e = target.pow(2).sum(1, keepdim=True)
+        w = F.avg_pool1d(e, self.kernel, stride=1, padding=self.kernel // 2,
+                         count_include_pad=False)
+        w = w / w.mean(dim=-1, keepdim=True).clamp_min(self.eps)
+        return w
+
+    def forward(
+        self, pred: torch.Tensor, target: torch.Tensor
+    ) -> torch.Tensor:
+        tt_row = target.reshape(target.shape[0], -1).pow(2).sum(-1).sqrt()
+        sig = tt_row > self.sig_thresh
+        zero = pred.new_zeros(())
+
+        if sig.any():
+            p, t = pred[sig], target[sig]
+            pf = p.reshape(p.shape[0], -1)
+            tf = t.reshape(t.shape[0], -1)
+            pn = pf.norm(dim=-1).clamp_min(self.eps)
+            tn = tf.norm(dim=-1).clamp_min(self.eps)
+            gain = pn / tn
+            gain_term = torch.log(gain.clamp_min(self.eps)).pow(2).mean()
+
+            if self.calibrate_gain:
+                # compare shape only: remove the systematic scale first
+                p = p / gain.detach().clamp_min(self.eps).view(-1, 1, 1)
+
+            if self.energy_weight:
+                w = self._envelope(t)
+                pw, tw = p * w.sqrt(), t * w.sqrt()
+            else:
+                pw, tw = p, t
+            pwf = pw.reshape(pw.shape[0], -1)
+            twf = tw.reshape(tw.shape[0], -1)
+            rho = (pwf * twf).sum(-1) / (
+                pwf.norm(dim=-1) * twf.norm(dim=-1)
+            ).clamp_min(self.eps)
+            shape_term = (1.0 - rho).mean()
+            time_term = (p - t).pow(2).mean()
+        else:
+            shape_term = gain_term = time_term = zero
+
+        if (~sig).any():
+            bkg_term = pred[~sig].pow(2).mean()
+        else:
+            bkg_term = zero
+
+        total = (
+            shape_term
+            + self.lambda_gain * gain_term
+            + self.lambda_time * time_term
+            + self.lambda_bkg * bkg_term
+        )
+        self.last_shape_term = shape_term.detach()
+        self.last_gain_term = gain_term.detach()
+        self.last_time_term = time_term.detach()
+        self.last_bkg_term = bkg_term.detach()
+        return total
+
+
 class CorrelationDenoiseLoss(nn.Module):
     """Scale-invariant matched-filter denoiser loss.
 
