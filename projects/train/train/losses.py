@@ -53,17 +53,31 @@ class ScheduledMixtureLoss(nn.Module):
     ``alpha`` is externally mutable so the training task can schedule it
     epoch-by-epoch (0 = pure spectral, 1 = pure time-domain).
 
-    Both terms are reduced over the whole batch. When ``density`` is set,
-    each term is divided by the same discrepancy measured against a zero
-    prediction -- mean(err) / mean(scale) -- so loud events dominate both
-    numerator and denominator, as they did before the per-row variant.
+    The two terms live on different scales and that mismatch moves during
+    training. A time-domain MSE grows with the square of the waveform
+    amplitude, while an ``msle`` spectral term compares log magnitudes and
+    so is amplitude-invariant: measured over four decades of amplitude the
+    ratio between them swings by six orders of magnitude. Under an SNR
+    curriculum the amplitudes shift as training runs, so a fixed ``alpha``
+    silently re-weights the two objectives.
+
+    Dividing each term by a statistic of the current batch fixes the scale
+    but breaks on noise-only targets, where that statistic is zero: the
+    quotient is then either a clamp-limited spike or a division by zero.
+    Instead the time term is divided by ``target_scale``, a running mean of
+    the target power kept as a buffer and updated only from batches that
+    carry signal. It is a slow-moving constant rather than a per-batch
+    quantity, so it tracks the curriculum without ever collapsing to zero,
+    and a batch of pure background is scored against the same scale as any
+    other batch -- its error stays finite and meaningful.
 
     Args:
         alpha: initial weight for the time term. Updated in place each epoch.
-        density: if True, divide each term by the batch-wide discrepancy
-            against a zero prediction, making both terms dimensionless
-            "error relative to predicting nothing" so alpha=0.5 is equal
-            weight. If False, no scaling; rely on alpha for balance.
+        density: if True, divide the time term by the running target scale
+            so it becomes dimensionless and comparable to the spectral term.
+            If False, no scaling; rely on alpha for balance.
+        scale_momentum: EMA momentum for the running target scale. Higher
+            values track the curriculum more slowly.
         time_loss: time-domain discrepancy, one of LOSS_FUNCTIONS.
         spectral_loss: 'mse' (default) compares |FFT| directly; 'msle'
             compares log(|FFT| + log_floor) to compress dynamic range so loud
@@ -86,6 +100,7 @@ class ScheduledMixtureLoss(nn.Module):
         log_floor: float = 1e-9,
         log_base: float = 10.0,
         huber_delta: float = 1.0,
+        scale_momentum: float = 0.99,
     ):
         super().__init__()
         if not 0.0 <= alpha <= 1.0:
@@ -105,6 +120,10 @@ class ScheduledMixtureLoss(nn.Module):
             raise ValueError(f"log_base must be > 1, got {log_base}")
         if huber_delta <= 0.0:
             raise ValueError(f"huber_delta must be > 0, got {huber_delta}")
+        if not 0.0 <= scale_momentum < 1.0:
+            raise ValueError(
+                f"scale_momentum must be in [0, 1), got {scale_momentum}"
+            )
         self.alpha = alpha  # mutable; updated each epoch by the task
         self.density = density
         self.time_loss = time_loss
@@ -113,29 +132,62 @@ class ScheduledMixtureLoss(nn.Module):
         self.log_base = log_base
         self._log_base_scale = math.log(log_base)
         self.huber_delta = huber_delta
+        self.scale_momentum = scale_momentum
+        # running mean of the target's own "error against predicting zero",
+        # saved with the model so a resumed run keeps the same normalization
+        self.register_buffer("target_scale", torch.ones(()))
+        self.register_buffer(
+            "scale_initialized", torch.zeros((), dtype=torch.bool)
+        )
+
+    @torch.no_grad()
+    def _update_scale(self, target: torch.Tensor) -> None:
+        """Track the typical target scale across batches.
+
+        The update is skipped for a batch whose targets are all (or nearly
+        all) zero, since such a batch says nothing about the scale of a
+        signal and would drag the running value toward zero.
+        """
+        batch_scale = loss_helper(
+            self.time_loss,
+            torch.zeros_like(target),
+            target,
+            self.huber_delta,
+        )
+        if batch_scale <= 0.0:
+            return
+        if not self.scale_initialized:
+            self.target_scale.fill_(float(batch_scale))
+            self.scale_initialized.fill_(True)
+        else:
+            momentum = self.scale_momentum
+            self.target_scale.mul_(momentum).add_(
+                batch_scale * (1.0 - momentum)
+            )
 
     def _term(
         self, loss: str, pred: torch.Tensor, target: torch.Tensor
     ) -> torch.Tensor:
-        """One term of the mixture, reduced over the whole batch and
-        optionally made dimensionless.
+        """One term of the mixture, reduced over the whole batch.
 
         ``loss`` selects the discrepancy, so ``time_loss`` and
         ``spectral_loss`` are honored rather than assumed to be MSE.
         """
-        value = loss_helper(loss, pred, target, self.huber_delta)
-        if self.density:
-            scale = loss_helper(
-                loss, torch.zeros_like(target), target, self.huber_delta
-            )
-            value = value / scale.clamp_min(1e-8)
-        return value
+        return loss_helper(loss, pred, target, self.huber_delta)
 
     def forward(
         self, pred: torch.Tensor, target: torch.Tensor
     ) -> torch.Tensor:
         """pred, target: (B, C, L). Returns scalar loss."""
+        if self.training and self.density:
+            self._update_scale(target)
+
         time_term = self._term(self.time_loss, pred, target)
+        if self.density:
+            # divide by a slow-moving constant, not a statistic of this
+            # batch, so a background-only batch is scored on the same
+            # footing instead of against a vanishing denominator
+            time_term = time_term / self.target_scale.clamp_min(1e-12)
 
         pred_mag = torch.fft.rfft(pred, dim=-1).abs()
         target_mag = torch.fft.rfft(target, dim=-1).abs()
