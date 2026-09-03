@@ -61,7 +61,7 @@ class Denoiser(AframeBase):
         log_a_max: float = 4.6,
         pct_lr_ramp: float = 0.0,
         verbose: bool = False,
-        log_grad_every: int = 0,
+        log_grad_every: int = 1,
     ) -> None:
         super().__init__(
             arch=arch,
@@ -177,43 +177,55 @@ class Denoiser(AframeBase):
                 ).mean(),
             )
 
-        every = self.hparams.log_grad_every
-        if every and stage == "train" and self.global_step % every == 0:
-            self._log_term_gradients(denoised, X_clean)
+        if self.hparams.log_grad_every and stage == "train":
+            self._accumulate_term_gradients(denoised, X_clean)
 
         return loss
 
-    def _log_term_gradients(self, denoised, X_clean) -> None:
-        """Log each loss term's gradient norm wrt the prediction.
+    def _accumulate_term_gradients(self, denoised, X_clean) -> None:
+        """Measure each loss term's gradient norm wrt the prediction.
 
         Which term actually drives the update is not visible from the term
-        values: a mixture can be dominated by whichever term has the larger
-        gradient, and for a time-vs-spectral mixture that balance moves with
-        waveform amplitude, which the SNR curriculum changes during a run.
-        Measuring it on the real batches settles the question that synthetic
-        amplitude sweeps can only bracket.
+        values: a mixture is led by whichever term has the larger gradient,
+        and for a time-vs-spectral mixture that balance moves with waveform
+        amplitude, which the SNR curriculum changes during a run.
+
+        Measured on every ``log_grad_every`` batch and accumulated, then
+        averaged once per epoch by ``on_train_epoch_end``. A single batch is
+        far too noisy to read: the spectral gradient norm has been measured
+        to vary by more than its own size between batches.
+
+        Each term's norm is logged on its own. Their relative size is the
+        question of interest, but leaving them separate keeps the choice of
+        how to summarise it (arithmetic or geometric mean of the ratio, say)
+        open at analysis time rather than fixing it here.
         """
+        if self.global_step % self.hparams.log_grad_every:
+            return
+
         from train.losses import term_gradient_norms
 
-        stats = term_gradient_norms(
-            self.denoiser_loss, denoised, X_clean
-        )
+        stats = term_gradient_norms(self.denoiser_loss, denoised, X_clean)
         if not stats:
             return
+
         for key, value in stats.items():
             if key.endswith("_gradnorm"):
-                self.log(f"grad/{key[: -len('_gradnorm')]}", value)
-        norms = {
-            k[: -len("_gradnorm")]: v
-            for k, v in stats.items()
-            if k.endswith("_gradnorm") and v > 0
-        }
-        # log every pairwise ratio, so "which term leads" is directly
-        # readable rather than inferred from two separate curves
-        names = sorted(norms)
-        for i, a in enumerate(names):
-            for b in names[i + 1 :]:
-                self.log(f"grad/ratio_{b}_over_{a}", norms[b] / norms[a])
+                name = key[: -len("_gradnorm")]
+                self._grad_totals[name] = (
+                    self._grad_totals.get(name, 0.0) + value
+                )
+        self._grad_batches += 1
+
+    def on_train_epoch_start(self) -> None:
+        self._grad_totals = {}
+        self._grad_batches = 0
+
+    def on_train_epoch_end(self) -> None:
+        if not getattr(self, "_grad_batches", 0):
+            return
+        for name, total in self._grad_totals.items():
+            self.log(f"grad/{name}", total / self._grad_batches)
 
     def train_step(self, batch) -> torch.Tensor:
         """AframeBase.training_step delegates here and logs train/loss."""
