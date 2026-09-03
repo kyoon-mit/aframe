@@ -1,0 +1,36 @@
+# Learned weights with the SNR curriculum held fixed at minimum 8.
+# Learned weighting gave the best peak rho in wave 1 (0.344); this checks
+# whether it still leads once difficulty is held constant.
+
+trainer:
+  default_root_dir: /home/kyoon/SSM-BNS/aframe/dev/runs/denoiser_4s/train/merger/shapegain/shapegain_learned_fixsnr
+  logger:
+    init_args:
+      name: claude_shapegain_learned_fixsnr
+      id: claude-shapegain_learned_fixsnr
+      save_dir: /home/kyoon/SSM-BNS/aframe/dev/runs/denoiser_4s/train/merger/shapegain/shapegain_learned_fixsnr
+
+data:
+  init_args:
+    snr_sampler:
+      class_path: train.augmentations.SnrSampler
+      init_args:
+        constant_params:
+          index: -3
+          maximum: 100.0
+        start_params:
+          minimum: 8.0
+        end_params:
+          minimum: 8.0
+        decay_steps: 31280
+
+model:
+  init_args:
+    denoiser_loss:
+      class_path: train.losses.ShapeGainLoss
+      init_args:
+        lambda_gain: 0.3
+        lambda_time: 1.0
+        lambda_bkg: 1.0
+        sig_thresh: 0.5
+        learn_weights: true

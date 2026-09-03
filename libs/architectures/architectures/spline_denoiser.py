@@ -104,8 +104,16 @@ class SplineS4Denoiser(Architecture):
     def forward(self, X: torch.Tensor) -> torch.Tensor:
         # (B, C, L) -> S4D features (B, d_model, L)
         h = self.model(X)
-        # one feature vector per control point
-        h = F.adaptive_avg_pool1d(h, self.n_basis)
+        # One feature vector per control point. adaptive_avg_pool1d cannot do
+        # 8192 -> n_basis on this device (it exceeds the CUDA shared-memory
+        # limit and raises an internal assert), so pool with an explicit
+        # fixed-size kernel, which is the same operation for our ratios.
+        length = h.shape[-1]
+        kernel = max(1, length // self.n_basis)
+        h = F.avg_pool1d(h, kernel_size=kernel, stride=kernel, ceil_mode=True)
+        if h.shape[-1] != self.n_basis:
+            h = F.interpolate(h, size=self.n_basis, mode="linear",
+                              align_corners=False)
         # (B, n_basis, d_model) -> (B, n_basis, C) -> (B, C, n_basis)
         coeff = self.to_coeff(h.transpose(1, 2)).transpose(1, 2)
         # expand on the fixed basis: (B, C, n_basis) @ (n_basis, L)

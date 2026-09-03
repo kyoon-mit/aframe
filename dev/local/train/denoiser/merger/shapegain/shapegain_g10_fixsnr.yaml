@@ -1,0 +1,36 @@
+# lambda_gain 1.0 with the SNR curriculum held fixed at minimum 8.
+# Every wave-1 run shows rho falling in lockstep with target_rms as the
+# curriculum ramps 20 -> 4, which masks real progress. Freezing the floor
+# makes the learning curve mean what it appears to mean.
+
+trainer:
+  default_root_dir: /home/kyoon/SSM-BNS/aframe/dev/runs/denoiser_4s/train/merger/shapegain/shapegain_g10_fixsnr
+  logger:
+    init_args:
+      name: claude_shapegain_g10_fixsnr
+      id: claude-shapegain_g10_fixsnr
+      save_dir: /home/kyoon/SSM-BNS/aframe/dev/runs/denoiser_4s/train/merger/shapegain/shapegain_g10_fixsnr
+
+data:
+  init_args:
+    snr_sampler:
+      class_path: train.augmentations.SnrSampler
+      init_args:
+        constant_params:
+          index: -3
+          maximum: 100.0
+        start_params:
+          minimum: 8.0
+        end_params:
+          minimum: 8.0
+        decay_steps: 31280
+
+model:
+  init_args:
+    denoiser_loss:
+      class_path: train.losses.ShapeGainLoss
+      init_args:
+        lambda_gain: 1.0
+        lambda_time: 1.0
+        lambda_bkg: 1.0
+        sig_thresh: 0.5

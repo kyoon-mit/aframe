@@ -1,0 +1,21 @@
+# Very strong amplitude pressure (lambda_gain 3.0).
+# lambda_gain 1.0 moved gain only 0.40 -> 0.34, so the gain term is being
+# outvoted. This tests whether amplitude is recoverable at all by weight.
+
+trainer:
+  default_root_dir: /home/kyoon/SSM-BNS/aframe/dev/runs/denoiser_4s/train/merger/shapegain/shapegain_g30
+  logger:
+    init_args:
+      name: claude_shapegain_g30
+      id: claude-shapegain_g30
+      save_dir: /home/kyoon/SSM-BNS/aframe/dev/runs/denoiser_4s/train/merger/shapegain/shapegain_g30
+
+model:
+  init_args:
+    denoiser_loss:
+      class_path: train.losses.ShapeGainLoss
+      init_args:
+        lambda_gain: 3.0
+        lambda_time: 1.0
+        lambda_bkg: 1.0
+        sig_thresh: 0.5
