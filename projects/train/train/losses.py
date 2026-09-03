@@ -53,15 +53,14 @@ class ScheduledMixtureLoss(nn.Module):
     ``alpha`` is externally mutable so the training task can schedule it
     epoch-by-epoch (0 = pure spectral, 1 = pure time-domain).
 
-    Both terms are computed per row and then averaged, so every signal
-    carries equal weight regardless of its SNR. When ``density`` is set, each
-    row's error is divided by that row's own "error of predicting zero"
-    before averaging -- mean(err_row / scale_row), not
-    mean(err_row) / mean(scale_row).
+    Both terms are reduced over the whole batch. When ``density`` is set,
+    each term is divided by the same discrepancy measured against a zero
+    prediction -- mean(err) / mean(scale) -- so loud events dominate both
+    numerator and denominator, as they did before the per-row variant.
 
     Args:
         alpha: initial weight for the time term. Updated in place each epoch.
-        density: if True, divide each row's error by that row's discrepancy
+        density: if True, divide each term by the batch-wide discrepancy
             against a zero prediction, making both terms dimensionless
             "error relative to predicting nothing" so alpha=0.5 is equal
             weight. If False, no scaling; rely on alpha for balance.
@@ -84,7 +83,7 @@ class ScheduledMixtureLoss(nn.Module):
         density: bool = True,
         time_loss: str = "mse",
         spectral_loss: str = "mse",
-        log_floor: float = 1e-6,
+        log_floor: float = 1e-9,
         log_base: float = 10.0,
         huber_delta: float = 1.0,
     ):
@@ -115,30 +114,28 @@ class ScheduledMixtureLoss(nn.Module):
         self._log_base_scale = math.log(log_base)
         self.huber_delta = huber_delta
 
-    def _row_term(
-        self, pred: torch.Tensor, target: torch.Tensor
+    def _term(
+        self, loss: str, pred: torch.Tensor, target: torch.Tensor
     ) -> torch.Tensor:
-        """Per-row MSE, optionally divided per row by the row's own
-        error-of-predicting-zero, then averaged over the batch.
+        """One term of the mixture, reduced over the whole batch and
+        optionally made dimensionless.
 
-        pred, target: (..., L). Reduces over every dim but the batch, so a
-        (B, C, L) or (B, C, F) input gives one number per (B, C) pair.
+        ``loss`` selects the discrepancy, so ``time_loss`` and
+        ``spectral_loss`` are honored rather than assumed to be MSE.
         """
-        err = (pred - target).pow(2).mean(dim=tuple(range(1, target.ndim)))
+        value = loss_helper(loss, pred, target, self.huber_delta)
         if self.density:
-            scale = (
-                target.pow(2)
-                .mean(dim=tuple(range(1, target.ndim)))
-                .clamp_min(1e-9)
+            scale = loss_helper(
+                loss, torch.zeros_like(target), target, self.huber_delta
             )
-            err = err / scale
-        return err.mean()
+            value = value / scale.clamp_min(1e-8)
+        return value
 
     def forward(
         self, pred: torch.Tensor, target: torch.Tensor
     ) -> torch.Tensor:
         """pred, target: (B, C, L). Returns scalar loss."""
-        time_term = self._row_term(pred, target)
+        time_term = self._term(self.time_loss, pred, target)
 
         pred_mag = torch.fft.rfft(pred, dim=-1).abs()
         target_mag = torch.fft.rfft(target, dim=-1).abs()
@@ -151,7 +148,11 @@ class ScheduledMixtureLoss(nn.Module):
             target_mag = (
                 torch.log(target_mag + self.log_floor) / self._log_base_scale
             )
-        spectral_term = self._row_term(pred_mag, target_mag)
+            spectral_term = self._term("mse", pred_mag, target_mag)
+        else:
+            spectral_term = self._term(
+                self.spectral_loss, pred_mag, target_mag
+            )
 
         mix = self.alpha * time_term + (1.0 - self.alpha) * spectral_term
 
