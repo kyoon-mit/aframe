@@ -422,6 +422,11 @@ class StagedDenoisedClassification(DenoisedClassification):
         self.freeze_epoch = freeze_epoch
         self.denoise_waveform_prob = denoise_waveform_prob
         self.classify_waveform_prob = classify_waveform_prob
+        # start at the schedule's first point rather than the base weight:
+        # the parent sets lambda_bce = lambda_bce until the first
+        # on_train_epoch_start, which would let BCE train at full weight
+        # for the first epoch of what is supposed to be denoiser-only.
+        self.lambda_bce = self._base_lambda_bce * self.bce_schedule[0][1]
 
     @property
     def classifying(self) -> bool:
