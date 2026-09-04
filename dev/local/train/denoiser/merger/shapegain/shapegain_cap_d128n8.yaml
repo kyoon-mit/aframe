@@ -1,0 +1,49 @@
+# Capacity scan: d_model 128, 8 layers.
+# Tests depth as well as width; a chirp is a long-range sweep, so depth may
+# matter more than width for tracking its phase evolution.
+
+trainer:
+  default_root_dir: /home/kyoon/SSM-BNS/aframe/dev/runs/denoiser_4s/train/merger/shapegain/shapegain_cap_d128n8
+  logger:
+    init_args:
+      name: claude_shapegain_cap_d128n8
+      id: claude-shapegain_cap_d128n8
+      save_dir: /home/kyoon/SSM-BNS/aframe/dev/runs/denoiser_4s/train/merger/shapegain/shapegain_cap_d128n8
+
+data:
+  init_args:
+    snr_sampler:
+      class_path: train.augmentations.SnrSampler
+      init_args:
+        constant_params:
+          index: -3
+          maximum: 100.0
+        start_params:
+          minimum: 8.0
+        end_params:
+          minimum: 8.0
+        decay_steps: 31280
+
+model:
+  init_args:
+    arch:
+      class_path: architectures.denoiser.TimeDomainS4Denoiser
+      init_args:
+        num_ifos: 2
+        d_model: 128
+        d_state: 64
+        n_layers: 8
+        dropout: 0.2
+        prenorm: false
+        num_groups: 32
+        dt_min: 1e-4
+        dt_max: 10.0
+
+    denoiser_loss:
+      class_path: train.losses.ShapeGainLoss
+      init_args:
+        lambda_gain: 0.3
+        lambda_time: 1.0
+        lambda_bkg: 1.0
+        sig_thresh: 0.5
+        learn_weights: true

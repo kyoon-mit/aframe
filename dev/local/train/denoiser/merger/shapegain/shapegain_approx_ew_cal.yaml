@@ -1,0 +1,41 @@
+# Approximate recovery: energy weighting plus gain calibration.
+# Exact recovery is unreachable at SNR 4-8 (gain tracks rho, the Wiener
+# optimum), so the objective is retargeted at what downstream analysis
+# actually needs: correct phase evolution where the signal has power.
+# Scale is left to post-hoc calibration, being a known factor.
+
+trainer:
+  default_root_dir: /home/kyoon/SSM-BNS/aframe/dev/runs/denoiser_4s/train/merger/shapegain/shapegain_approx_ew_cal
+  logger:
+    init_args:
+      name: claude_shapegain_approx_ew_cal
+      id: claude-shapegain_approx_ew_cal
+      save_dir: /home/kyoon/SSM-BNS/aframe/dev/runs/denoiser_4s/train/merger/shapegain/shapegain_approx_ew_cal
+
+data:
+  init_args:
+    snr_sampler:
+      class_path: train.augmentations.SnrSampler
+      init_args:
+        constant_params:
+          index: -3
+          maximum: 100.0
+        start_params:
+          minimum: 8.0
+        end_params:
+          minimum: 8.0
+        decay_steps: 31280
+
+model:
+  init_args:
+    denoiser_loss:
+      class_path: train.losses.ApproximateRecoveryLoss
+      init_args:
+        lambda_gain: 0.05
+        lambda_time: 0.1
+        lambda_bkg: 1.0
+        energy_weight: true
+        smooth_ms: 50.0
+        calibrate_gain: true
+        sig_thresh: 0.5
+        sample_rate: 2048.0

@@ -1,0 +1,36 @@
+# Shape/gain objective with a B-spline output basis, stride 2: knots every 0.98 ms, reaching ~512 Hz (99.9% of target power).
+# Control for stride 4, to separate 'basis too coarse' from 'basis helps'.
+
+trainer:
+  default_root_dir: /home/kyoon/SSM-BNS/aframe/dev/runs/denoiser_4s/train/merger/shapegain/shapegain_spline_s2
+  logger:
+    init_args:
+      name: claude_shapegain_spline_s2
+      id: claude-shapegain_spline_s2
+      save_dir: /home/kyoon/SSM-BNS/aframe/dev/runs/denoiser_4s/train/merger/shapegain/shapegain_spline_s2
+
+model:
+  init_args:
+    arch:
+      class_path: architectures.spline_denoiser.SplineS4Denoiser
+      init_args:
+        num_ifos: 2
+        kernel_length: 4.0
+        sample_rate: 2048
+        stride: 2
+        d_model: 64
+        d_state: 64
+        n_layers: 4
+        dropout: 0.2
+        prenorm: false
+        num_groups: 32
+        dt_min: 1e-4
+        dt_max: 10.0
+
+    denoiser_loss:
+      class_path: train.losses.ShapeGainLoss
+      init_args:
+        lambda_gain: 0.3
+        lambda_time: 1.0
+        lambda_bkg: 1.0
+        sig_thresh: 0.5

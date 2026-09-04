@@ -1,0 +1,38 @@
+# Shape/gain objective with a B-spline output basis, stride 4: knots every 1.95 ms, so the basis reaches ~256 Hz and covers
+# 99% of the target power. The first attempt used stride 16, capping the
+# basis at ~64 Hz while the chirp sweeps past 300 Hz, and rho collapsed to
+# 0.007: the waveform was not representable at all.
+
+trainer:
+  default_root_dir: /home/kyoon/SSM-BNS/aframe/dev/runs/denoiser_4s/train/merger/shapegain/shapegain_spline_s4
+  logger:
+    init_args:
+      name: claude_shapegain_spline_s4
+      id: claude-shapegain_spline_s4
+      save_dir: /home/kyoon/SSM-BNS/aframe/dev/runs/denoiser_4s/train/merger/shapegain/shapegain_spline_s4
+
+model:
+  init_args:
+    arch:
+      class_path: architectures.spline_denoiser.SplineS4Denoiser
+      init_args:
+        num_ifos: 2
+        kernel_length: 4.0
+        sample_rate: 2048
+        stride: 4
+        d_model: 64
+        d_state: 64
+        n_layers: 4
+        dropout: 0.2
+        prenorm: false
+        num_groups: 32
+        dt_min: 1e-4
+        dt_max: 10.0
+
+    denoiser_loss:
+      class_path: train.losses.ShapeGainLoss
+      init_args:
+        lambda_gain: 0.3
+        lambda_time: 1.0
+        lambda_bkg: 1.0
+        sig_thresh: 0.5
