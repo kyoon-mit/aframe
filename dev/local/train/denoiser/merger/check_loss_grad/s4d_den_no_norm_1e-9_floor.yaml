@@ -1,0 +1,163 @@
+# ScheduledMixtureLoss, no normalisation, log_floor 1e-9.
+#
+# density is false, so neither term is scaled and alpha alone balances them.
+# Every row carries signal (waveform_prob 1.0). Validation runs the same
+# injection pipeline as training, since the timeslide path carries no clean
+# target.
+#
+# log_grad_every is set, so the per-term gradient norms are logged and the
+# time-vs-spectral balance can be read off directly.
+
+seed_everything: 20260901
+
+trainer:
+  max_epochs: 1000
+  accelerator: gpu
+  devices: 1
+  check_val_every_n_epoch: 1
+  log_every_n_steps: 50
+  benchmark: true
+
+  default_root_dir: /home/kyoon/SSM-BNS/aframe/dev/runs/denoiser_4s/train/merger/check_loss_grad/s4d_den_no_norm_1e-9_floor
+
+  logger:
+    class_path: lightning.pytorch.loggers.WandbLogger
+    init_args:
+      project: DENOISER-SCAN
+      name: check_loss_no_norm_1e-9
+      id: check_loss_no_norm_1e-9
+      save_dir: /home/kyoon/SSM-BNS/aframe/dev/runs/denoiser_4s/train/merger/check_loss_grad/s4d_den_no_norm_1e-9_floor
+
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        monitor: val/den_loss
+        mode: min
+        save_top_k: 1
+        save_last: true
+        filename: den_{epoch:02d}
+        auto_insert_metric_name: false
+
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: epoch
+
+    - class_path: train.callbacks.ReferenceEventCallback
+      init_args:
+        events_file: /home/kyoon/SSM-BNS/DATA/aframe/plot/merger_5s_2048Hz/plot_events.hdf5
+        every_n_epochs: 20
+
+model:
+  class_path: train.model.denoiser_ky.Denoiser
+  init_args:
+    arch:
+      class_path: architectures.denoiser.TimeDomainS4Denoiser
+      init_args:
+        num_ifos: 2
+        d_model: 64
+        d_state: 64
+        n_layers: 4
+        dropout: 0.2
+        prenorm: false
+        num_groups: 32
+        dt_min: 1e-4
+        dt_max: 10.0
+
+    learning_rate: 2.5e-4
+    ssm_lr: 2.5e-3
+    weight_decay: 0.01
+    normalize_input: false
+
+    denoiser_loss:
+      class_path: train.losses.ScheduledMixtureLoss
+      init_args:
+        alpha: 0.5
+        density: false
+        time_loss: mse
+        spectral_loss: msle
+        log_floor: 1e-9
+        log_base: 10.0
+
+    lr_scheduler:
+      class_path: train.model.regression_ky.WarmupCosineAnnealingWarmRestarts
+      init_args:
+        warmup_epochs: 10
+        T_0: 20
+        T_mult: 2
+        eta_min: 1e-7
+        peak_decay: 0.9
+    lr_scheduler_interval: epoch
+
+data:
+  class_path: train.data.supervised.DenoiserOnlyAframeDataset
+  init_args:
+    background_dir: /home/kyoon/SSM-BNS/DATA/O3a_H1_L1_2048Hz
+    waveforms_dir: /home/kyoon/SSM-BNS/DATA/aframe/train
+    ifos: [H1, L1]
+    sample_rate: 2048
+
+    kernel_length: 4.0
+    left_pad: 3.5
+    right_pad: 0.0
+
+    batch_size: 64
+    batches_per_epoch: 782   # ~50k samples per epoch
+    val_batches: 78
+    chunk_size: 2000
+    chunks_per_epoch: 25
+    num_files_per_batch: 1
+
+    fduration: 1.0
+    fftlength: 2.0
+    psd_length: 20.0
+    highpass: 20
+
+    # every row carries signal: this is a denoiser, not a detector
+    waveform_prob: 1.0
+    swap_prob: 0.0
+    mute_prob: 0.0
+    max_num_workers: 16
+    persistent_workers: true
+
+    num_valid_views: 4
+    valid_stride: 25
+    valid_livetime: 210000
+
+    snr_sampler:
+      class_path: train.augmentations.SnrSampler
+      init_args:
+        constant_params:
+          index: -3
+          maximum: 100.0
+        start_params:
+          minimum: 20.0     # ramp curriculum 20 -> 4 over 40 epochs
+        end_params:
+          minimum: 4.0
+        decay_steps: 31280  # 40 epochs * 782 batches/epoch
+
+    param_transforms:
+      - class_path: train.transforms.ChirpMass
+
+    waveform_sampler:
+      class_path: train.data.waveforms.WaveformLoader
+      init_args:
+        ifos: [H1, L1]
+        sample_rate: 2048
+        num_val_waveforms: 8192
+        val_waveform_file: /home/kyoon/SSM-BNS/DATA/aframe/val/end_o3_ratesandpops_bns_snr4.hdf5
+        training_waveform_path: /home/kyoon/SSM-BNS/DATA/aframe/train/end_o3_ratesandpops_bns_uniform_chirp.hdf5
+
+    dec:
+      class_path: ml4gw.distributions.Cosine
+    psi:
+      class_path: torch.distributions.Uniform
+      init_args:
+        low: 0.0
+        high: 3.14159
+        validate_args: false
+    phi:
+      class_path: torch.distributions.Uniform
+      init_args:
+        low: -3.14159
+        high: 3.14159
+        validate_args: false

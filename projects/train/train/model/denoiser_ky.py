@@ -9,6 +9,7 @@ path, because the timeslide batch carries no clean target to score against.
 Set ``waveform_prob=1.0`` so every row carries signal.
 """
 
+import math
 from typing import Callable, Optional
 
 import torch
@@ -62,6 +63,7 @@ class Denoiser(AframeBase):
         pct_lr_ramp: float = 0.0,
         verbose: bool = False,
         log_grad_every: int = 1,
+        alpha_schedule: Optional[dict] = None,
     ) -> None:
         super().__init__(
             arch=arch,
@@ -72,6 +74,7 @@ class Denoiser(AframeBase):
         )
         self.denoiser_loss = denoiser_loss or torch.nn.MSELoss()
         self._lr_scheduler_factory = lr_scheduler
+        self._alpha_schedule = alpha_schedule
         self.save_hyperparameters(
             "ssm_lr",
             "normalize_input",
@@ -208,6 +211,39 @@ class Denoiser(AframeBase):
     def on_train_epoch_start(self) -> None:
         self._grad_totals = {}
         self._grad_batches = 0
+        self._apply_alpha_schedule()
+
+    def _apply_alpha_schedule(self) -> None:
+        """Move the loss's alpha along its schedule for this epoch.
+
+        Takes {mode, start, end, start_epoch, end_epoch} with mode one of
+        constant, linear or cosine. Only applies when the loss exposes a
+        mutable alpha, as ScheduledMixtureLoss does.
+        """
+        schedule = self._alpha_schedule
+        if schedule is None or not hasattr(self.denoiser_loss, "alpha"):
+            return
+
+        epoch = self.current_epoch
+        mode = schedule.get("mode", "constant")
+        start, end = schedule.get("start", 0.5), schedule.get("end", 0.5)
+        first, last = (
+            schedule.get("start_epoch", 0),
+            schedule.get("end_epoch", 0),
+        )
+
+        if mode == "constant" or epoch >= last:
+            alpha = end if epoch >= last else start
+        elif epoch <= first:
+            alpha = start
+        else:
+            fraction = (epoch - first) / (last - first)
+            if mode == "cosine":
+                fraction = 0.5 * (1 - math.cos(math.pi * fraction))
+            alpha = start + (end - start) * fraction
+
+        self.denoiser_loss.alpha = alpha
+        self.log("denoiser_loss/alpha", alpha, on_epoch=True)
 
     def on_train_epoch_end(self) -> None:
         if not getattr(self, "_grad_batches", 0):
