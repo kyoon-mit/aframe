@@ -1,6 +1,11 @@
-# ScheduledMixtureLoss, no normalisation, log_floor 1e0.
+# ScheduledMixtureLoss, no normalisation, log_floor 1e-3, alpha tracking SNR.
 #
 # density is false, so neither term is scaled and alpha alone balances them.
+# The measured spectral-to-time gradient ratio is about 2400 at the trained
+# amplitude and scales as amplitude^-2, so a fixed alpha of 0.5 hands the
+# spectral term essentially the whole update. The snr_tracking schedule sets
+# alpha from the epoch's mean target amplitude to hold the two gradient
+# contributions comparable while the SNR curriculum ramps 20 down to 4.
 # Every row carries signal (waveform_prob 1.0). Validation runs the same
 # injection pipeline as training, since the timeslide path carries no clean
 # target.
@@ -18,15 +23,15 @@ trainer:
   log_every_n_steps: 50
   benchmark: true
 
-  default_root_dir: /home/kyoon/SSM-BNS/aframe/dev/runs/denoiser_4s/train/merger/check_loss_grad/s4d_den_no_norm_1e0_floor
+  default_root_dir: /home/kyoon/SSM-BNS/aframe/dev/runs/denoiser_4s/train/merger/fix_loss_grad/s4d_den_no_norm_1e-3_floor_alpha_fix
 
   logger:
     class_path: lightning.pytorch.loggers.WandbLogger
     init_args:
       project: DENOISER-SCAN
-      name: check_loss_no_norm_1e0
-      id: check_loss_no_norm_1e0
-      save_dir: /home/kyoon/SSM-BNS/aframe/dev/runs/denoiser_4s/train/merger/check_loss_grad/s4d_den_no_norm_1e0_floor
+      name: no_norm_1e-3_floor_alpha_fix
+      id: no_norm_1e-3_floor_alpha_fix
+      save_dir: /home/kyoon/SSM-BNS/aframe/dev/runs/denoiser_4s/train/merger/fix_loss_grad/s4d_den_no_norm_1e-3_floor_alpha_fix
 
   callbacks:
     - class_path: lightning.pytorch.callbacks.ModelCheckpoint
@@ -75,8 +80,14 @@ model:
         density: false
         time_loss: mse
         spectral_loss: msle
-        log_floor: 1.0
+        log_floor: 1e-3
         log_base: 10.0
+
+    alpha_schedule:
+      mode: snr_tracking
+      start: 0.5        # alpha floor
+      end: 0.9999       # alpha ceiling
+      ratio_scale: 14.0 # measured ratio * target_rms^2
 
     lr_scheduler:
       class_path: train.model.regression_ky.WarmupCosineAnnealingWarmRestarts

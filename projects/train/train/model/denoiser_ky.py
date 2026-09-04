@@ -148,6 +148,16 @@ class Denoiser(AframeBase):
             target_rms = X_clean.pow(2).mean().sqrt()
             self.log(f"{stage}/pred_rms", pred_rms)
             self.log(f"{stage}/target_rms", target_rms)
+            if stage == "train":
+                # running mean over the epoch, read by the snr_tracking
+                # alpha schedule at the start of the next one
+                self._target_rms_total = (
+                    getattr(self, "_target_rms_total", 0.0)
+                    + float(target_rms)
+                )
+                self._target_rms_count = (
+                    getattr(self, "_target_rms_count", 0) + 1
+                )
             # signed: positive means the denoiser is over-predicting
             self.log(f"{stage}/diff_pred_target_rms", pred_rms - target_rms)
 
@@ -211,14 +221,28 @@ class Denoiser(AframeBase):
     def on_train_epoch_start(self) -> None:
         self._grad_totals = {}
         self._grad_batches = 0
+        count = getattr(self, "_target_rms_count", 0)
+        if count:
+            self._last_target_rms = self._target_rms_total / count
+        self._target_rms_total = 0.0
+        self._target_rms_count = 0
         self._apply_alpha_schedule()
 
     def _apply_alpha_schedule(self) -> None:
         """Move the loss's alpha along its schedule for this epoch.
 
         Takes {mode, start, end, start_epoch, end_epoch} with mode one of
-        constant, linear or cosine. Only applies when the loss exposes a
-        mutable alpha, as ScheduledMixtureLoss does.
+        constant, linear, cosine or snr_tracking. Only applies when the loss
+        exposes a mutable alpha, as ScheduledMixtureLoss does.
+
+        ``snr_tracking`` keeps the two terms' gradient contributions equal
+        instead of interpolating on epoch. The time term's gradient scales as
+        the waveform amplitude and the log-magnitude spectral term's as its
+        inverse, so their ratio goes as amplitude^-2; measured on this data
+        ratio * target_rms^2 is about 14 across the curriculum. alpha is then
+        set from the current epoch's target amplitude so that
+        alpha * g_time and (1 - alpha) * g_spec stay comparable as the SNR
+        curriculum moves the amplitude.
         """
         schedule = self._alpha_schedule
         if schedule is None or not hasattr(self.denoiser_loss, "alpha"):
@@ -232,7 +256,16 @@ class Denoiser(AframeBase):
             schedule.get("end_epoch", 0),
         )
 
-        if mode == "constant" or epoch >= last:
+        if mode == "snr_tracking":
+            scale = schedule.get("ratio_scale", 14.0)
+            amplitude = getattr(self, "_last_target_rms", None)
+            if amplitude is None or amplitude <= 0:
+                return  # no measurement yet; leave alpha where it is
+            ratio = scale / (amplitude**2)
+            alpha = ratio / (1.0 + ratio)
+            alpha = min(max(alpha, start), end)
+            self.log("denoiser_loss/grad_ratio_est", ratio, on_epoch=True)
+        elif mode == "constant" or epoch >= last:
             alpha = end if epoch >= last else start
         elif epoch <= first:
             alpha = start

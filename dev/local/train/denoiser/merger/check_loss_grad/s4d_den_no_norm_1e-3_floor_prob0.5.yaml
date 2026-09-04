@@ -1,9 +1,12 @@
-# ScheduledMixtureLoss, no normalisation, log_floor 1e0.
+# ScheduledMixtureLoss, no normalisation, log_floor 1e-3, half background.
 #
 # density is false, so neither term is scaled and alpha alone balances them.
-# Every row carries signal (waveform_prob 1.0). Validation runs the same
-# injection pipeline as training, since the timeslide path carries no clean
-# target.
+# waveform_prob is 0.5, so half the rows carry no injection and their target
+# is identically zero: the denoiser is shown what silence looks like instead
+# of only ever seeing signal. Without normalisation there is no per-row
+# division by a target statistic, so a zero target costs nothing numerically.
+# Validation runs the same injection pipeline as training, since the
+# timeslide path carries no clean target.
 #
 # log_grad_every is set, so the per-term gradient norms are logged and the
 # time-vs-spectral balance can be read off directly.
@@ -18,15 +21,15 @@ trainer:
   log_every_n_steps: 50
   benchmark: true
 
-  default_root_dir: /home/kyoon/SSM-BNS/aframe/dev/runs/denoiser_4s/train/merger/check_loss_grad/s4d_den_no_norm_1e0_floor
+  default_root_dir: /home/kyoon/SSM-BNS/aframe/dev/runs/denoiser_4s/train/merger/check_loss_grad/s4d_den_no_norm_1e-3_floor_prob0.5
 
   logger:
     class_path: lightning.pytorch.loggers.WandbLogger
     init_args:
       project: DENOISER-SCAN
-      name: check_loss_no_norm_1e0
-      id: check_loss_no_norm_1e0
-      save_dir: /home/kyoon/SSM-BNS/aframe/dev/runs/denoiser_4s/train/merger/check_loss_grad/s4d_den_no_norm_1e0_floor
+      name: check_loss_no_norm_prob0.5
+      id: check_loss_no_norm_prob0.5
+      save_dir: /home/kyoon/SSM-BNS/aframe/dev/runs/denoiser_4s/train/merger/check_loss_grad/s4d_den_no_norm_1e-3_floor_prob0.5
 
   callbacks:
     - class_path: lightning.pytorch.callbacks.ModelCheckpoint
@@ -75,7 +78,7 @@ model:
         density: false
         time_loss: mse
         spectral_loss: msle
-        log_floor: 1.0
+        log_floor: 1e-3
         log_base: 10.0
 
     lr_scheduler:
@@ -112,8 +115,9 @@ data:
     psd_length: 20.0
     highpass: 20
 
-    # every row carries signal: this is a denoiser, not a detector
-    waveform_prob: 1.0
+    # half the rows are background only, so the denoiser learns to output
+    # zero on noise rather than only ever seeing signal
+    waveform_prob: 0.5
     swap_prob: 0.0
     mute_prob: 0.0
     max_num_workers: 16

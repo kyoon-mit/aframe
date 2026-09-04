@@ -44,7 +44,7 @@ trainer:
 
     - class_path: train.callbacks.ReferenceEventCallback
       init_args:
-        events_file: /home/kyoon/SSM-BNS/DATA/aframe/plot/merger_5s_2048Hz/plot_events.hdf5
+        events_file: /home/kyoon/SSM-BNS/DATA/aframe/plot/merger_4s_2048Hz/plot_events.hdf5
         every_n_epochs: 20
 
 model:
