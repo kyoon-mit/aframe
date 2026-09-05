@@ -463,5 +463,3 @@ class StagedDenoisedClassification(DenoisedClassification):
                 )
         else:
             self._set_waveform_prob(self.denoise_waveform_prob)
-
-        self.log("stage/classifying", float(self.classifying), on_epoch=True)
