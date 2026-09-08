@@ -496,3 +496,69 @@ except ImportError:
             raise ImportError(
                 "JAX and equinox are required. uv sync --extra jax"
             )
+
+
+class ClassificationTimeDomainS4DenoiseClassifyS4(
+    MultiTaskArchitecture, SupervisedArchitecture
+):
+    """S4D seq-to-seq denoiser feeding an S4D classifier head.
+
+    The same split as ``ClassificationTimeDomainS4DenoiseClassifyResNet``,
+    but the head is a second S4D stack rather than a convolutional ResNet.
+    A chirp is a long sweep whose phase evolves across the whole window, so
+    a recurrence that carries state over the sequence can use evidence a
+    fixed convolutional receptive field cannot.
+
+    ``forward`` returns ``(x_denoised, logit)``. Pairs with
+    ``DenoisedClassification``. Set ``detach_denoiser`` to stop gradients at
+    the denoiser, which is what a frozen denoiser needs.
+    """
+
+    def __init__(
+        self,
+        num_ifos: int,
+        denoiser_d_model: int = 64,
+        denoiser_d_state: int = 64,
+        denoiser_n_layers: int = 4,
+        denoiser_dropout: float = 0.2,
+        denoiser_prenorm: bool = False,
+        num_groups: Optional[int] = None,
+        dt_min: float = 1e-3,
+        dt_max: float = 0.1,
+        detach_denoiser: bool = False,
+        classifier_d_model: int = 64,
+        classifier_d_state: int = 64,
+        classifier_n_layers: int = 4,
+        classifier_dropout: float = 0.2,
+    ) -> None:
+        super().__init__()
+        self.model = S4ModelDenoiseRegress(
+            denoiser=S4ModelSeq2Seq,
+            regressor=S4Model,
+            denoiser_params={
+                "d_input": num_ifos,
+                "d_output": num_ifos,
+                "d_model": denoiser_d_model,
+                "d_state": denoiser_d_state,
+                "n_layers": denoiser_n_layers,
+                "dropout": denoiser_dropout,
+                "prenorm": denoiser_prenorm,
+                "num_groups": num_groups,
+                "dt_min": dt_min,
+                "dt_max": dt_max,
+            },
+            regressor_params={
+                "d_input": num_ifos,
+                "d_output": 1,  # single detection logit
+                "d_model": classifier_d_model,
+                "d_state": classifier_d_state,
+                "n_layers": classifier_n_layers,
+                "dropout": classifier_dropout,
+                "dt_min": dt_min,
+                "dt_max": dt_max,
+            },
+            detach_denoiser=detach_denoiser,
+        )
+
+    def forward(self, X: torch.Tensor):
+        return self.model(X)

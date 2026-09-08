@@ -1630,3 +1630,80 @@ class ReferenceEventCallback(DenoiserEvolutionCallback):
             if event < len(self.names):
                 ax.set_ylabel(f"{self.names[event]} / ifo {ifo}")
         return fig
+
+
+class LoadDenoiserWeights(Callback):
+    """Initialise the denoiser from a standalone Denoiser checkpoint.
+
+    The pure denoiser task stores its architecture under ``model.model.*``
+    while the joint denoise-and-classify architecture keeps the same modules
+    under ``model.denoiser.*``, so the state dict is remapped by prefix
+    before loading. Only the denoiser is touched; the classifier head keeps
+    its fresh initialisation.
+
+    With ``freeze`` set the denoiser parameters get ``requires_grad=False``
+    and the module is held in eval mode, so its dropout and any running
+    statistics stay fixed while the classifier trains on its output.
+
+    Args:
+        checkpoint: path to the Denoiser checkpoint.
+        freeze: whether to hold the denoiser fixed.
+        source_prefix, target_prefix: state dict prefixes to translate.
+    """
+
+    def __init__(
+        self,
+        checkpoint: str,
+        freeze: bool = True,
+        source_prefix: str = "model.model.",
+        target_prefix: str = "model.model.denoiser.",
+    ):
+        super().__init__()
+        self.checkpoint = checkpoint
+        self.freeze = freeze
+        self.source_prefix = source_prefix
+        self.target_prefix = target_prefix
+
+    def _denoiser(self, pl_module):
+        # the task holds the architecture in .model, which in turn holds the
+        # denoiser, so the module path is one level deeper than the
+        # architecture's own state dict suggests
+        return getattr(getattr(pl_module.model, "model", None), "denoiser", None)
+
+    def on_fit_start(self, trainer, pl_module) -> None:
+        state = torch.load(
+            self.checkpoint, map_location="cpu", weights_only=False
+        )["state_dict"]
+        remapped = {
+            key.replace(self.source_prefix, self.target_prefix, 1): value
+            for key, value in state.items()
+            if key.startswith(self.source_prefix)
+        }
+        missing, unexpected = pl_module.load_state_dict(
+            remapped, strict=False
+        )
+        loaded = len(remapped)
+        stray = [k for k in unexpected if k.startswith(self.target_prefix)]
+        print(
+            f"[LoadDenoiserWeights] {loaded} tensors from {self.checkpoint}"
+            + (f", {len(stray)} unmatched" if stray else "")
+        )
+        if stray:
+            raise RuntimeError(
+                f"denoiser keys did not match the architecture: {stray[:3]}"
+            )
+
+        if self.freeze:
+            denoiser = self._denoiser(pl_module)
+            if denoiser is None:
+                raise RuntimeError("architecture exposes no .denoiser")
+            for parameter in denoiser.parameters():
+                parameter.requires_grad_(False)
+            print("[LoadDenoiserWeights] denoiser frozen")
+
+    def on_train_epoch_start(self, trainer, pl_module) -> None:
+        # keep it in eval mode so dropout stays off for the whole run
+        if self.freeze:
+            denoiser = self._denoiser(pl_module)
+            if denoiser is not None:
+                denoiser.eval()
