@@ -1,12 +1,9 @@
-"""Pure denoiser training task: reconstruct the clean strain, nothing else.
+"""Denoiser training task: reconstruct the clean strain, nothing else.
 
-No classifier head, no detection metric, no AUROC. The model sees whitened
-noisy strain and is scored only on how well it reproduces the injected
-waveform, so nothing pulls the representation toward a detection statistic.
-
-Validation reuses the training injection pipeline rather than the timeslide
-path, because the timeslide batch carries no clean target to score against.
-Set ``waveform_prob=1.0`` so every row carries signal.
+No classifier head and no detection metric, so nothing pulls the
+representation toward a detection statistic. Validation runs the training
+injection pipeline, since a timeslide batch carries no clean target. Set
+``waveform_prob=1.0`` so every row has signal.
 """
 
 import math
@@ -25,11 +22,8 @@ from train.model.regression_ky import (
 class Denoiser(AframeBase):
     """Train an architecture to map noisy whitened strain to clean strain.
 
-    The loss is expected to expose ``last_time_term`` and
-    ``last_spectral_term`` after each call (as ``ScheduledMixtureLoss`` does),
-    which are logged separately so the two halves of a mixture loss can be
-    compared. When the loss normalises its terms, the logged values are the
-    normalised ones, since those are what the optimiser actually sees.
+    A loss that stashes ``last_<name>_term`` attributes gets each term
+    logged separately, as normalised by the loss itself.
 
     Args:
         arch: denoiser architecture mapping (B, C, L) to (B, C, L).
@@ -99,8 +93,7 @@ class Denoiser(AframeBase):
     def _shared_step(self, batch, stage: str) -> torch.Tensor:
         """Denoise one batch and log the loss and its components.
 
-        Both the training and validation dataloaders run the injection
-        pipeline, so each batch is ``(X, X_clean, y, params)``.
+        Both dataloaders inject, so a batch is ``(X, X_clean, y, params)``.
         """
         X, X_clean = batch[0], batch[1]
         denoised = self(X)
@@ -167,10 +160,9 @@ class Denoiser(AframeBase):
     def _log_recovery(self, denoised, target, stage: str) -> None:
         """Whether the waveform came back, independent of the loss.
 
-        ``rho`` is the normalised inner product with the clean target:
-        scale free and phase sensitive, so a shrunken or misplaced copy
-        scores near zero however small its loss. ``gain`` is the amplitude
-        actually realised. Rows with no signal are skipped.
+        ``rho`` is the normalised inner product with the clean target, so
+        a shrunken or misplaced copy scores near zero however small its
+        loss; ``gain`` is the amplitude realised. Skips signal-free rows.
         """
         pred_flat = denoised.reshape(denoised.shape[0], -1)
         target_flat = target.reshape(target.shape[0], -1)
@@ -195,8 +187,7 @@ class Denoiser(AframeBase):
     def _accumulate_term_gradients(self, denoised, target) -> None:
         """Add this batch's per-term gradient norms to the epoch totals.
 
-        Costs an extra backward pass, so ``log_grad_every`` thins it out;
-        0 turns it off.
+        Costs a backward pass, so ``log_grad_every`` thins it; 0 is off.
         """
         every = self.hparams.log_grad_every
         if not every or self.global_step % every:
@@ -236,12 +227,12 @@ class Denoiser(AframeBase):
     def _apply_alpha_schedule(self) -> None:
         """Move the loss's alpha along its schedule for this epoch.
 
-        Takes ``{mode, start, end, start_epoch, end_epoch}``, and needs a
-        loss with a mutable ``alpha``. ``constant``, ``linear`` and
-        ``cosine`` interpolate from ``start`` to ``end`` over the epoch
-        range. ``grad_tracking`` instead holds the two terms' gradient
-        contributions equal, setting alpha from the measured ratio of
-        their norms; ``start`` and ``end`` then act as bounds.
+        Takes ``{mode, start, end, start_epoch, end_epoch}`` and needs a
+        mutable ``alpha``. ``constant``, ``linear`` and ``cosine``
+        interpolate ``start`` to ``end`` over the epoch range.
+        ``grad_tracking`` instead equalises the two terms' gradient
+        contributions from their measured norms, with ``start`` and
+        ``end`` as bounds.
         """
         schedule = self._alpha_schedule
         if schedule is None or not hasattr(self.denoiser_loss, "alpha"):
