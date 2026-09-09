@@ -46,7 +46,86 @@ def loss_helper(
     raise ValueError(f"Unknown loss {loss!r}. Choose one of {LOSS_FUNCTIONS}.")
 
 
-class ScheduledMixtureLoss(nn.Module):
+class TermStashMixin:
+    """Stash each loss term as a ``last_<name>_term`` attribute.
+
+    The terms exist to be logged, so they are detached by default: holding
+    their graphs would keep a copy of the backward graph alive every step.
+    ``term_gradient_norms`` sets ``keep_term_graph`` for the length of one
+    call when it needs to differentiate them.
+    """
+
+    keep_term_graph = False
+
+    def _stash(self, **terms: torch.Tensor) -> None:
+        for name, value in terms.items():
+            setattr(
+                self,
+                f"last_{name}_term",
+                value if self.keep_term_graph else value.detach(),
+            )
+
+
+@torch.enable_grad()
+def term_gradient_norms(
+    loss_fn: nn.Module,
+    pred: torch.Tensor,
+    target: torch.Tensor,
+) -> dict:
+    """Gradient norm of each loss term with respect to the prediction.
+
+    The mixing weight is only meaningful next to these: two terms can have
+    similar values and still contribute gradients that differ by orders of
+    magnitude, and it is the gradients that move the weights.
+
+    Differentiates each ``last_<name>_term`` the loss stashed and returns
+    ``{<name>_value, <name>_gradnorm}``, or an empty dict for a loss that
+    stashes nothing.
+    """
+    prediction = pred.detach().clone().requires_grad_(True)
+    target = target.detach()
+
+    previous = getattr(loss_fn, "keep_term_graph", None)
+    if previous is None:
+        return {}
+
+    loss_fn.keep_term_graph = True
+    try:
+        loss_fn(prediction, target)
+        terms = {
+            name[len("last_") : -len("_term")]: getattr(loss_fn, name)
+            for name in dir(loss_fn)
+            if name.startswith("last_") and name.endswith("_term")
+        }
+        differentiable = [
+            (name, value)
+            for name, value in terms.items()
+            if torch.is_tensor(value) and value.requires_grad
+        ]
+
+        stats = {}
+        for index, (name, value) in enumerate(differentiable):
+            stats[f"{name}_value"] = float(value.detach())
+            # one graph is shared across the terms, so hold it until the last
+            (gradient,) = torch.autograd.grad(
+                value,
+                prediction,
+                retain_graph=index < len(differentiable) - 1,
+                allow_unused=True,
+            )
+            stats[f"{name}_gradnorm"] = (
+                0.0 if gradient is None else float(gradient.norm())
+            )
+
+        # a term with no gradient path still has a value worth logging
+        for name, value in terms.items():
+            stats.setdefault(f"{name}_value", float(value.detach()))
+    finally:
+        loss_fn.keep_term_graph = previous
+    return stats
+
+
+class ScheduledMixtureLoss(TermStashMixin, nn.Module):
     """Mixture of a time-domain and a frequency-domain denoiser loss.
 
     Aframe tensors are ``(B, C, L)``, so the FFT runs over the last dim ``L``.
@@ -210,8 +289,7 @@ class ScheduledMixtureLoss(nn.Module):
 
         # expose raw components (pre-alpha) so the task can log them and
         # pick alpha from their relative scale
-        self.last_time_term = time_term.detach()
-        self.last_spectral_term = spectral_term.detach()
+        self._stash(time=time_term, spectral=spectral_term)
         return mix
 
 
