@@ -72,7 +72,7 @@ model:
     warm_start_ckpt: null
     lambda_spread: 0.2
     denoiser_loss:
-      class_path: train.losses.SNRWeightedMSELoss
+      class_path: train.losses_denoiser_ky.SNRWeightedMSELoss
       init_args:
         gamma: 1.0
         ref_snr: 8.0

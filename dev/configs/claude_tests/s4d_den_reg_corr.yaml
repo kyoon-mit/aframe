@@ -72,7 +72,7 @@ model:
     warm_start_ckpt: null
     lambda_spread: 0.2
     denoiser_loss:
-      class_path: train.losses.CorrelationDenoiseLoss
+      class_path: train.losses_denoiser_ky.CorrelationDenoiseLoss
       init_args:
         mse_weight: 0.1
         sig_thresh: 0.5

@@ -72,7 +72,7 @@ model:
     warm_start_ckpt: null
     lambda_spread: 0.2
     denoiser_loss:
-      class_path: train.losses.MixtureMSESpectralLoss
+      class_path: train.losses_denoiser_ky.MixtureMSESpectralLoss
       init_args:
         alpha: 0.5
     lambda_denoise: 30.0

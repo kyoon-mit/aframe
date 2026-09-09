@@ -70,7 +70,7 @@ model:
     denoiser_ckpt: null
     freeze_denoiser: true
     denoiser_loss:
-      class_path: train.losses.ScheduledMixtureLoss
+      class_path: train.losses_denoiser_ky.ScheduledMixtureLoss
       init_args:
         alpha: 0.5
         density: true
