@@ -28,8 +28,17 @@ case "${RESUME:-auto}" in
     no|none|false) ;;
     auto)
         ROOT=$(grep -m1 'default_root_dir:' "${CONFIG}" | awk '{print $2}')
-        LAST=$(find "${ROOT}" -name last.ckpt 2>/dev/null | head -1)
-        [ -n "${LAST:-}" ] && CKPT_ARGS=(--ckpt_path "${LAST}")
+        # On a fresh run ROOT does not exist yet, so find exits 1 and
+        # pipefail would fail the whole assignment, which set -e turns
+        # into a silent exit before anything is printed. Look only if the
+        # directory is there, and let a failed search be a normal miss.
+        LAST=""
+        if [ -d "${ROOT}" ]; then
+            LAST=$(find "${ROOT}" -name last.ckpt 2>/dev/null | head -1 || true)
+        fi
+        if [ -n "${LAST}" ]; then
+            CKPT_ARGS=(--ckpt_path "${LAST}")
+        fi
         ;;
     *) CKPT_ARGS=(--ckpt_path "${RESUME}") ;;
 esac
@@ -44,7 +53,9 @@ echo "resume: ${CKPT_ARGS[1]:-none (fresh)}"
 # A shared base.yaml is optional: a self-contained variant carries
 # everything itself and there is nothing to layer under it.
 BASE_ARGS=()
-[ -f "${HERE}/base.yaml" ] && BASE_ARGS=(--config "${HERE}/base.yaml")
+if [ -f "${HERE}/base.yaml" ]; then
+    BASE_ARGS=(--config "${HERE}/base.yaml")
+fi
 
 cd "${REPO}/projects/train"
 exec uv run python -m train fit \
