@@ -55,10 +55,9 @@ def loss_helper(
 class TermStashMixin:
     """Stash each loss term as a ``last_<name>_term`` attribute.
 
-    The terms exist to be logged, so they are detached by default: holding
-    their graphs would keep a copy of the backward graph alive every step.
-    ``term_gradient_norms`` sets ``keep_term_graph`` for the length of one
-    call when it needs to differentiate them.
+    Detached by default, since holding their graphs would keep a backward
+    graph alive every step. ``term_gradient_norms`` sets
+    ``keep_term_graph`` for one call when it needs to differentiate them.
     """
 
     keep_term_graph = False
@@ -80,13 +79,12 @@ def term_gradient_norms(
 ) -> dict:
     """Gradient norm of each loss term with respect to the prediction.
 
-    The mixing weight is only meaningful next to these: two terms can have
-    similar values and still contribute gradients that differ by orders of
-    magnitude, and it is the gradients that move the weights.
+    The mixing weight only means something next to these: two terms can
+    sit at similar values while their gradients differ by orders of
+    magnitude, and the gradients are what move the weights.
 
-    Differentiates each ``last_<name>_term`` the loss stashed and returns
-    ``{<name>_value, <name>_gradnorm}``, or an empty dict for a loss that
-    stashes nothing.
+    Differentiates each stashed ``last_<name>_term`` and returns
+    ``{<name>_value, <name>_gradnorm}``, empty if the loss stashes none.
     """
     prediction = pred.detach().clone().requires_grad_(True)
     target = target.detach()
@@ -131,6 +129,54 @@ def term_gradient_norms(
     return stats
 
 
+class TimeMSELoss(TermStashMixin, nn.Module):
+    """Plain time-domain MSE::
+
+        L = mean_{b,c,t} ( pred_{bct} - target_{bct} )^2
+
+    No spectral term, no normalisation, no schedule.
+    """
+
+    def forward(
+        self, pred: torch.Tensor, target: torch.Tensor
+    ) -> torch.Tensor:
+        """pred, target: (B, C, L). Returns scalar loss."""
+        time_term = F.mse_loss(pred, target)
+        self._stash(time=time_term)
+        return time_term
+
+
+class TimeMSESegLoss(TermStashMixin, nn.Module):
+    """Time-domain MSE summed over ``nw_time`` equal segments::
+
+        L = sum_i mean_{b,c,t in i} ( pred_{bct} - target_{bct} )^2
+
+    Args:
+        nw_time: number of equal time segments.
+    """
+
+    def __init__(self, nw_time: int = 8):
+        super().__init__()
+        if nw_time < 1:
+            raise ValueError(f"nw_time must be >= 1, got {nw_time}")
+        self.nw_time = nw_time
+
+    def forward(
+        self, pred: torch.Tensor, target: torch.Tensor
+    ) -> torch.Tensor:
+        """pred, target: (B, C, L). ``L`` must divide by ``nw_time``."""
+        length = target.shape[-1]
+        if length % self.nw_time:
+            raise ValueError(
+                f"kernel length {length} does not divide into "
+                f"{self.nw_time} segments"
+            )
+        error = (pred - target).pow(2).unflatten(-1, (self.nw_time, -1))
+        time_term = error.mean(dim=(0, 1, 3)).sum()
+        self._stash(time=time_term)
+        return time_term
+
+
 class ScheduledMixtureLoss(TermStashMixin, nn.Module):
     """Mixture of a time-domain and a frequency-domain denoiser loss.
 
@@ -138,23 +184,16 @@ class ScheduledMixtureLoss(TermStashMixin, nn.Module):
     ``alpha`` is externally mutable so the training task can schedule it
     epoch-by-epoch (0 = pure spectral, 1 = pure time-domain).
 
-    The two terms live on different scales and that mismatch moves during
-    training. A time-domain MSE grows with the square of the waveform
-    amplitude, while an ``msle`` spectral term compares log magnitudes and
-    so is amplitude-invariant: measured over four decades of amplitude the
-    ratio between them swings by six orders of magnitude. Under an SNR
-    curriculum the amplitudes shift as training runs, so a fixed ``alpha``
-    silently re-weights the two objectives.
+    The terms sit on different scales and the gap moves during training: a
+    time MSE grows as amplitude squared while an ``msle`` term compares log
+    magnitudes and is amplitude-invariant, so over four decades of
+    amplitude their ratio swings by six orders. An SNR curriculum shifts
+    the amplitude, so a fixed ``alpha`` silently re-weights the two.
 
-    Dividing each term by a statistic of the current batch fixes the scale
-    but breaks on noise-only targets, where that statistic is zero: the
-    quotient is then either a clamp-limited spike or a division by zero.
-    Instead the time term is divided by ``target_scale``, a running mean of
-    the target power kept as a buffer and updated only from batches that
-    carry signal. It is a slow-moving constant rather than a per-batch
-    quantity, so it tracks the curriculum without ever collapsing to zero,
-    and a batch of pure background is scored against the same scale as any
-    other batch -- its error stays finite and meaningful.
+    A per-batch divisor would fix the scale but is zero on a noise-only
+    target. The time term is instead divided by ``target_scale``, an EMA of
+    the target power updated only from batches carrying signal: slow
+    moving, never zero, so a background batch stays finite.
 
     Args:
         alpha: initial weight for the time term. Updated in place each epoch.
@@ -234,9 +273,8 @@ class ScheduledMixtureLoss(TermStashMixin, nn.Module):
     def _update_scale(self, target: torch.Tensor) -> None:
         """Track the typical target scale across batches.
 
-        The update is skipped for a batch whose targets are all (or nearly
-        all) zero, since such a batch says nothing about the scale of a
-        signal and would drag the running value toward zero.
+        Skipped for an all-zero batch, which says nothing about signal
+        scale and would drag the running value toward zero.
         """
         batch_scale = loss_helper(
             self.time_loss,
@@ -273,21 +311,17 @@ class ScheduledMixtureLoss(TermStashMixin, nn.Module):
     ) -> torch.Tensor:
         """Spectral error, scored differently where the target is empty.
 
-        The log exists to compress a spectrum that spans decades, so that
-        quiet bins are not drowned out by loud ones. A noise-only row has
-        no such spectrum: its target is zero everywhere, and the log's
-        floor then decides what counts as silent. At ``log_floor`` 1e0 the
-        difference between emitting 1e-2 and emitting nothing is 4e-3 in
-        log, squared away to 2e-5, so the row is scored as already
-        perfect. Lowering the floor restores the distinction but puts the
-        prediction in the region where the log's 1/x derivative drives the
-        gradient up as the output falls, which is the wrong direction to
-        converge from.
+        The log compresses a spectrum spanning decades so quiet bins are
+        not drowned by loud ones. A noise-only row has no such spectrum:
+        its target is zero and ``log_floor`` alone decides what counts as
+        silent. At floor 1e0 the gap between emitting 1e-2 and nothing is
+        4e-3 in log, squared to 2e-5, so the row scores as perfect. A
+        lower floor restores the distinction but lands in the region where
+        the log's 1/x derivative pushes hardest as the output falls, the
+        wrong direction to converge from.
 
-        So the log is used only where there is a distribution to compare,
-        and rows whose target is empty are scored on plain magnitudes,
-        where zero is an ordinary value and the gradient falls off as the
-        output approaches it.
+        So use the log only where there is a distribution to compare, and
+        score empty rows on plain magnitudes, where zero is ordinary.
         """
         row_energy = target.reshape(target.shape[0], -1).pow(2).sum(-1)
         has_signal = row_energy.sqrt() > self.sig_thresh
@@ -321,6 +355,12 @@ class ScheduledMixtureLoss(TermStashMixin, nn.Module):
             torch.log(target_mag + self.log_floor) / self._log_base_scale,
         )
 
+    def _time_term(
+        self, pred: torch.Tensor, target: torch.Tensor
+    ) -> torch.Tensor:
+        """Time-domain discrepancy over the whole kernel."""
+        return self._term(self.time_loss, pred, target)
+
     def forward(
         self, pred: torch.Tensor, target: torch.Tensor
     ) -> torch.Tensor:
@@ -328,7 +368,7 @@ class ScheduledMixtureLoss(TermStashMixin, nn.Module):
         if self.training and self.density:
             self._update_scale(target)
 
-        time_term = self._term(self.time_loss, pred, target)
+        time_term = self._time_term(pred, target)
         if self.density:
             # divide by a slow-moving constant, not a statistic of this
             # batch, so a background-only batch is scored on the same
@@ -351,6 +391,118 @@ class ScheduledMixtureLoss(TermStashMixin, nn.Module):
         # pick alpha from their relative scale
         self._stash(time=time_term, spectral=spectral_term)
         return mix
+
+
+class ScheduledMixtureRelativeLoss(ScheduledMixtureLoss):
+    """Relative error per (row, channel, time segment), plus an envelope.
+
+    Row ``b``, channel ``c``, segment ``i`` of ``nw_time``; ``S`` are the
+    rows carrying signal and ``B`` the background rows::
+
+        L = alpha * time + (1 - alpha) * spectral
+
+        time     = |S|/N * ( mean_S rel + lambda_env * mean_S env )
+                 + |B|/N * mean_B ||pred||^2
+
+        rel_{bci} = ||pred_{bci} - target_{bci}||^2
+                    ---------------------------------
+                    max( ||target_{bci}||^2 , floor_{bc} )
+
+        env_{bci} = ( log||pred_{bci}|| - log||target_{bci}|| )^2
+
+        floor_{bc} = seg_floor * mean_t target_{bc}(t)^2
+
+        spectral = |S|/N * mean_S ( log_b(|P|+f) - log_b(|T|+f) )^2
+                 + |B|/N * mean_B ( |P| - |T| )^2
+
+    with ``P = |rfft(pred)|``, ``T = |rfft(target)|``, ``f = log_floor``.
+
+    ``rel`` weights every cell by its own energy; ``env`` penalises the
+    amplitude departing from the target's.
+
+    Args:
+        nw_time: equal time segments. 1 normalises per row only.
+        nw_spec: segments for the spectral term. Only 1 is implemented.
+        seg_floor: floor on a cell's divisor, as a fraction of the row's
+            mean power.
+        lambda_env: weight on the envelope term. 0 disables it.
+    """
+
+    def __init__(
+        self,
+        *args,
+        nw_time: int = 8,
+        nw_spec: int = 1,
+        seg_floor: float = 1e-3,
+        lambda_env: float = 0.0,
+        **kwargs,
+    ):
+        super().__init__(*args, **kwargs)
+        if nw_time < 1:
+            raise ValueError(f"nw_time must be >= 1, got {nw_time}")
+        if nw_spec != 1:
+            raise ValueError(f"only nw_spec=1 is implemented, got {nw_spec}")
+        if seg_floor <= 0.0:
+            raise ValueError(f"seg_floor must be > 0, got {seg_floor}")
+        if lambda_env < 0.0:
+            raise ValueError(f"lambda_env must be >= 0, got {lambda_env}")
+        self.nw_time = nw_time
+        self.nw_spec = nw_spec
+        self.seg_floor = seg_floor
+        self.lambda_env = lambda_env
+
+    def _time_term(
+        self, pred: torch.Tensor, target: torch.Tensor
+    ) -> torch.Tensor:
+        """Relative error per (row, channel, segment) cell.
+
+        pred, target: ``(B, C, L)``. ``L`` must divide by ``nw_time``.
+        """
+        length = target.shape[-1]
+        if length % self.nw_time:
+            raise ValueError(
+                f"kernel length {length} does not divide into "
+                f"{self.nw_time} segments"
+            )
+
+        # (B, C, nw, W): channels stay separate, since a signal can be far
+        # louder in one interferometer than the other
+        pred_seg = pred.unflatten(-1, (self.nw_time, -1))
+        target_seg = target.unflatten(-1, (self.nw_time, -1))
+
+        error = (pred_seg - target_seg).pow(2).mean(-1)
+        power = target_seg.pow(2).mean(-1)
+
+        row_power = target.pow(2).mean(-1, keepdim=True)
+        floor = (self.seg_floor * row_power).clamp_min(1e-12)
+        relative = error / torch.maximum(power, floor)
+
+        # sig_thresh is a threshold on the norm, as in the parent, not on
+        # the mean power
+        has_signal = target.pow(2).sum(-1).sqrt() > self.sig_thresh
+        if not bool(has_signal.any()):
+            return super()._time_term(pred, target)
+
+        signal_term = relative[has_signal].mean()
+        if self.lambda_env:
+            eps = floor.sqrt()
+            log_pred = (pred_seg.pow(2).mean(-1).sqrt() + eps).log()
+            log_target = (power.sqrt() + eps).log()
+            envelope = (log_pred - log_target).pow(2)[has_signal].mean()
+            signal_term = signal_term + self.lambda_env * envelope
+
+        terms = [signal_term]
+        weights = [int(has_signal.sum())]
+        if not bool(has_signal.all()):
+            empty = ~has_signal
+            terms.append(error[empty].mean())
+            weights.append(int(empty.sum()))
+
+        total = sum(weights)
+        return sum(
+            term * (weight / total)
+            for term, weight in zip(terms, weights, strict=True)
+        )
 
 
 class CorrelationDenoiseLoss(nn.Module):
