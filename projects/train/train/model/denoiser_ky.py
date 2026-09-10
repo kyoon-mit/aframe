@@ -11,7 +11,7 @@ from typing import Callable, Optional
 
 import torch
 
-from train.losses import term_gradient_norms
+from train.losses_denoiser_ky import term_gradient_norms
 from train.model.base import AframeBase
 from train.model.regression_ky import (
     WarmupCosineAnnealingWarmRestarts,
