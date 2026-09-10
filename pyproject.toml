@@ -69,5 +69,7 @@ select = ["B", "C", "E", "F", "W", "B9"]
 ignore = ["W605", "E203", "F722"]
 
 # ignore asterisk imports and unused
-# import errors in __init__ files
-per-file-ignores =  {"**/__init__.py" = ["F401", "F403"]}
+# import errors in __init__ files. The plot_events scripts are argparse
+# front ends whose main() reads as one long recipe; splitting it up to
+# satisfy the complexity limit would not make it clearer.
+per-file-ignores =  {"**/__init__.py" = ["F401", "F403"], "dev/data/plot_events/*.py" = ["C901"]}

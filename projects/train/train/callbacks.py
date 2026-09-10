@@ -1557,8 +1557,8 @@ class ReferenceEventCallback(DenoiserEvolutionCallback):
     The parent class captures whichever batch training happens to hand it,
     so the events change from run to run and the resulting plots cannot be
     compared across variants. This one reads a curated file instead, built
-    by DATA/aframe_data/plot/scripts/build_plot_events.py, so every run
-    plots the same signals: several signal-to-noise ratios, one injection
+    by dev/data/plot_events/build_plot_events.py, so every run plots
+    the same signals: several signal-to-noise ratios, one injection
     on a glitch, and one background-only stretch.
 
     The file supplies ``noisy`` and ``clean`` arrays of shape
