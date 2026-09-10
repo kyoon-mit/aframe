@@ -169,6 +169,9 @@ class ScheduledMixtureLoss(TermStashMixin, nn.Module):
             bins stop dominating; any LOSS_FUNCTIONS name applies that
             discrepancy to plain magnitudes.
         log_floor: floor inside the log for 'msle'.
+        sig_thresh: a row whose clean target has a smaller norm than this
+            carries no signal, and its spectral error is measured on plain
+            magnitudes rather than through the log.
         log_base: base of the logarithm for 'msle'. Changing it rescales the
             spectral term by 1/ln(base)**2 -- base 10 makes it ~5.3x smaller
             than natural log -- so it shifts where alpha balances the two
@@ -186,6 +189,7 @@ class ScheduledMixtureLoss(TermStashMixin, nn.Module):
         log_base: float = 10.0,
         huber_delta: float = 1.0,
         scale_momentum: float = 0.99,
+        sig_thresh: float = 0.5,
     ):
         super().__init__()
         if not 0.0 <= alpha <= 1.0:
@@ -218,6 +222,7 @@ class ScheduledMixtureLoss(TermStashMixin, nn.Module):
         self._log_base_scale = math.log(log_base)
         self.huber_delta = huber_delta
         self.scale_momentum = scale_momentum
+        self.sig_thresh = sig_thresh
         # running mean of the target's own "error against predicting zero",
         # saved with the model so a resumed run keeps the same normalization
         self.register_buffer("target_scale", torch.ones(()))
@@ -260,6 +265,62 @@ class ScheduledMixtureLoss(TermStashMixin, nn.Module):
         """
         return loss_helper(loss, pred, target, self.huber_delta)
 
+    def _msle_term(
+        self,
+        pred_mag: torch.Tensor,
+        target_mag: torch.Tensor,
+        target: torch.Tensor,
+    ) -> torch.Tensor:
+        """Spectral error, scored differently where the target is empty.
+
+        The log exists to compress a spectrum that spans decades, so that
+        quiet bins are not drowned out by loud ones. A noise-only row has
+        no such spectrum: its target is zero everywhere, and the log's
+        floor then decides what counts as silent. At ``log_floor`` 1e0 the
+        difference between emitting 1e-2 and emitting nothing is 4e-3 in
+        log, squared away to 2e-5, so the row is scored as already
+        perfect. Lowering the floor restores the distinction but puts the
+        prediction in the region where the log's 1/x derivative drives the
+        gradient up as the output falls, which is the wrong direction to
+        converge from.
+
+        So the log is used only where there is a distribution to compare,
+        and rows whose target is empty are scored on plain magnitudes,
+        where zero is an ordinary value and the gradient falls off as the
+        output approaches it.
+        """
+        row_energy = target.reshape(target.shape[0], -1).pow(2).sum(-1)
+        has_signal = row_energy.sqrt() > self.sig_thresh
+        if bool(has_signal.all()):
+            return self._term("mse", *self._as_log(pred_mag, target_mag))
+
+        terms, weights = [], []
+        if bool(has_signal.any()):
+            log_pred, log_target = self._as_log(
+                pred_mag[has_signal], target_mag[has_signal]
+            )
+            terms.append(self._term("mse", log_pred, log_target))
+            weights.append(int(has_signal.sum()))
+
+        empty = ~has_signal
+        terms.append(self._term("mse", pred_mag[empty], target_mag[empty]))
+        weights.append(int(empty.sum()))
+
+        total = sum(weights)
+        return sum(
+            term * (weight / total)
+            for term, weight in zip(terms, weights, strict=True)
+        )
+
+    def _as_log(
+        self, pred_mag: torch.Tensor, target_mag: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Magnitudes as log_b(|X| + floor)."""
+        return (
+            torch.log(pred_mag + self.log_floor) / self._log_base_scale,
+            torch.log(target_mag + self.log_floor) / self._log_base_scale,
+        )
+
     def forward(
         self, pred: torch.Tensor, target: torch.Tensor
     ) -> torch.Tensor:
@@ -278,14 +339,7 @@ class ScheduledMixtureLoss(TermStashMixin, nn.Module):
         target_mag = torch.fft.rfft(target, dim=-1).abs()
 
         if self.spectral_loss == "msle":
-            # log_b(x) = ln(x) / ln(b)
-            pred_mag = (
-                torch.log(pred_mag + self.log_floor) / self._log_base_scale
-            )
-            target_mag = (
-                torch.log(target_mag + self.log_floor) / self._log_base_scale
-            )
-            spectral_term = self._term("mse", pred_mag, target_mag)
+            spectral_term = self._msle_term(pred_mag, target_mag, target)
         else:
             spectral_term = self._term(
                 self.spectral_loss, pred_mag, target_mag
