@@ -2,7 +2,7 @@
 #SBATCH --partition=gpu_test
 #SBATCH --job-name=den_no_curr_1e-3_prob0.5
 #SBATCH --gres=gpu:1
-#SBATCH --mem=16G
+#SBATCH --mem=48G
 #SBATCH --cpus-per-task=8
 #SBATCH --time=12:00:00
 #SBATCH --output=/n/holystore01/LABS/iaifi_lab/Lab/kyoon/aframe/dev/runs/denoiser_4s/train/merger/fix_loss_grad/slurm_logs/%x_%j.out
@@ -21,8 +21,9 @@ export HDF5_USE_FILE_LOCKING=FALSE
 cd ${REPO}/projects/train
 source ${REPO}/projects/train/.venv/bin/activate
 
-# 8 cpus on this allocation, and the train and validation workers are both
-# alive at the handover, so keep the count well under the core count
+# The parent holds the validation timeslides and each worker forks a copy
+# of it, so a 16G allocation with 4 workers was OOM killed during the sanity
+# check. Fewer workers, more headroom.
 uv run --no-sync python -m train fit \
   --config ${CONFIG} \
-  --data.init_args.max_num_workers=4
+  --data.init_args.max_num_workers=2
