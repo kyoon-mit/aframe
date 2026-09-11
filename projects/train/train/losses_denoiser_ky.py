@@ -146,6 +146,122 @@ class TimeMSELoss(TermStashMixin, nn.Module):
         return time_term
 
 
+class FreqMSELoss(TermStashMixin, nn.Module):
+    """MSE on the magnitude spectrum::
+
+        L = mean_{b,c,f} ( |rfft(pred)|_{bcf} - |rfft(target)|_{bcf} )^2
+
+    The magnitude discards phase, so a time-shifted or sign-flipped
+    reconstruction costs nothing here. Pair it with a time term if that
+    matters.
+    """
+
+    def forward(
+        self, pred: torch.Tensor, target: torch.Tensor
+    ) -> torch.Tensor:
+        """pred, target: (B, C, L). Returns scalar loss."""
+        pred_mag = torch.fft.rfft(pred, dim=-1).abs()
+        target_mag = torch.fft.rfft(target, dim=-1).abs()
+        spectral_term = F.mse_loss(pred_mag, target_mag)
+        self._stash(spectral=spectral_term)
+        return spectral_term
+
+
+class FreqMSLELoss(TermStashMixin, nn.Module):
+    """MSE on log magnitude spectra::
+
+        L = mean_{b,c,f} ( log_b(|P|+floor) - log_b(|T|+floor) )^2
+
+    with ``P = |rfft(pred)|`` and ``T = |rfft(target)|``. The log
+    compresses a spectrum spanning decades so quiet bins are not drowned
+    by loud ones; ``log_floor`` sets where a bin counts as silent, and
+    below it the log's 1/x derivative pushes hardest as the output falls.
+    Phase is discarded with the magnitude.
+
+    Args:
+        log_floor: floor inside the log.
+        log_base: base of the logarithm. Rescales the loss by
+            1/ln(base)**2.
+    """
+
+    def __init__(self, log_floor: float = 1.0, log_base: float = 10.0):
+        super().__init__()
+        if log_floor <= 0.0:
+            raise ValueError(f"log_floor must be > 0, got {log_floor}")
+        if log_base <= 1.0:
+            raise ValueError(f"log_base must be > 1, got {log_base}")
+        self.log_floor = log_floor
+        self.log_base = log_base
+        self._log_base_scale = math.log(log_base)
+
+    def forward(
+        self, pred: torch.Tensor, target: torch.Tensor
+    ) -> torch.Tensor:
+        """pred, target: (B, C, L). Returns scalar loss."""
+        pred_mag = torch.fft.rfft(pred, dim=-1).abs()
+        target_mag = torch.fft.rfft(target, dim=-1).abs()
+        log_pred = (pred_mag + self.log_floor).log() / self._log_base_scale
+        log_target = (target_mag + self.log_floor).log() / self._log_base_scale
+        spectral_term = F.mse_loss(log_pred, log_target)
+        self._stash(spectral=spectral_term)
+        return spectral_term
+
+
+class TimeMSELogAmpLoss(TermStashMixin, nn.Module):
+    """Time-domain MSE with a log-amplitude penalty::
+
+        L = mean_{b,c,t} ( pred_{bct} - target_{bct} )^2
+            + lambda_amp * mean_S ( log||pred_{bc}|| - log||target_{bc}|| )^2
+
+    MSE alone is minimised by shrinking: for a prediction of shape
+    correlation rho the least-squares scale is rho, so an imperfect
+    reconstruction is rewarded for collapsing toward zero. The penalty is
+    symmetric in the log, so halving costs what doubling costs.
+
+    ``S`` are the rows carrying signal; a background row has no amplitude
+    to match and takes the MSE alone.
+
+    Args:
+        lambda_amp: weight on the log-amplitude penalty.
+        sig_thresh: rows whose target norm is below this carry no signal.
+        eps: floor inside the log.
+    """
+
+    def __init__(
+        self,
+        lambda_amp: float = 1.0,
+        sig_thresh: float = 0.5,
+        eps: float = 1e-8,
+    ):
+        super().__init__()
+        if lambda_amp < 0.0:
+            raise ValueError(f"lambda_amp must be >= 0, got {lambda_amp}")
+        if eps <= 0.0:
+            raise ValueError(f"eps must be > 0, got {eps}")
+        self.lambda_amp = lambda_amp
+        self.sig_thresh = sig_thresh
+        self.eps = eps
+
+    def forward(
+        self, pred: torch.Tensor, target: torch.Tensor
+    ) -> torch.Tensor:
+        """pred, target: (B, C, L). Returns scalar loss."""
+        time_term = F.mse_loss(pred, target)
+
+        target_norm = target.pow(2).sum(-1).sqrt()  # (B, C)
+        has_signal = target_norm > self.sig_thresh
+        amp_term = pred.new_zeros(())
+        if self.lambda_amp and bool(has_signal.any()):
+            pred_norm = pred.pow(2).sum(-1).sqrt()
+            log_ratio = (pred_norm[has_signal] + self.eps).log() - (
+                target_norm[has_signal] + self.eps
+            ).log()
+            amp_term = log_ratio.pow(2).mean()
+
+        self._stash(time=time_term, amp=amp_term)
+        return time_term + self.lambda_amp * amp_term
+
+
 class TimeMSESegLoss(TermStashMixin, nn.Module):
     """Time-domain MSE summed over ``nw_time`` equal segments::
 
@@ -171,7 +287,9 @@ class TimeMSESegLoss(TermStashMixin, nn.Module):
                 f"kernel length {length} does not divide into "
                 f"{self.nw_time} segments"
             )
-        error = (pred - target).pow(2).unflatten(-1, (self.nw_time, -1))
+        error = F.mse_loss(pred, target, reduction="none")
+        # (B, C, L) -> (B, C, nw_time, L // nw_time)
+        error = error.unflatten(-1, (self.nw_time, -1))
         time_term = error.mean(dim=(0, 1, 3)).sum()
         self._stash(time=time_term)
         return time_term
@@ -216,6 +334,10 @@ class ScheduledMixtureLoss(TermStashMixin, nn.Module):
             than natural log -- so it shifts where alpha balances the two
             terms rather than changing the shape of either.
         huber_delta: transition point for 'huber'/'smooth_l1', both terms.
+        lambda_amp: weight on a log-amplitude penalty added outside the
+            alpha mixture. MSE alone is minimised by shrinking, since for
+            a prediction of shape correlation rho the least-squares scale
+            is rho; the penalty is symmetric in the log. 0 disables it.
     """
 
     def __init__(
@@ -229,6 +351,7 @@ class ScheduledMixtureLoss(TermStashMixin, nn.Module):
         huber_delta: float = 1.0,
         scale_momentum: float = 0.99,
         sig_thresh: float = 0.5,
+        lambda_amp: float = 0.0,
     ):
         super().__init__()
         if not 0.0 <= alpha <= 1.0:
@@ -262,6 +385,9 @@ class ScheduledMixtureLoss(TermStashMixin, nn.Module):
         self.huber_delta = huber_delta
         self.scale_momentum = scale_momentum
         self.sig_thresh = sig_thresh
+        if lambda_amp < 0.0:
+            raise ValueError(f"lambda_amp must be >= 0, got {lambda_amp}")
+        self.lambda_amp = lambda_amp
         # running mean of the target's own "error against predicting zero",
         # saved with the model so a resumed run keeps the same normalization
         self.register_buffer("target_scale", torch.ones(()))
@@ -387,9 +513,21 @@ class ScheduledMixtureLoss(TermStashMixin, nn.Module):
 
         mix = self.alpha * time_term + (1.0 - self.alpha) * spectral_term
 
+        amp_term = pred.new_zeros(())
+        if self.lambda_amp:
+            target_norm = target.pow(2).sum(-1).sqrt()  # (B, C)
+            has_signal = target_norm > self.sig_thresh
+            if bool(has_signal.any()):
+                pred_norm = pred.pow(2).sum(-1).sqrt()
+                log_ratio = (pred_norm[has_signal] + 1e-8).log() - (
+                    target_norm[has_signal] + 1e-8
+                ).log()
+                amp_term = log_ratio.pow(2).mean()
+            mix = mix + self.lambda_amp * amp_term
+
         # expose raw components (pre-alpha) so the task can log them and
         # pick alpha from their relative scale
-        self._stash(time=time_term, spectral=spectral_term)
+        self._stash(time=time_term, spectral=spectral_term, amp=amp_term)
         return mix
 
 
