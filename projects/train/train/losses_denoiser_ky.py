@@ -338,6 +338,8 @@ class ScheduledMixtureLoss(TermStashMixin, nn.Module):
             alpha mixture. MSE alone is minimised by shrinking, since for
             a prediction of shape correlation rho the least-squares scale
             is rho; the penalty is symmetric in the log. 0 disables it.
+        c_rho: weight on a (1 - rho) penalty, where rho is the per-row
+            cosine similarity between prediction and target. 0 disables it.
     """
 
     def __init__(
@@ -352,6 +354,7 @@ class ScheduledMixtureLoss(TermStashMixin, nn.Module):
         scale_momentum: float = 0.99,
         sig_thresh: float = 0.5,
         lambda_amp: float = 0.0,
+        c_rho: float = 0.0,
     ):
         super().__init__()
         if not 0.0 <= alpha <= 1.0:
@@ -388,6 +391,9 @@ class ScheduledMixtureLoss(TermStashMixin, nn.Module):
         if lambda_amp < 0.0:
             raise ValueError(f"lambda_amp must be >= 0, got {lambda_amp}")
         self.lambda_amp = lambda_amp
+        if c_rho < 0.0:
+            raise ValueError(f"c_rho must be >= 0, got {c_rho}")
+        self.c_rho = c_rho
         # running mean of the target's own "error against predicting zero",
         # saved with the model so a resumed run keeps the same normalization
         self.register_buffer("target_scale", torch.ones(()))
@@ -525,9 +531,27 @@ class ScheduledMixtureLoss(TermStashMixin, nn.Module):
                 amp_term = log_ratio.pow(2).mean()
             mix = mix + self.lambda_amp * amp_term
 
+        rho_term = pred.new_zeros(())
+        if self.c_rho:
+            target_norm = target.pow(2).sum(-1).sqrt()  # (B, C)
+            has_signal = target_norm > self.sig_thresh
+            if bool(has_signal.any()):
+                pred_norm = pred.pow(2).sum(-1).sqrt()
+                inner = (pred * target).sum(-1)
+                rho = inner[has_signal] / (
+                    pred_norm[has_signal] * target_norm[has_signal] + 1e-8
+                )
+                rho_term = (1.0 - rho).mean()
+            mix = mix + self.c_rho * rho_term
+
         # expose raw components (pre-alpha) so the task can log them and
         # pick alpha from their relative scale
-        self._stash(time=time_term, spectral=spectral_term, amp=amp_term)
+        self._stash(
+            time=time_term,
+            spectral=spectral_term,
+            amp=amp_term,
+            rho=rho_term,
+        )
         return mix
 
 
