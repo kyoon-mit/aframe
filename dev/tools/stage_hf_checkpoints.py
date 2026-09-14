@@ -17,6 +17,10 @@ Usage::
 
     python stage_hf_checkpoints.py --list
     python stage_hf_checkpoints.py --runs NAME [NAME ...] --out hf_staging
+    python stage_hf_checkpoints.py --runs NAME --upload
+    python stage_hf_checkpoints.py --upload            # push an existing --out
+
+Uploading needs huggingface_hub and 'hf auth login' with a write token.
 """
 
 from __future__ import annotations
@@ -43,6 +47,7 @@ CONFIG_ROOTS = [
 ENTITY = "kyoon-mit-massachusetts-institute-of-technology"
 PROJECT = "DENOISER-SCAN"
 METRICS = ["val/rho", "val/gain", "val/den_loss"]
+HF_REPO = "kyoon-mit/SSM-BNS-WIP"
 
 
 def find_runs() -> dict[str, Path]:
@@ -216,12 +221,46 @@ def command_stage(entries: list[dict], out: Path) -> None:
     print(f"\nwrote {out}/results.csv ({len(rows)} checkpoints)")
 
 
+def command_upload(out: Path, repo: str) -> None:
+    """Push the staged tree to Hugging Face, keeping its directory layout."""
+    try:
+        from huggingface_hub import HfApi
+    except ImportError:
+        sys.exit("huggingface_hub is not installed: uv add huggingface_hub")
+
+    api = HfApi()
+    try:
+        who = api.whoami()["name"]
+    except Exception:
+        sys.exit("not logged in to Hugging Face: run 'hf auth login'")
+
+    api.create_repo(repo, repo_type="model", private=True, exist_ok=True)
+    print(f"uploading {out} to {repo} as {who}")
+    url = api.upload_folder(
+        folder_path=str(out),
+        repo_id=repo,
+        repo_type="model",
+        commit_message="Add denoiser checkpoints",
+    )
+    print(url)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--list", action="store_true", help="show stageable runs")
     parser.add_argument("--runs", nargs="+", default=[], help="run names to stage")
     parser.add_argument("--out", type=Path, default=Path("hf_staging"))
+    parser.add_argument(
+        "--upload", action="store_true", help=f"push --out to {HF_REPO}"
+    )
+    parser.add_argument("--repo", default=HF_REPO, help="Hugging Face model repo")
     args = parser.parse_args()
+
+    if args.upload and not args.runs:
+        if not args.out.is_dir():
+            sys.exit(f"{args.out} does not exist: stage runs first with --runs")
+        command_upload(args.out, args.repo)
+        return
 
     available = find_runs()
     if not available:
@@ -236,6 +275,8 @@ def main() -> None:
     if unknown:
         sys.exit(f"unknown runs: {', '.join(unknown)}")
     command_stage([describe(n, available[n]) for n in args.runs], args.out)
+    if args.upload:
+        command_upload(args.out, args.repo)
 
 
 if __name__ == "__main__":
