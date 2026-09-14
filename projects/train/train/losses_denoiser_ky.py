@@ -26,29 +26,35 @@ def loss_helper(
     pred: torch.Tensor,
     target: torch.Tensor,
     delta: float = 1.0,
+    reduction: str = "mean",
 ) -> torch.Tensor:
     """Scalar discrepancy between two tensors, selected by name.
 
     All options are means over every element, so they stay comparable in
     magnitude and can be swapped without retuning the mixing weight. See
     LOSS_FUNCTIONS for the choices; ``delta`` is the huber/smooth_l1
-    transition point (ignored otherwise).
+    transition point (ignored otherwise). ``reduction`` "none" returns the
+    error elementwise instead, for a caller that weights it itself; "rmse"
+    has no elementwise form, since its sqrt is taken after the mean.
     """
     if loss == "mse":
-        return F.mse_loss(pred, target)
+        return F.mse_loss(pred, target, reduction=reduction)
     if loss == "mae":
-        return F.l1_loss(pred, target)
+        return F.l1_loss(pred, target, reduction=reduction)
     if loss == "rmse":
+        if reduction != "mean":
+            raise ValueError("rmse has no elementwise form")
         # clamp keeps the sqrt gradient finite when the error reaches zero
         return F.mse_loss(pred, target).clamp_min(1e-12).sqrt()
     if loss == "huber":
-        return F.huber_loss(pred, target, delta=delta)
+        return F.huber_loss(pred, target, delta=delta, reduction=reduction)
     if loss in ("smooth_l1", "smae"):
-        return F.smooth_l1_loss(pred, target, beta=delta)
+        return F.smooth_l1_loss(pred, target, beta=delta, reduction=reduction)
     if loss == "logcosh":
         # log(cosh(d)) as |d| + log1p(exp(-2|d|)) - log(2); no overflow
         d = (pred - target).abs()
-        return (d + torch.log1p(torch.exp(-2.0 * d)) - math.log(2.0)).mean()
+        error = d + torch.log1p(torch.exp(-2.0 * d)) - math.log(2.0)
+        return error if reduction == "none" else error.mean()
     raise ValueError(f"Unknown loss {loss!r}. Choose one of {LOSS_FUNCTIONS}.")
 
 
@@ -665,6 +671,96 @@ class ScheduledMixtureRelativeLoss(ScheduledMixtureLoss):
             term * (weight / total)
             for term, weight in zip(terms, weights, strict=True)
         )
+
+
+class ScheduledMixtureWeightedLoss(ScheduledMixtureLoss):
+    """Spectral term with the frequency bins weighted as a power law.
+
+    Bins ``f`` of ``rfft``, ``highpass`` the data's own corner::
+
+        spectral = sum_f w(f) * err(f) / sum_f w(f)
+
+        w(f) = ( max(f, highpass) / highpass )^-beta_freq
+
+    ``err`` is whatever the parent scores, so both the log branch and the
+    plain-magnitude branch for empty rows are weighted the same way.
+
+    An rfft has a fixed bin spacing, so a sweep spends most of its bins at
+    high frequency while most of its cycles sit at low frequency, and a
+    flat mean scores the band the chirp barely occupies. beta_freq 1 makes
+    each octave count equally; 0 leaves the parent's flat mean untouched.
+
+    Below the corner the weight holds at 1 rather than continuing to
+    climb. The data is highpassed but the model's output is not, and it
+    does emit there, so those bins keep the weight they have without the
+    power law running away towards DC.
+
+    Args:
+        beta_freq: power-law exponent on the bin weight. 0 disables the
+            weighting and recovers the parent exactly.
+        highpass: corner in Hz, below which the weight stays flat.
+        sample_rate: of the data, to convert bin index to Hz.
+    """
+
+    def __init__(
+        self,
+        *args,
+        beta_freq: float = 1.0,
+        highpass: float = 20.0,
+        sample_rate: float = 2048.0,
+        **kwargs,
+    ):
+        super().__init__(*args, **kwargs)
+        if beta_freq < 0.0:
+            raise ValueError(f"beta_freq must be >= 0, got {beta_freq}")
+        if highpass <= 0.0:
+            raise ValueError(f"highpass must be > 0, got {highpass}")
+        if sample_rate <= 0.0:
+            raise ValueError(f"sample_rate must be > 0, got {sample_rate}")
+        self.beta_freq = beta_freq
+        self.highpass = highpass
+        self.sample_rate = sample_rate
+        # built on the first forward, when the number of bins is known
+        self.register_buffer("bin_weight", torch.empty(0), persistent=False)
+
+    def _weights(self, num_bins: int, device, dtype) -> torch.Tensor:
+        """Bin weights, normalised to mean 1 so alpha keeps its meaning."""
+        if self.bin_weight.numel() == num_bins:
+            return self.bin_weight
+        # rfft bin i of a length-L window is i * sample_rate / L Hz, and
+        # num_bins = L // 2 + 1, so the spacing is sample_rate / L
+        freqs = torch.arange(num_bins, device=device, dtype=dtype)
+        freqs = freqs * (self.sample_rate / (2 * (num_bins - 1)))
+        ratio = freqs.clamp_min(self.highpass) / self.highpass
+        weight = ratio**-self.beta_freq
+        weight = weight / weight.mean()
+        self.bin_weight = weight
+        return weight
+
+    def _term(
+        self, loss: str, pred: torch.Tensor, target: torch.Tensor
+    ) -> torch.Tensor:
+        """Weighted over frequency, flat everywhere else.
+
+        The parent routes its time and spectral terms through here alike,
+        so weight only the tensors that are laid out in frequency bins.
+        """
+        if not self.beta_freq or pred.shape[-1] != self._num_bins:
+            return super()._term(loss, pred, target)
+
+        weight = self._weights(pred.shape[-1], pred.device, pred.dtype)
+        error = loss_helper(loss, pred, target, self.huber_delta, "none")
+        # mean over every axis but frequency, then weight across the bins
+        per_bin = error.mean(dim=tuple(range(error.dim() - 1)))
+        return (per_bin * weight).sum() / weight.sum()
+
+    def forward(
+        self, pred: torch.Tensor, target: torch.Tensor
+    ) -> torch.Tensor:
+        """pred, target: (B, C, L). Returns scalar loss."""
+        # the spectral tensors are the only ones this long
+        self._num_bins = pred.shape[-1] // 2 + 1
+        return super().forward(pred, target)
 
 
 class CorrelationDenoiseLoss(nn.Module):
