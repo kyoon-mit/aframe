@@ -1347,6 +1347,9 @@ class DenoiserEvolutionCallback(Callback):
             pred = pl_module(noisy)
             if isinstance(pred, (tuple, list)):
                 pred = pred[0]  # x_denoised
+            # a residual-trained denoiser emits the noise, not the waveform
+            if hasattr(pl_module, "recover"):
+                pred = pl_module.recover(noisy, pred)
         if was_training:
             pl_module.train()
 
@@ -1410,6 +1413,9 @@ class DenoiserEvolutionCallback(Callback):
             pred = pl_module(noisy)
             if isinstance(pred, (tuple, list)):
                 pred = pred[0]
+            # a residual-trained denoiser emits the noise, not the waveform
+            if hasattr(pl_module, "recover"):
+                pred = pl_module.recover(noisy, pred)
         if was_training:
             pl_module.train()
 
@@ -1467,6 +1473,10 @@ class DenoiserEvolutionCallback(Callback):
                 }
             )
 
+    # where coalescence sits in the kernel, in samples, when known; the
+    # reference-event file records it, a live training batch does not
+    merger_index = None
+
     def _time_axis(self, length):
         if self.sample_rate:
             t = self.window_begin + np.arange(length) / self.sample_rate
@@ -1498,11 +1508,16 @@ class DenoiserEvolutionCallback(Callback):
         for e in range(n_ex):
             for k in range(n_ifos):
                 row = e * n_ifos + k
-                # merger = peak amplitude of the clean target; t=0 there,
-                # so pre-merger is negative (relative time to coalescence).
-                # With no injection the target is all zeros and has no
-                # merger, so fall back to absolute time from kernel start.
-                if np.any(target[e, k]):
+                # t=0 at coalescence, so pre-merger is negative. Use the
+                # index the events file records where there is one: on a
+                # pre-merger kernel the coalescence lies past the window,
+                # and the peak of what is inside it is just the loudest
+                # inspiral cycle, which would put t=0 in the wrong place.
+                # Without a recorded index fall back to that peak, and to
+                # the kernel start on a row with no injection at all.
+                if self.merger_index is not None:
+                    merger_idx = self.merger_index
+                elif np.any(target[e, k]):
                     merger_idx = int(np.argmax(np.abs(target[e, k])))
                 else:
                     merger_idx = 0
@@ -1551,6 +1566,11 @@ class DenoiserEvolutionCallback(Callback):
                 f, m = self._fft(pred[e, k, sl])
                 axf.loglog(f, m, lw=0.9, color="tab:red", label="prediction")
                 axf.set_ylabel("|rfft|")
+                # a background row's target is identically zero, so its log
+                # axis would otherwise stretch down to the float floor and
+                # leave the prediction a flat line at the top
+                if not target[e, k, sl].any():
+                    axf.set_ylim(bottom=1e-10)
                 if row == 0:
                     axf.set_title("abs(rfft) magnitude", fontsize=9)
                     axf.legend(fontsize=7, loc="upper right")
@@ -1609,6 +1629,8 @@ class ReferenceEventCallback(DenoiserEvolutionCallback):
             clean = torch.tensor(handle["clean"][:], dtype=torch.float32)
             self.names = [name.decode() for name in handle["names"][:]]
             self.sample_rate = float(handle.attrs["sample_rate"])
+            if "merger_index" in handle.attrs:
+                self.merger_index = int(handle.attrs["merger_index"])
         device = pl_module.device
         self._fixed_batch = (noisy.to(device), clean.to(device))
         self.n_examples = noisy.shape[0]

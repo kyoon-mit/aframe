@@ -92,9 +92,18 @@ class Denoiser(AframeBase):
         )
 
     def forward(self, X: torch.Tensor) -> torch.Tensor:
+        """Whatever the network emits: the waveform, or the noise under
+        ``predict_residual``. Callers wanting the waveform either way go
+        through ``recover``."""
         if self.hparams.normalize_input:
             X = X / X.std(dim=-1, keepdim=True).clamp(min=1e-8)
         return self.model(X)
+
+    def recover(self, X: torch.Tensor, output: torch.Tensor):
+        """The waveform implied by an output, for plots and metrics."""
+        if self.hparams.predict_residual:
+            return X - output
+        return output
 
     def _shared_step(self, batch, stage: str) -> torch.Tensor:
         """Denoise one batch and log the loss and its components.
@@ -102,15 +111,14 @@ class Denoiser(AframeBase):
         Both dataloaders inject, so a batch is ``(X, X_clean, y, params)``.
         """
         X, X_clean = batch[0], batch[1]
-        output = self(X)
+        # score the network's own output against what it was asked to fit,
+        # which under predict_residual is the noise rather than the waveform
+        scored = self(X)
         if self.hparams.predict_residual:
-            # the model is fitting the noise, so the waveform is whatever
-            # subtracting it from the input leaves behind
-            scored, scored_target = output, X - X_clean
-            denoised = X - output
+            scored_target = X - X_clean
         else:
-            scored, scored_target = output, X_clean
-            denoised = output
+            scored_target = X_clean
+        denoised = self.recover(X, scored)
         loss = self.denoiser_loss(scored, scored_target)
 
         on_step = stage == "train"
