@@ -1,5 +1,5 @@
-# Time MSE + freq msle (log_floor 1) at fixed alpha 0.5, with a
-# log-amplitude penalty. Fixed SNR 4.
+# Time MSE + freq msle (log_floor 1e-1) at fixed alpha 0.5 with c_rho 1,
+# on a 4s window ending 16s before merger. SNR uniform on [4, 100].
 
 seed_everything: 20260910
 
@@ -11,15 +11,15 @@ trainer:
   log_every_n_steps: 50
   benchmark: true
 
-  default_root_dir: /n/holystore01/LABS/iaifi_lab/Lab/kyoon/aframe/dev/runs/denoise/merger/sched_floor_1e0_logamp_lambda_1
+  default_root_dir: /n/holystore01/LABS/iaifi_lab/Lab/kyoon/aframe/dev/runs/denoise/premerger/premerger_16s_sched_alpha_0.1_floor_1e-3_c_rho_5_lambda_amp_1_uniform_snr
 
   logger:
     class_path: lightning.pytorch.loggers.WandbLogger
     init_args:
       project: DENOISER-SCAN
-      name: sched_floor_1e0_logamp_lambda_1
-      id: sched_floor_1e0_logamp_lambda_1
-      save_dir: /n/holystore01/LABS/iaifi_lab/Lab/kyoon/aframe/dev/runs/denoise/merger/sched_floor_1e0_logamp_lambda_1
+      name: premerger_16s_sched_alpha_0.1_floor_1e-3_c_rho_5_lambda_amp_1_uniform_snr
+      id: premerger_16s_sched_alpha_0.1_floor_1e-3_c_rho_5_lambda_amp_1_uniform_snr
+      save_dir: /n/holystore01/LABS/iaifi_lab/Lab/kyoon/aframe/dev/runs/denoise/premerger/premerger_16s_sched_alpha_0.1_floor_1e-3_c_rho_5_lambda_amp_1_uniform_snr
 
   callbacks:
     - class_path: lightning.pytorch.callbacks.ModelCheckpoint
@@ -37,7 +37,7 @@ trainer:
 
     - class_path: train.callbacks.ReferenceEventCallback
       init_args:
-        events_file: /n/holystore01/LABS/iaifi_lab/Lab/kyoon/aframe/data/plot/merger_4s_2048Hz/plot_events.hdf5
+        events_file: /n/holystore01/LABS/iaifi_lab/Lab/kyoon/aframe/data/plot/premerger_16s_4s_256Hz/plot_events.hdf5
         every_n_epochs: 10
 
 model:
@@ -64,13 +64,13 @@ model:
     denoiser_loss:
       class_path: train.losses_denoiser_ky.ScheduledMixtureLoss
       init_args:
-        alpha: 0.5
+        alpha: 0.1
         density: false
         time_loss: mse
         spectral_loss: msle
-        log_floor: 1.0
+        log_floor: 1e-3
         lambda_amp: 1.0
-
+        c_rho: 5.0
 
     lr_scheduler:
       class_path: train.model.regression_ky.WarmupCosineAnnealingWarmRestarts
@@ -89,10 +89,11 @@ data:
     waveforms_dir: /n/holystore01/LABS/iaifi_lab/Lab/kyoon/DATA/aframe_data/train
     ifos: [H1, L1]
     sample_rate: 2048
+    model_input_sample_rate: 256
 
     kernel_length: 4.0
-    left_pad: 3.5
-    right_pad: 0.0
+    left_pad: 19.5
+    right_pad: -16.0
 
     batch_size: 128
     batches_per_epoch: 391
@@ -120,13 +121,14 @@ data:
     snr_sampler:
       class_path: train.augmentations.SnrSampler
       init_args:
+        distribution: torch.distributions.Uniform
         constant_params:
-          index: -3
-          maximum: 100.0
+          low: 4.0
+          validate_args: false
         start_params:
-          minimum: 4.0
+          high: 100.0
         end_params:
-          minimum: 4.0
+          high: 100.0
         decay_steps: 1
 
     param_transforms:

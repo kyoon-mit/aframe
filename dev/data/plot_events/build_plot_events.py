@@ -41,8 +41,10 @@ HERE = Path(__file__).resolve().parent
 PLOT_ROOT = HERE.parent
 DATA_ROOT = Path("/n/holystore01/LABS/iaifi_lab/Lab/kyoon/DATA")
 DEFAULT_BACKGROUND = str(DATA_ROOT / "O3a_H1_L1_2048Hz")
+# a training set: the events are made by projecting its polarisations
+# through the same pipeline training uses, not by taking a stored response
 DEFAULT_WAVEFORMS = str(
-    DATA_ROOT / "aframe_data/val/end_o3_ratesandpops_bns_snr4.hdf5"
+    DATA_ROOT / "aframe_data/train/end_o3_ratesandpops_bns_uniform_chirp.hdf5"
 )
 
 
@@ -410,82 +412,93 @@ def main():
         quietest[1],
     )
 
-    # Injection. The whitened waveform's norm is its optimal matched-filter
-    # SNR, so scaling to a target norm sets the SNR exactly.
-    with h5py.File(args.waveform_file) as handle:
-        # aframe stores polarisations under waveforms/<ifo>, lowercased
-        group = handle[args.waveform_group]
-        keys = [ifo.lower() for ifo in args.ifos if ifo.lower() in group]
-        if len(keys) != len(args.ifos):
-            keys = list(group)[: len(args.ifos)]
-        waveform = np.stack([group[key][args.waveform_index] for key in keys])
-        snr_recorded = None
-        if "parameters/snr" in handle:
-            snr_recorded = float(handle["parameters/snr"][args.waveform_index])
-    waveform = torch.tensor(waveform, dtype=torch.float64)
-    LOGGER.info(
-        "waveform %d from %s: shape %s%s",
-        args.waveform_index,
-        "/".join(keys),
-        tuple(waveform.shape),
-        f", recorded snr {snr_recorded:.1f}" if snr_recorded else "",
-    )
+    # Injection through the training pipeline itself. Training projects a
+    # pair of polarisations onto the detectors, rescales that response to
+    # its target network SNR over the whole waveform, and only then cuts
+    # the kernel; the kernel keeps whatever share of the SNR its window
+    # covers. Reimplementing those steps here is how the file once drifted
+    # from what the model trains on, so they are now the pipeline's own
+    # WaveformProjector and the same slicing arithmetic, with the random
+    # sky position pinned so the events are reproducible.
+    import train.augmentations as aug
 
+    with h5py.File(args.waveform_file) as handle:
+        group = handle[args.waveform_group]
+        if "cross" in group and "plus" in group:
+            cross = torch.tensor(group["cross"][args.waveform_index])
+            plus = torch.tensor(group["plus"][args.waveform_index])
+        else:
+            raise SystemExit(
+                f"{args.waveform_file} holds projected responses, not "
+                "polarisations; point --waveform-file at a training set "
+                "with waveforms/cross and waveforms/plus"
+            )
+    LOGGER.info(
+        "waveform %d from %s: %d samples",
+        args.waveform_index,
+        Path(args.waveform_file).name,
+        cross.shape[-1],
+    )
     if args.native_sample_rate > rate:
         from scipy.signal import decimate
 
-        waveform = torch.tensor(
-            decimate(
-                waveform.numpy(),
-                int(round(args.native_sample_rate / rate)),
-                ftype="fir",
-                axis=-1,
-            ),
-            dtype=torch.float64,
-        )
+        factor = int(round(args.native_sample_rate / rate))
+        cross = torch.tensor(decimate(cross.numpy(), factor, ftype="fir"))
+        plus = torch.tensor(decimate(plus.numpy(), factor, ftype="fir"))
 
-    # Slice exactly as build_val_batches does, so these events sit in the
-    # kernel the way validation events do. The window start is set by
-    # left_pad, not right_pad: the merger lands left_pad_size samples from
-    # the kernel start, which leaves the post-merger tail inside the window.
-    # Driving it from right_pad instead truncates the merger and ringdown.
-    signal_index = waveform.shape[-1] - int(args.waveform_right_pad * rate)
+    projector = aug.WaveformProjector(args.ifos, rate, args.highpass, None).to(
+        device
+    )
+    # a fixed, overhead-ish sky position: the point is one reproducible
+    # event at several amplitudes, not a draw from the prior
+    sky = {
+        key: torch.tensor([value], dtype=torch.float64, device=device)
+        for key, value in (("dec", 0.3), ("psi", 0.7), ("phi", 1.1))
+    }
+
+    # the same slicing arithmetic as AframeDataset.slice_waveforms, then a
+    # fixed cut of one kernel from the span it returns, where training
+    # would draw the cut at random
+    pad = int(args.fduration * rate)
     kernel_size = kernel + pad
     left_pad_size = int(args.left_pad * rate) + pad // 2
-    start = signal_index - left_pad_size
-    stop = start + kernel_size
 
-    left = -min(start, 0)
-    right = max(stop - waveform.shape[-1], 0)
-    if left or right:
-        waveform = torch.nn.functional.pad(waveform, [left, right])
-        start += left
-        stop += left
-    padded = waveform[:, start:stop]
-    # Where the coalescence sits in the whitened kernel, known here by
-    # construction. Recording it means the plotter never has to re-derive
-    # the origin from an argmax, which drifts between rows and is undefined
-    # on a background row whose target is identically zero.
-    merger_index = signal_index + left - start - pad // 2
-    LOGGER.info(
-        "merger %.3f s into the %.1f s kernel (right_pad %.2f s)",
-        merger_index / rate,
-        kernel / rate,
-        args.right_pad,
-    )
+    def kernel_of(response):
+        """One kernel, padded for the whitener, from a full response."""
+        signal_index = response.shape[-1] - int(args.waveform_right_pad * rate)
+        start = signal_index - left_pad_size
+        stop = start + kernel_size
+        left = -min(start, 0)
+        right = max(stop - response.shape[-1], 0)
+        if left or right:
+            response = torch.nn.functional.pad(response, [left, right])
+            start += left
+            stop += left
+        return response[..., start:stop], signal_index + left - start
+
+    merger_index = None
 
     def whitened_unit(psd):
-        """Whiten the padded waveform with this PSD and normalise it.
+        """The kernel this waveform contributes at network SNR 1.
 
-        The waveform has to pass through the same whitening as the data it
-        is injected into, or the norm is not the SNR the detector would see.
+        Project at network SNR 1 with the pipeline's own projector, which
+        rescales over the whole response exactly as training does, then
+        cut and whiten the kernel.
         """
-        white = (
-            whiten(padded.unsqueeze(0).to(device), psd.to(device))
-            .squeeze(0)
-            .cpu()
+        nonlocal merger_index
+        response = projector(
+            sky["dec"],
+            sky["psi"],
+            sky["phi"],
+            torch.tensor([1.0], dtype=torch.float64, device=device),
+            psd.to(device).double().unsqueeze(0),
+            cross=cross.to(device).double().unsqueeze(0),
+            plus=plus.to(device).double().unsqueeze(0),
         )
-        return white / white.reshape(-1).norm().clamp_min(1e-12)
+        padded, signal_in_padded = kernel_of(response)
+        merger_index = signal_in_padded - pad // 2
+        white = whiten(padded, psd.to(device).double()).squeeze(0).cpu()
+        return white
 
     names, noisy_rows, clean_rows = [], [], []
 
@@ -504,6 +517,13 @@ def main():
     LOGGER.info("building events")
     for snr in args.snrs:
         add(f"snr{snr:g}", quietest[3], snr, quietest[5])
+        if merger_index is not None and snr == args.snrs[0]:
+            LOGGER.info(
+                "merger %.3f s into the %.1f s kernel (right_pad %.2f s)",
+                merger_index / rate,
+                kernel / rate,
+                args.right_pad,
+            )
     if not args.no_glitch:
         add("glitch", loudest[3], args.glitch_snr, loudest[5])
     if not args.no_background:
