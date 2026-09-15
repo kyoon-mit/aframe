@@ -33,6 +33,10 @@ class Denoiser(AframeBase):
             parameters, which are also excluded from weight decay.
         weight_decay: L2 strength for non-SSM parameters.
         normalize_input: divide each channel by its own standard deviation.
+        predict_residual: fit the noise, ``X - X_clean``, instead of the
+            waveform, and recover the waveform as ``X - output``. The
+            logged metrics are unchanged either way, since they compare
+            the recovered waveform against the clean target.
         lr_scheduler: factory taking an optimizer and returning a scheduler.
         log_dt_min, log_dt_max, log_a_max: bounds applied to the S4D
             parameters after every optimiser step to keep them stable.
@@ -48,6 +52,7 @@ class Denoiser(AframeBase):
         ssm_lr: float = 1e-3,
         weight_decay: float = 0.01,
         normalize_input: bool = True,
+        predict_residual: bool = False,
         lr_scheduler: Optional[
             Callable[[torch.optim.Optimizer], object]
         ] = None,
@@ -78,6 +83,7 @@ class Denoiser(AframeBase):
         self.save_hyperparameters(
             "ssm_lr",
             "normalize_input",
+            "predict_residual",
             "lr_scheduler_interval",
             "log_dt_min",
             "log_dt_max",
@@ -96,8 +102,16 @@ class Denoiser(AframeBase):
         Both dataloaders inject, so a batch is ``(X, X_clean, y, params)``.
         """
         X, X_clean = batch[0], batch[1]
-        denoised = self(X)
-        loss = self.denoiser_loss(denoised, X_clean)
+        output = self(X)
+        if self.hparams.predict_residual:
+            # the model is fitting the noise, so the waveform is whatever
+            # subtracting it from the input leaves behind
+            scored, scored_target = output, X - X_clean
+            denoised = X - output
+        else:
+            scored, scored_target = output, X_clean
+            denoised = output
+        loss = self.denoiser_loss(scored, scored_target)
 
         on_step = stage == "train"
         self.log(
@@ -153,7 +167,8 @@ class Denoiser(AframeBase):
             self._log_recovery(denoised, X_clean, stage)
 
         if stage == "train":
-            self._accumulate_term_gradients(denoised, X_clean)
+            # the pair the loss saw, so the norms describe what is optimised
+            self._accumulate_term_gradients(scored, scored_target)
 
         return loss
 
