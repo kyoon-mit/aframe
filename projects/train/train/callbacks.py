@@ -96,7 +96,17 @@ class WandbSaveConfig(pl.cli.SaveConfigCallback):
             # pop off unecessary trainer args
             config = self.config.as_dict()
             config.pop("trainer")
-            wandb_logger.experiment.config.update(config)
+            # A resumed run already holds the config it first started with,
+            # and wandb refuses to overwrite a stored key unless asked, so
+            # let the config being written now win. Only on a resume: on a
+            # fresh run that refusal is the guard against quietly reusing
+            # another run's id, which is worth keeping.
+            # "allow" is the logger's own default, so only an explicit
+            # "must" means the caller is deliberately resuming
+            resuming = wandb_logger._wandb_init.get("resume") == "must"
+            wandb_logger.experiment.config.update(
+                config, allow_val_change=resuming
+            )
 
 
 class ModelCheckpoint(pl.callbacks.ModelCheckpoint):

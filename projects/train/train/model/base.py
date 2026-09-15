@@ -37,7 +37,12 @@ class AframeBase(pl.LightningModule):
         self.model = arch
         self.verbose = verbose
         self._logger = self.init_logging(verbose)
-        self.save_hyperparameters(ignore=["arch", "metric"])
+        # lr_scheduler is a factory, and logging it records the object
+        # rather than its settings; the config callback then writes the
+        # same key as the null it parses from the YAML, which wandb reads
+        # as one key changing value and refuses. Its settings are logged
+        # by that callback and by LearningRateMonitor regardless.
+        self.save_hyperparameters(ignore=["arch", "metric", "lr_scheduler"])
 
     def init_logging(self, verbose):
         log_format = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
