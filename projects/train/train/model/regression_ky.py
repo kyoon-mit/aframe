@@ -380,6 +380,10 @@ class GaussianNLLRegressionAframeCustomLR(GaussianNLLRegressionAframe):
 
         ssm_params, other_params = [], []
         for name, p in self.model.named_parameters():
+            # a frozen denoiser's parameters would otherwise still collect
+            # optimiser state and weight decay
+            if not p.requires_grad:
+                continue
             leaf = name.rsplit(".", 1)[-1]
             if leaf in self.SSM_PARAM_NAMES:
                 ssm_params.append(p)
@@ -431,6 +435,10 @@ class DenoisedGaussianNLLRegression(GaussianNLLRegressionAframeCustomLR):
     (e.g. ``[(0, 0.0), (30, 1.0)]`` = denoiser-only for 30 epochs, then joint).
     All ``train/*`` regression metrics from the parent are logged unchanged,
     plus ``train/loss_denoise`` / ``train/loss_regress`` / the lambdas.
+
+    ``denoiser_ckpt`` loads a denoiser trained on its own by the Denoiser
+    task, and ``freeze_denoiser`` then holds it fixed so only the regressor
+    learns. Both are optional; without them the two train jointly as before.
     """
 
     def __init__(
@@ -441,6 +449,8 @@ class DenoisedGaussianNLLRegression(GaussianNLLRegressionAframeCustomLR):
         lambda_regress: float = 0.5,
         regress_schedule: Optional[List[Tuple]] = None,
         alpha_schedule: Optional[dict] = None,
+        denoiser_ckpt: Optional[str] = None,
+        freeze_denoiser: bool = False,
         **kwargs,
     ):
         super().__init__(*args, **kwargs)
@@ -459,6 +469,67 @@ class DenoisedGaussianNLLRegression(GaussianNLLRegressionAframeCustomLR):
         # end_epoch}. mode = constant/linear/cosine. Only applies when
         # denoiser_loss exposes a mutable .alpha (e.g. ScheduledMixtureLoss).
         self.alpha_schedule = alpha_schedule
+
+        # two-stage training: load a denoiser trained on its own by the
+        # Denoiser task, then hold it fixed while the regressor learns
+        self.freeze_denoiser = freeze_denoiser
+        if denoiser_ckpt is not None:
+            self._load_denoiser(denoiser_ckpt)
+        if freeze_denoiser:
+            self._freeze_denoiser()
+
+    @property
+    def denoiser(self):
+        """The denoiser submodule, wherever the architecture keeps it."""
+        if hasattr(self.model, "denoiser"):
+            return self.model.denoiser
+        return self.model.model.denoiser
+
+    def _load_denoiser(self, ckpt_path):
+        """Copy denoiser weights out of a standalone Denoiser checkpoint.
+
+        That task stores them under ``model.model.*`` while here the same
+        stack sits at ``model.denoiser.*``, so the prefix is rewritten and
+        only shape-matching tensors are taken.
+        """
+        ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=False)
+        source = ckpt.get("state_dict", ckpt)
+        target = self.denoiser.state_dict()
+        compatible, skipped = {}, []
+        for key, value in source.items():
+            name = key
+            for prefix in ("model.model.", "model.denoiser.", "model."):
+                if name.startswith(prefix):
+                    name = name[len(prefix) :]
+                    break
+            if name in target and target[name].shape == value.shape:
+                compatible[name] = value
+            else:
+                skipped.append(key)
+        missing = [k for k in target if k not in compatible]
+        self.denoiser.load_state_dict(compatible, strict=False)
+        self._logger.info(
+            f"Loaded denoiser from {ckpt_path}: {len(compatible)} tensors, "
+            f"skipped {len(skipped)}, left {len(missing)} fresh {missing}"
+        )
+
+    def _freeze_denoiser(self):
+        for param in self.denoiser.parameters():
+            param.requires_grad = False
+        self.denoiser.eval()
+        self._logger.info("Denoiser frozen; training regressor head only")
+
+    def train(self, mode: bool = True):
+        """Keep a frozen denoiser in eval mode.
+
+        Lightning calls ``train()`` on the whole task each epoch, which
+        would otherwise switch the frozen denoiser's dropout back on and
+        leave the regressor chasing a moving input.
+        """
+        super().train(mode)
+        if self.freeze_denoiser:
+            self.denoiser.eval()
+        return self
 
     def on_train_epoch_start(self):
         e = self.current_epoch
