@@ -346,6 +346,9 @@ class ScheduledMixtureLoss(TermStashMixin, nn.Module):
             is rho; the penalty is symmetric in the log. 0 disables it.
         c_rho: weight on a (1 - rho) penalty, where rho is the per-row
             cosine similarity between prediction and target. 0 disables it.
+        log_background: score signal-free rows through the log as well,
+            rather than on plain magnitudes, so both land on one scale.
+            Needs a log_floor small enough to see a zero target.
     """
 
     def __init__(
@@ -360,6 +363,7 @@ class ScheduledMixtureLoss(TermStashMixin, nn.Module):
         scale_momentum: float = 0.99,
         sig_thresh: float = 0.5,
         lambda_amp: float = 0.0,
+        log_background: bool = False,
         c_rho: float = 0.0,
     ):
         super().__init__()
@@ -397,6 +401,7 @@ class ScheduledMixtureLoss(TermStashMixin, nn.Module):
         if lambda_amp < 0.0:
             raise ValueError(f"lambda_amp must be >= 0, got {lambda_amp}")
         self.lambda_amp = lambda_amp
+        self.log_background = log_background
         if c_rho < 0.0:
             raise ValueError(f"c_rho must be >= 0, got {c_rho}")
         self.c_rho = c_rho
@@ -460,10 +465,17 @@ class ScheduledMixtureLoss(TermStashMixin, nn.Module):
 
         So use the log only where there is a distribution to compare, and
         score empty rows on plain magnitudes, where zero is ordinary.
+
+        That split costs a common scale: a log term sits near 1 while a
+        magnitude term on whitened noise sits in the thousands, so a batch
+        holding both is scored almost entirely on its empty rows. With
+        ``log_background`` the empty rows go through the log as well,
+        against their own zero target, which is only meaningful once
+        ``log_floor`` is small enough for that zero to register.
         """
         row_energy = target.reshape(target.shape[0], -1).pow(2).sum(-1)
         has_signal = row_energy.sqrt() > self.sig_thresh
-        if bool(has_signal.all()):
+        if self.log_background or bool(has_signal.all()):
             return self._term("mse", *self._as_log(pred_mag, target_mag))
 
         terms, weights = [], []
