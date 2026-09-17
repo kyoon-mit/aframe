@@ -500,12 +500,13 @@ def main():
         white = whiten(padded, psd.to(device).double()).squeeze(0).cpu()
         return white
 
-    names, noisy_rows, clean_rows = [], [], []
+    names, noisy_rows, clean_rows, psd_rows = [], [], [], []
 
     def add(name, background_whitened, snr, psd):
         clean = whitened_unit(psd) * snr
         noisy_rows.append((background_whitened.double() + clean).float())
         clean_rows.append(clean.float())
+        psd_rows.append(psd.squeeze(0).cpu())
         names.append(name)
         LOGGER.info(
             "  %-12s snr %7.2f   background peak %6.2f",
@@ -529,6 +530,7 @@ def main():
     if not args.no_background:
         noisy_rows.append(loudest[3].float())
         clean_rows.append(torch.zeros_like(loudest[3]).float())
+        psd_rows.append(loudest[5].squeeze(0).cpu())
         names.append("background")
         LOGGER.info(
             "  %-12s snr    0.00   background peak %6.2f",
@@ -545,6 +547,9 @@ def main():
     with h5py.File(output, "w") as handle:
         handle["noisy"] = torch.stack(noisy_rows).numpy()
         handle["clean"] = torch.stack(clean_rows).numpy()
+        # the psd each row was whitened with, so a model that reproduces
+        # the data's highpass on its output can build it for these rows
+        handle["psds"] = torch.stack(psd_rows).numpy()
         handle["names"] = np.array(names, dtype="S32")
         handle.attrs["sample_rate"] = rate
         handle.attrs["kernel_length"] = args.kernel_length
