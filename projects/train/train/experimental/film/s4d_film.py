@@ -10,9 +10,11 @@ from architectures.networks.s4d_variants import S4ModelSeq2Seq
 class S4ModelSeq2SeqFiLM(S4ModelSeq2Seq):
     """S4D seq-to-seq with feature-wise linear modulation on every block.
 
-    Each block's output becomes ``gamma * x + beta``, with gamma and beta
-    produced per channel per layer from a conditioning vector (Perez et
-    al., AAAI 2018). With no conditioning the modulation is the identity.
+    Each block's residual branch becomes ``gamma * z + beta``, with gamma
+    and beta produced per channel per layer from a conditioning vector.
+    With no conditioning the modulation is the identity. Pre-norm only.
+
+    Perez et al. 2018, arXiv:1709.07871.
 
     Args:
         cond_dim: length of the conditioning vector. 0 disables FiLM and
@@ -27,6 +29,7 @@ class S4ModelSeq2SeqFiLM(S4ModelSeq2Seq):
         cond_hidden: int = 64,
         **kwargs,
     ):
+        kwargs["prenorm"] = True
         super().__init__(*args, **kwargs)
         self.cond_dim = cond_dim
         if cond_dim:
@@ -66,17 +69,13 @@ class S4ModelSeq2SeqFiLM(S4ModelSeq2Seq):
         for index, (layer, norm, dropout) in enumerate(
             zip(self.s4_layers, self.norms, self.dropouts, strict=True)
         ):
-            if self.prenorm:
-                z = self._apply_norm(norm, x)
-                z = dropout(layer(z))
-                x = x + z
-            else:
-                z = dropout(layer(x))
-                x = self._apply_norm(norm, z + x)
+            z = self._apply_norm(norm, x)
+            z = dropout(layer(z))
             if gammas is not None:
                 gamma = gammas[:, index].unsqueeze(-1)  # (B, d_model, 1)
                 beta = betas[:, index].unsqueeze(-1)
-                x = gamma * x + beta
+                z = gamma * z + beta
+            x = x + z
         x = x.transpose(-1, -2)
         x = self.decoder(x)
         return x.transpose(-1, -2)
@@ -100,7 +99,6 @@ class TimeDomainS4DenoiserFiLM(Architecture):
         d_state: int = 64,
         n_layers: int = 4,
         dropout: float = 0.2,
-        prenorm: bool = False,
         num_groups: Optional[int] = None,
         dt_min: float = 1e-3,
         dt_max: float = 5.0,
@@ -115,7 +113,6 @@ class TimeDomainS4DenoiserFiLM(Architecture):
             d_state=d_state,
             n_layers=n_layers,
             dropout=dropout,
-            prenorm=prenorm,
             num_groups=num_groups,
             dt_min=dt_min,
             dt_max=dt_max,
