@@ -34,6 +34,35 @@ def inspiral_phase(
     return torch.where(freqs.unsqueeze(0) > 0, phase, torch.zeros_like(phase))
 
 
+def _rotation(
+    length: int,
+    chirp_mass: torch.Tensor,
+    coalescence_time: torch.Tensor,
+    sample_rate: float,
+    sign: int,
+) -> torch.Tensor:
+    """``exp(i sign Psi)`` on the rfft grid, as a complex (B, F) tensor.
+
+    The phase runs to thousands of radians at the low end of the band and
+    to tens of thousands through the coalescence-time term, which single
+    precision cannot carry: its spacing there is coarse enough to shift
+    the demodulation by an appreciable fraction of a radian. So the phase
+    is built in double and only the unit-modulus result is cast back.
+    """
+    dtype = torch.complex64 if chirp_mass.dtype == torch.float32 else None
+    freqs = torch.fft.rfftfreq(
+        length,
+        1 / sample_rate,
+        device=chirp_mass.device,
+        dtype=torch.float64,
+    )
+    phase = inspiral_phase(
+        freqs, chirp_mass.double(), coalescence_time.double()
+    )
+    rotation = torch.exp(sign * 1j * phase)
+    return rotation if dtype is None else rotation.to(dtype)
+
+
 def heterodyne(
     x: torch.Tensor,
     chirp_mass: torch.Tensor,
@@ -56,10 +85,7 @@ def heterodyne(
         (B, 2C, L) real, interleaved in phase and quadrature.
     """
     length = x.shape[-1]
-    freqs = torch.fft.rfftfreq(length, 1 / sample_rate, device=x.device)
-    rotation = torch.exp(
-        -1j * inspiral_phase(freqs, chirp_mass, coalescence_time)
-    )
+    rotation = _rotation(length, chirp_mass, coalescence_time, sample_rate, 1)
     spectrum = torch.fft.rfft(x, dim=-1) * rotation.unsqueeze(1)
     # a one-sided spectrum carries only positive frequencies, so the
     # inverse is complex and holds the analytic signal
@@ -79,10 +105,7 @@ def dehierodyne(
     """Inverse of ``heterodyne``: I and Q back to real channels."""
     length = z.shape[-1]
     analytic = torch.complex(z[:, 0::2], z[:, 1::2])
-    freqs = torch.fft.rfftfreq(length, 1 / sample_rate, device=z.device)
-    rotation = torch.exp(
-        1j * inspiral_phase(freqs, chirp_mass, coalescence_time)
-    )
-    spectrum = torch.fft.fft(analytic, dim=-1)[..., : freqs.shape[0]]
+    rotation = _rotation(length, chirp_mass, coalescence_time, sample_rate, -1)
+    spectrum = torch.fft.fft(analytic, dim=-1)[..., : rotation.shape[-1]]
     spectrum = spectrum * rotation.unsqueeze(1)
     return torch.fft.irfft(spectrum, n=length, dim=-1)
