@@ -20,6 +20,12 @@ class HeterodyneDenoiserDataset(DenoiserOnlyAframeDataset):
     swap and mute augmentations must be off.
     """
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # the CLI links this to the network's input width, and the network
+        # sees an in-phase and a quadrature channel per interferometer
+        self.num_ifos = 2 * len(self.hparams.ifos)
+
     def inject(self, X, waveforms, params):
         if (
             self.hparams.waveform_prob != 1.0

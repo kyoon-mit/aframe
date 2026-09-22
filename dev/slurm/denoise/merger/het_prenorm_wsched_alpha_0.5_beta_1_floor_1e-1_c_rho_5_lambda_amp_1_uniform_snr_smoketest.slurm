@@ -1,10 +1,10 @@
 #!/bin/bash
 #SBATCH --partition=gpu_test
-#SBATCH --job-name=het_prenorm_wsched_alpha_0.5_beta_1_floor_1e-1_c_rho_5_lambda_amp_1
+#SBATCH --job-name=het_smoketest
 #SBATCH --gres=gpu:1
 #SBATCH --mem=64G
 #SBATCH --cpus-per-task=8
-#SBATCH --time=12:00:00
+#SBATCH --time=01:00:00
 #SBATCH --output=/n/holystore01/LABS/iaifi_lab/Lab/kyoon/aframe/dev/runs/denoise/merger/slurm_logs/%x_%j.out
 #SBATCH --error=/n/holystore01/LABS/iaifi_lab/Lab/kyoon/aframe/dev/runs/denoise/merger/slurm_logs/%x_%j.err
 
@@ -18,4 +18,11 @@ export HDF5_USE_FILE_LOCKING=FALSE
 cd ${REPO}/projects/train
 source ${REPO}/projects/train/.venv/bin/activate
 
-uv run --no-sync python -m train fit --config ${CONFIG}
+uv run --no-sync python -m train fit --config ${CONFIG} \
+  --trainer.logger=lightning.pytorch.loggers.CSVLogger \
+  --trainer.logger.save_dir=${REPO}/dev/runs/denoise/merger/het_smoketest \
+  --trainer.max_epochs=2 \
+  --data.batch_size=64 \
+  --data.batches_per_epoch=20 \
+  --data.val_batches=2 \
+  --trainer.default_root_dir=${REPO}/dev/runs/denoise/merger/het_smoketest

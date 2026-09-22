@@ -54,12 +54,14 @@ trainer:
         every_n_epochs: 10
         # waveform_index 0 of the training set, the one the file holds
         chirp_mass: 2.734892
+        out_dir: /n/holystore01/LABS/iaifi_lab/Lab/kyoon/aframe/dev/runs/denoise/merger/het_prenorm_wsched_alpha_0.5_beta_1_floor_1e-1_c_rho_5_lambda_amp_1_uniform_snr/reference_events
 
     - class_path: train.experimental.heterodyne.callback.HeterodyneEvolutionCallback
       init_args:
         n_examples: 4
         every_n_epochs: 10
         sample_rate: 2048
+        out_dir: /n/holystore01/LABS/iaifi_lab/Lab/kyoon/aframe/dev/runs/denoise/merger/het_prenorm_wsched_alpha_0.5_beta_1_floor_1e-1_c_rho_5_lambda_amp_1_uniform_snr/denoiser_evolution
 
 model:
   class_path: train.experimental.heterodyne.task.HeterodyneDenoiser
