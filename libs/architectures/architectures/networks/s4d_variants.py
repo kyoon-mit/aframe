@@ -25,6 +25,72 @@ class S4ModelPrenorm(S4Model):
         return self.decoder(x)
 
 
+class S4ModelPooled(S4Model):
+    """S4Model whose residual blocks take a norm choice and a norm order.
+
+    ``S4Model`` fixes LayerNorm after each block and ``S4ModelPrenorm``
+    fixes LayerNorm before it. This takes either order, and GroupNorm in
+    place of LayerNorm when ``num_groups`` is given, keeping the parent's
+    mean-pool and linear readout.
+
+    Args:
+        prenorm: normalise before the block rather than after.
+        num_groups: use GroupNorm with this many groups instead of
+            LayerNorm.
+    """
+
+    def __init__(
+        self,
+        *args,
+        prenorm: bool = False,
+        num_groups: Optional[int] = None,
+        **kwargs,
+    ):
+        super().__init__(*args, **kwargs)
+        self.prenorm = prenorm
+        self._groupnorm = num_groups is not None
+        if self._groupnorm:
+            d_model = self.encoder.out_features
+            self.norms = nn.ModuleList(
+                [
+                    GroupNorm1D(num_channels=d_model, num_groups=num_groups)
+                    for _ in range(len(self.s4_layers))
+                ]
+            )
+
+    def _apply_norm(self, norm: nn.Module, x: torch.Tensor) -> torch.Tensor:
+        # x is (B, d_model, L). GroupNorm1D normalizes channels directly;
+        # LayerNorm needs the (B, L, d_model) view.
+        if self._groupnorm:
+            return norm(x)
+        return norm(x.transpose(-1, -2)).transpose(-1, -2)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            x: (B, d_input, L)
+
+        Returns:
+            (B, d_output)
+        """
+        x = x.transpose(-1, -2)
+        x = self.encoder(x)
+        x = x.transpose(-1, -2)  # (B, d_model, L)
+        for layer, norm, dropout in zip(
+            self.s4_layers, self.norms, self.dropouts, strict=True
+        ):
+            if self.prenorm:
+                z = self._apply_norm(norm, x)
+                z = dropout(layer(z))
+                x = x + z
+            else:
+                z = dropout(layer(x))
+                x = self._apply_norm(norm, z + x)
+        x = x.transpose(-1, -2)  # (B, L, d_model)
+        x = x.mean(dim=1)
+        return self.decoder(x)
+
+
 class S4ModelResNetMLPDecoder(S4Model):
     """S4Model backbone with a ResNet1D + MLP readout head in place of the
     mean-pool + linear decoder."""

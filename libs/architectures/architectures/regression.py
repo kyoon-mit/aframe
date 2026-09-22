@@ -9,6 +9,7 @@ from architectures.supervised import SupervisedArchitecture
 from architectures.base import JaxArchitecture
 from architectures.networks.s4d_variants import (
     S4ModelDenoiseRegress,
+    S4ModelPooled,
     S4ModelResNetMLPDecoder,
     S4ModelSeq2Seq,
 )
@@ -124,6 +125,79 @@ class RegressionTimeDomainS4DenoiseRegress(
                 "d_state": regressor_d_state,
                 "n_layers": regressor_n_layers,
                 "dropout": regressor_dropout,
+                "dt_min": dt_min,
+                "dt_max": dt_max,
+            },
+            detach_denoiser=detach_denoiser,
+        )
+
+    def forward(self, X: torch.Tensor):
+        return self.model(X)
+
+
+class RegressionTimeDomainS4DenoiseRegressNorm(
+    RegressionArchitecture, SupervisedArchitecture
+):
+    """S4D denoiser feeding an S4D regressor, both with a norm choice.
+
+    Same shape as ``RegressionTimeDomainS4DenoiseRegress`` -- a mean-pool
+    and linear readout, no ResNet -- but the norm order and GroupNorm
+    reach both halves, so the denoiser can match one trained on its own.
+    ``forward`` returns ``(x_denoised, param_estimates)``.
+
+    Args:
+        prenorm: normalise before each block rather than after, in the
+            denoiser and the regressor alike.
+        num_groups: use GroupNorm with this many groups instead of
+            LayerNorm.
+    """
+
+    def __init__(
+        self,
+        num_ifos: int,
+        d_output: int = 2,
+        denoiser_d_model: int = 64,
+        denoiser_d_state: int = 64,
+        denoiser_n_layers: int = 4,
+        denoiser_dropout: float = 0.2,
+        regressor_d_model: int = 64,
+        regressor_d_state: int = 64,
+        regressor_n_layers: int = 4,
+        regressor_dropout: float = 0.2,
+        prenorm: bool = False,
+        num_groups: Optional[int] = None,
+        dt_min: float = 1e-3,
+        dt_max: float = 0.1,
+        detach_denoiser: bool = False,
+        # linked from the CLI but unused here
+        sample_rate: Optional[float] = None,
+        kernel_length: Optional[float] = None,
+    ) -> None:
+        super().__init__()
+        self.model = S4ModelDenoiseRegress(
+            denoiser=S4ModelSeq2Seq,
+            regressor=S4ModelPooled,
+            denoiser_params={
+                "d_input": num_ifos,
+                "d_output": num_ifos,
+                "d_model": denoiser_d_model,
+                "d_state": denoiser_d_state,
+                "n_layers": denoiser_n_layers,
+                "dropout": denoiser_dropout,
+                "prenorm": prenorm,
+                "num_groups": num_groups,
+                "dt_min": dt_min,
+                "dt_max": dt_max,
+            },
+            regressor_params={
+                "d_input": num_ifos,
+                "d_output": d_output,
+                "d_model": regressor_d_model,
+                "d_state": regressor_d_state,
+                "n_layers": regressor_n_layers,
+                "dropout": regressor_dropout,
+                "prenorm": prenorm,
+                "num_groups": num_groups,
                 "dt_min": dt_min,
                 "dt_max": dt_max,
             },
