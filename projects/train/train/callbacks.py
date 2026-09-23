@@ -1305,15 +1305,9 @@ class DenoiserEvolutionCallback(Callback):
         self._fixed_batch = None
         self._frame_paths = []
 
-    # wandb key and output directory this callback writes under; a
-    # subclass overrides it so two callbacks on one run do not collide
-    log_name = "evolution"
-
     def on_fit_start(self, trainer, pl_module) -> None:
         if self.out_dir is None:
-            self.out_dir = Path(trainer.log_dir or ".") / (
-                f"denoiser_{self.log_name}"
-            )
+            self.out_dir = Path(trainer.log_dir or ".") / "denoiser_evolution"
         self.out_dir.mkdir(parents=True, exist_ok=True)
 
     def on_train_batch_start(
@@ -1374,16 +1368,14 @@ class DenoiserEvolutionCallback(Callback):
             import wandb
 
             trainer.logger.experiment.log(
-                {f"denoiser/{self.log_name}": wandb.Image(fig)},
+                {"denoiser/evolution": wandb.Image(fig)},
                 step=trainer.global_step,
             )
         plt.close(fig)
 
     def on_test_start(self, trainer, pl_module) -> None:
         if self.out_dir is None:
-            self.out_dir = Path(trainer.log_dir or ".") / (
-                f"denoiser_{self.log_name}"
-            )
+            self.out_dir = Path(trainer.log_dir or ".") / "denoiser_evolution"
         self.out_dir.mkdir(parents=True, exist_ok=True)
         self._test_batch = None
 
@@ -1441,9 +1433,7 @@ class DenoiserEvolutionCallback(Callback):
         if isinstance(trainer.logger, WandbLogger):
             import wandb
 
-            trainer.logger.experiment.log(
-                {f"denoiser/{self.log_name}_test": wandb.Image(fig)}
-            )
+            trainer.logger.experiment.log({"denoiser/test": wandb.Image(fig)})
         plt.close(fig)
 
     def _assemble_gif(self, frame_paths, gif_name):
@@ -1477,7 +1467,7 @@ class DenoiserEvolutionCallback(Callback):
 
             trainer.logger.experiment.log(
                 {
-                    f"denoiser/{self.log_name}_gif": wandb.Video(
+                    "denoiser/evolution_gif": wandb.Video(
                         str(gif_path), fps=self.gif_fps
                     )
                 }
@@ -1610,8 +1600,6 @@ class ReferenceEventCallback(DenoiserEvolutionCallback):
         every_n_epochs: epochs between plots.
         out_dir: where to write frames; defaults to the trainer log dir.
     """
-
-    log_name = "reference"
 
     def __init__(
         self,
