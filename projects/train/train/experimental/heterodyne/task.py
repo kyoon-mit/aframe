@@ -29,11 +29,24 @@ class HeterodyneDenoiser(Denoiser):
     Args:
         sample_rate: of the model input, in Hz. Needed to turn rfft bins
             into frequencies.
+        chirp_mass_sigma: relative standard deviation of a Gaussian error
+            applied to the chirp mass before it is used, so the signal is
+            demodulated by a wrong phase. 0 uses the true value.
     """
 
-    def __init__(self, *args, sample_rate: float = 2048.0, **kwargs) -> None:
+    def __init__(
+        self,
+        *args,
+        sample_rate: float = 2048.0,
+        chirp_mass_sigma: float = 0.0,
+        **kwargs,
+    ) -> None:
         super().__init__(*args, **kwargs)
-        self.save_hyperparameters("sample_rate")
+        if chirp_mass_sigma < 0.0:
+            raise ValueError(
+                f"chirp_mass_sigma must be >= 0, got {chirp_mass_sigma}"
+            )
+        self.save_hyperparameters("sample_rate", "chirp_mass_sigma")
         self._conditioning: Optional[tuple] = None
 
     def forward(self, X: torch.Tensor) -> torch.Tensor:
@@ -56,9 +69,17 @@ class HeterodyneDenoiser(Denoiser):
         z = self.model(z)
         return dehierodyne(z, chirp_mass, coalescence_time, sample_rate)
 
+    def _jitter(self, chirp_mass: torch.Tensor) -> torch.Tensor:
+        """Scale the chirp mass by a Gaussian factor centred on 1."""
+        sigma = self.hparams.chirp_mass_sigma
+        if not sigma:
+            return chirp_mass
+        factor = 1.0 + sigma * torch.randn_like(chirp_mass)
+        return chirp_mass * factor.clamp_min(0.1)
+
     def condition(self, params: dict) -> None:
         self._conditioning = (
-            params["chirp_mass"],
+            self._jitter(params["chirp_mass"]),
             params["coalescence_time"],
         )
 
