@@ -128,3 +128,33 @@ class DenoisedRegressionWithDenoiserMetrics(DenoisedGaussianNLLRegression):
             denoised, out = self(X)
             self._log_denoiser_metrics(denoised, X_clean)
             self._log_regression_validation(out, params)
+
+    def test_step(self, batch, _):
+        """Raw regression outputs for ``PlotParamEstCallback``.
+
+        The parent unpacks a three-element batch and calls the network
+        for the regression output alone; here the batch carries the
+        clean target as well and the network returns the denoised strain
+        beside the prediction. Rows whose parameters are NaN carry no
+        injection and supply the background predictions.
+        """
+        X, _X_clean, _y, params = batch
+        _denoised, out = self(X)
+        mean, var = self._split(out)
+        mean_phys = mean * self.y_std + self.y_mean
+        sigma_phys = torch.sqrt(var) * self.y_std
+
+        targets = torch.stack([params[k] for k in self.param_names], dim=1)
+        injected = ~torch.isnan(targets).any(dim=1)
+
+        outputs = {
+            "y_true": targets[injected].detach().cpu(),
+            "y_pred": mean_phys[injected].detach().cpu(),
+            "y_sigma": sigma_phys[injected].detach().cpu(),
+        }
+        if (~injected).any():
+            outputs["y_pred_bg"] = mean_phys[~injected].detach().cpu()
+            outputs["y_sigma_bg"] = sigma_phys[~injected].detach().cpu()
+        if "snr" in params:
+            outputs["snr"] = params["snr"][injected].detach().cpu()
+        return outputs
