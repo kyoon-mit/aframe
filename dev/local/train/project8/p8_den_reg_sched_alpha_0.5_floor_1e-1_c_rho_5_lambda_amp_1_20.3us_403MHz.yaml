@@ -1,0 +1,123 @@
+# Denoiser and energy regressor trained together on Project 8, matching the
+# BNS den_reg_sched_alpha_0.5_floor_1e-1_c_rho_5_lambda_amp_1_uniform_snr run:
+# denoiser alone to epoch 200, regressor ramped in over the next 200.
+# First 8192 samples (the PhyTS benchmark window), cavity noise.
+
+seed_everything: 20260910
+
+trainer:
+  max_epochs: 1000
+  accelerator: gpu
+  devices: 1
+  check_val_every_n_epoch: 1
+  log_every_n_steps: 50
+  benchmark: true
+
+
+  default_root_dir: /home/kyoon/SSM-BNS/aframe/dev/runs/project8/p8_den_reg_sched_alpha_0.5_floor_1e-1_c_rho_5_lambda_amp_1_20.3us_403MHz
+
+  logger:
+    class_path: lightning.pytorch.loggers.WandbLogger
+    init_args:
+      project: PROJECT8-DEN-REG
+      name: p8_den_reg_sched_alpha_0.5_floor_1e-1_c_rho_5_lambda_amp_1_20.3us_403MHz
+      id: p8_den_reg_sched_alpha_0.5_floor_1e-1_c_rho_5_lambda_amp_1_20.3us_403MHz
+      save_dir: /home/kyoon/SSM-BNS/aframe/dev/runs/project8/p8_den_reg_sched_alpha_0.5_floor_1e-1_c_rho_5_lambda_amp_1_20.3us_403MHz
+
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        monitor: val/den_loss
+        mode: min
+        save_top_k: 1
+        save_last: true
+        filename: den_{epoch:02d}
+        auto_insert_metric_name: false
+
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: epoch
+
+    - class_path: train.callbacks.ReferenceEventCallback
+      init_args:
+        events_file: /home/kyoon/SSM-BNS/aframe/data/plot/project8_20.3us_403MHz/plot_events.hdf5
+        every_n_epochs: 10
+
+model:
+  class_path: train.experimental.den_reg.task.DenoisedRegressionWithDenoiserMetrics
+  init_args:
+    arch:
+      class_path: architectures.regression.RegressionTimeDomainS4DenoiseRegressNorm
+      init_args:
+        num_ifos: 2
+        d_output: 2          # chirp mass and its uncertainty
+        denoiser_d_model: 64
+        denoiser_d_state: 64
+        denoiser_n_layers: 4
+        denoiser_dropout: 0.2
+        regressor_d_model: 64
+        regressor_d_state: 64
+        regressor_n_layers: 4
+        regressor_dropout: 0.2
+        prenorm: true
+        num_groups: 32
+        dt_min: 1e-4
+        dt_max: 10.0
+        detach_denoiser: false
+
+    param_names:
+      - energy_eV
+    beta_nll: 0.3
+    y_mean: [18549.91]
+    y_std: [28.83]
+    lambda_spread: 0.2
+    within_thresholds: [20, 10, 5, 2, 1]
+    within_unit: eV
+
+    learning_rate: 1e-4
+    ssm_lr: 1e-3
+    weight_decay: 0.01
+    normalize_input: false
+    log_dt_min: -11.5
+    log_dt_max: 2.3
+    log_a_max: 4.6
+
+    # denoiser alone to epoch 200, regressor ramped in over the next 200,
+    # then the two weighted equally
+    lambda_denoise: 1.0
+    lambda_regress: 1.0
+    regress_schedule:
+      - [200, 0.0]
+      - [400, 1.0]
+
+    denoiser_loss:
+      class_path: train.losses_denoiser_ky.ScheduledMixtureLoss
+      init_args:
+        alpha: 0.5
+        density: false
+        time_loss: mse
+        spectral_loss: msle
+        log_floor: 1.0e-1
+        lambda_amp: 1.0
+        c_rho: 5.0
+
+
+    lr_scheduler:
+      class_path: train.model.regression_ky.WarmupCosineAnnealingWarmRestarts
+      init_args:
+        warmup_epochs: 10
+        T_0: 20
+        T_mult: 2
+        eta_min: 1e-7
+        peak_decay: 0.9
+    lr_scheduler_interval: epoch
+
+data:
+  class_path: train.experimental.project8.data.Project8DataModule
+  init_args:
+    data_dir: /home/kyoon/SSM-BNS/DATA/Project8
+    noise: cav
+    offset: 0
+    cutoff: 8192
+    batch_size: 128
+    num_workers: 4
