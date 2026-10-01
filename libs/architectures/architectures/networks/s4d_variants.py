@@ -248,15 +248,20 @@ class S4ModelDenoiseRegress(nn.Module):
         denoiser_params: dict,
         regressor_params: dict,
         detach_denoiser: bool = False,
+        smoother: Optional[nn.Module] = None,
     ):
         super().__init__()
         self.denoiser = denoiser(**denoiser_params)
         self.regressor = regressor(**regressor_params)
         self.detach_denoiser = detach_denoiser
+        # applied to the denoised output before the loss and the regressor
+        self.smoother = smoother
         return
 
     def forward(self, x):  # (B, d_input, L) -> (B, d_output)
         x_denoised = self.denoiser(x)  # (B, d_input, L) -> (B, d_input, L)
+        if self.smoother is not None:
+            x_denoised = self.smoother(x_denoised)
         if self.detach_denoiser:
             y = self.regressor(x_denoised.detach())
         else:

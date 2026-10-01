@@ -7,6 +7,7 @@ from ml4gw.nn.ssm.s4d import S4Model
 from architectures import Architecture
 from architectures.supervised import SupervisedArchitecture
 from architectures.base import JaxArchitecture
+from architectures.networks.lowband import LowBandSmoother
 from architectures.networks.s4d_variants import (
     S4ModelDenoiseRegress,
     S4ModelPooled,
@@ -150,6 +151,9 @@ class RegressionTimeDomainS4DenoiseRegressNorm(
             denoiser and the regressor alike.
         num_groups: use GroupNorm with this many groups instead of
             LayerNorm.
+        smooth_below: smooth the denoised spectrum below this frequency
+            in Hz with ``LowBandSmoother``. None disables it.
+        smooth_coeffs: polynomial coefficients of that fit.
     """
 
     def __init__(
@@ -169,11 +173,25 @@ class RegressionTimeDomainS4DenoiseRegressNorm(
         dt_min: float = 1e-3,
         dt_max: float = 0.1,
         detach_denoiser: bool = False,
-        # linked from the CLI but unused here
+        smooth_below: Optional[float] = None,
+        smooth_coeffs: int = 4,
+        # linked from the CLI
         sample_rate: Optional[float] = None,
         kernel_length: Optional[float] = None,
     ) -> None:
         super().__init__()
+        smoother = None
+        if smooth_below is not None:
+            if sample_rate is None or kernel_length is None:
+                raise ValueError(
+                    "smooth_below needs sample_rate and kernel_length"
+                )
+            smoother = LowBandSmoother(
+                int(kernel_length * sample_rate),
+                sample_rate,
+                smooth_below,
+                smooth_coeffs,
+            )
         self.model = S4ModelDenoiseRegress(
             denoiser=S4ModelSeq2Seq,
             regressor=S4ModelPooled,
@@ -202,6 +220,7 @@ class RegressionTimeDomainS4DenoiseRegressNorm(
                 "dt_max": dt_max,
             },
             detach_denoiser=detach_denoiser,
+            smoother=smoother,
         )
 
     def forward(self, X: torch.Tensor):
