@@ -1333,7 +1333,7 @@ class DenoiserEvolutionCallback(Callback):
         )
 
     def on_validation_epoch_end(self, trainer, pl_module) -> None:
-        if trainer.sanity_checking:
+        if trainer.sanity_checking or not trainer.is_global_zero:
             return
         if trainer.current_epoch % self.every_n_epochs != 0:
             return
@@ -1403,7 +1403,7 @@ class DenoiserEvolutionCallback(Callback):
         this shows what the denoiser emits from noise alone.
         """
         batch = getattr(self, "_test_batch", None)
-        if batch is None:
+        if batch is None or not trainer.is_global_zero:
             return
 
         noisy, target = batch
@@ -1459,7 +1459,7 @@ class DenoiserEvolutionCallback(Callback):
         return gif_path
 
     def on_fit_end(self, trainer, pl_module) -> None:
-        if not self._frame_paths:
+        if not self._frame_paths or not trainer.is_global_zero:
             return
         gif_path = self._assemble_gif(self._frame_paths, "evolution.gif")
         if gif_path and isinstance(trainer.logger, WandbLogger):
