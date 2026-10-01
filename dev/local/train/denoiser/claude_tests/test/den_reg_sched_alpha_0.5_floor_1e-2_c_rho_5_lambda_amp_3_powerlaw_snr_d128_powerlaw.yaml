@@ -1,0 +1,24 @@
+# Power-law SNR test of den_reg_sched_alpha_0.5_floor_1e-2_c_rho_5_lambda_amp_3_powerlaw_snr_d128: O3b background, SNR ~ power law (index -3) on
+# [4, 50], half the rows noise-only. Layer after the run's own config.yaml.
+trainer:
+  logger: false
+  callbacks:
+    - class_path: train.callbacks.PlotParamEstCallback
+      init_args:
+        save_dir: /home/kyoon/SSM-BNS/aframe/dev/runs/claude_tests/den_reg_sched_alpha_0.5_floor_1e-2_c_rho_5_lambda_amp_3_powerlaw_snr_d128/test_powerlaw_den_970
+
+data:
+  test_background_dir: /home/kyoon/SSM-BNS/DATA/O3b_H1_L1_2048Hz
+  test_batches: 800
+  waveform_prob: 0.5
+  snr_sampler:
+    class_path: train.augmentations.SnrSampler
+    init_args:
+      distribution: ml4gw.distributions.PowerLaw
+      constant_params:
+        minimum: 4.0
+        maximum: 50.0
+        index: -3.0
+      start_params: {}
+      end_params: {}
+      decay_steps: 1
