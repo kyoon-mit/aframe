@@ -13,9 +13,20 @@ class SupervisedAframeDataset(BaseAframeDataset):
         *args,
         swap_prob: Optional[float] = None,
         mute_prob: Optional[float] = None,
+        signal_repeats: int = 1,
         **kwargs,
     ) -> None:
+        """
+        Args:
+            signal_repeats: number of training samples that share one
+                injected signal, each with its own background.
+        """
         super().__init__(*args, **kwargs)
+        if signal_repeats < 1:
+            raise ValueError(
+                f"signal_repeats must be >= 1, got {signal_repeats}"
+            )
+        self.signal_repeats = signal_repeats
         if swap_prob is not None and 0 <= swap_prob <= 1:
             self.swapper = aug.ChannelSwapper(swap_prob)
             self.swap_prob = swap_prob
@@ -37,6 +48,10 @@ class SupervisedAframeDataset(BaseAframeDataset):
         else:
             self.muter = None
             self.mute_prob = 0
+
+    @property
+    def waveforms_per_batch(self) -> int:
+        return -(-self.hparams.batch_size // self.signal_repeats)
 
     @property
     def sample_prob(self):
@@ -76,22 +91,27 @@ class SupervisedAframeDataset(BaseAframeDataset):
             self._clean_signal = torch.zeros_like(X)
             return X, y, psds, params_out
 
-        dec, psi, phi = self.sample_extrinsic(X[mask])
+        # project each distinct signal once, then copy it into R samples,
+        # each with its own background
         N = mask.sum().item()
-        idx = torch.randperm(waveforms.shape[0])[:N]
+        R = self.signal_repeats if self.trainer.training else 1
+        n = -(-N // R)
+        dec, psi, phi = self.sample_extrinsic(X[:n])
+        idx = torch.randperm(waveforms.shape[0])[:n]
         waveforms = waveforms[idx].to(X.device).float()
         params = {k: v[idx].to(X.device).float() for k, v in params.items()}
-        hc, hp = waveforms[:, 0], waveforms[:, 1]
+        snrs = self.snr_sampler.sample((n,)).to(X.device)
+        params.update(dec=dec, psi=psi, phi=phi, snr=snrs)
 
-        snrs = self.snr_sampler.sample((mask.sum().item(),)).to(X.device)
         responses = self.projector(
-            dec, psi, phi, snrs, psds[mask], cross=hc, plus=hp
+            dec, psi, phi, cross=waveforms[:, 0], plus=waveforms[:, 1]
         )
-
-        params["dec"] = dec
-        params["psi"] = psi
-        params["phi"] = phi
-        params["snr"] = snrs
+        if R > 1:
+            responses = responses.repeat_interleave(R, dim=0)[:N]
+            params = {k: v.repeat_interleave(R)[:N] for k, v in params.items()}
+        responses = self.projector.rescaler(
+            responses, psds[mask], params["snr"]
+        )
 
         # If we're loading waveforms from disk, we'll have sliced
         # the waveforms already in `on_before_batch_transfer`

@@ -315,6 +315,11 @@ class BaseAframeDataset(pl.LightningDataModule):
         world_size, _ = self.get_world_size_and_rank()
         return self.hparams.batches_per_epoch // world_size
 
+    @property
+    def waveforms_per_batch(self) -> int:
+        """Waveforms sampled per training batch."""
+        return self.hparams.batch_size
+
     # TODO: can probably make this CLI configurable at some point
     @property
     def psd_window(self):
@@ -768,6 +773,7 @@ class BaseAframeDataset(pl.LightningDataModule):
             fnames=fnames,
             batches_per_epoch=self.hparams.test_batches
             or self.batches_per_epoch,
+            waveforms_per_batch=self.hparams.batch_size,
         )
 
     def strain_dataloader(
@@ -804,6 +810,7 @@ class BaseAframeDataset(pl.LightningDataModule):
         self,
         fnames: Optional[Sequence[str]] = None,
         batches_per_epoch: Optional[int] = None,
+        waveforms_per_batch: Optional[int] = None,
     ) -> torch.utils.data.DataLoader:
         dataloader = self.strain_dataloader(fnames, batches_per_epoch)
         pin_memory = self.pin_memory
@@ -850,7 +857,7 @@ class BaseAframeDataset(pl.LightningDataModule):
         # iterator of chunks of waveforms
         waveform_dataset = ChunkedWaveformDataset(
             waveform_loader,
-            batch_size=self.hparams.batch_size,
+            batch_size=waveforms_per_batch or self.waveforms_per_batch,
             batches_per_chunk=batches_per_chunk,
         )
 

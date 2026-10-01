@@ -83,6 +83,7 @@ class DenoiserOnlyAframeDataset(DenoisingTimeDomainSupervisedAframeDataset):
             fnames=self.valid_fnames,
             batches_per_epoch=self.hparams.val_batches
             or max(1, self.batches_per_epoch // 10),
+            waveforms_per_batch=self.hparams.batch_size,
         )
 
     def on_after_batch_transfer(self, batch, dataloader_idx):
