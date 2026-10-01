@@ -451,9 +451,15 @@ class DenoisedGaussianNLLRegression(GaussianNLLRegressionAframeCustomLR):
         alpha_schedule: Optional[dict] = None,
         denoiser_ckpt: Optional[str] = None,
         freeze_denoiser: bool = False,
+        within_thresholds: Optional[List[float]] = None,
+        within_unit: str = "",
         **kwargs,
     ):
         super().__init__(*args, **kwargs)
+        # absolute error thresholds in the parameter's own units, logged as
+        # within_<t><unit>_<name>; without them the percent thresholds apply
+        self.within_thresholds = list(within_thresholds or [])
+        self.within_unit = within_unit
         # MSE between x_denoised and X_clean, both (B, d_input, L) whitened
         self.denoiser_loss = denoiser_loss or nn.MSELoss()
         self.lambda_denoise = lambda_denoise
@@ -601,14 +607,29 @@ class DenoisedGaussianNLLRegression(GaussianNLLRegressionAframeCustomLR):
                 on_step=False,
                 on_epoch=True,
             )
-            for pct in (1, 2, 5, 10):
-                self.log(
-                    f"train/within_{pct}pct_{name}",
-                    (rel_err[:, i] < pct / 100.0).float().mean(),
-                    on_step=False,
-                    on_epoch=True,
-                )
+            self._log_within(
+                "train", name, mean_phys[:, i], targets[:, i], rel_err[:, i],
+                on_step=False, on_epoch=True,
+            )
         return nll + self.hparams.lambda_spread * spread
+
+    def _log_within(self, stage, name, pred, true, rel_err, **kwargs):
+        """Fraction of events within each error threshold."""
+        if self.within_thresholds:
+            err = (pred - true).abs()
+            for t in self.within_thresholds:
+                self.log(
+                    f"{stage}/within_{t:g}{self.within_unit}_{name}",
+                    (err < t).float().mean(),
+                    **kwargs,
+                )
+            return
+        for pct in (1, 2, 5, 10):
+            self.log(
+                f"{stage}/within_{pct}pct_{name}",
+                (rel_err < pct / 100.0).float().mean(),
+                **kwargs,
+            )
 
     def train_step(self, batch):
         # X_clean = noise-free projected waveform, same (whitened) space as

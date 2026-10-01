@@ -66,6 +66,26 @@ class DenoisedRegressionWithDenoiserMetrics(DenoisedGaussianNLLRegression):
         )
         self.log(f"{stage}/gain", (pred_norm / target_norm).mean())
 
+    def on_validation_epoch_start(self):
+        super().on_validation_epoch_start()
+        self._val_pred, self._val_true = [], []
+
+    def on_validation_epoch_end(self):
+        """RMSE and R^2 over the whole validation set, in physical units."""
+        super().on_validation_epoch_end()
+        if not self._val_pred:
+            return
+        pred = torch.cat(self._val_pred)
+        true = torch.cat(self._val_true)
+        for i, name in enumerate(self.param_names):
+            resid = pred[:, i] - true[:, i]
+            spread = true[:, i] - true[:, i].mean()
+            self.log(f"val/rmse_{name}", resid.pow(2).mean().sqrt())
+            self.log(
+                f"val/r2_{name}",
+                1 - resid.pow(2).sum() / spread.pow(2).sum().clamp_min(1e-12),
+            )
+
     def _log_regression_validation(self, out, params):
         """The parent's val/* regression set, on one view of the batch."""
         mask = ~torch.isnan(next(iter(params.values())))
@@ -89,6 +109,8 @@ class DenoisedRegressionWithDenoiserMetrics(DenoisedGaussianNLLRegression):
 
         mean_phys = mean * self.y_std + self.y_mean
         sigma_phys = torch.sqrt(var) * self.y_std
+        self._val_pred.append(mean_phys.detach())
+        self._val_true.append(targets.detach())
         rel_err = (mean_phys - targets).abs() / targets.abs().clamp(min=1e-8)
         for i, name in enumerate(self.param_names):
             self.log(
@@ -109,13 +131,10 @@ class DenoisedRegressionWithDenoiserMetrics(DenoisedGaussianNLLRegression):
                 on_epoch=True,
                 sync_dist=True,
             )
-            for pct in (1, 2, 5, 10):
-                self.log(
-                    f"val/within_{pct}pct_{name}",
-                    (rel_err[:, i] < pct / 100.0).float().mean(),
-                    on_epoch=True,
-                    sync_dist=True,
-                )
+            self._log_within(
+                "val", name, mean_phys[:, i], targets[:, i], rel_err[:, i],
+                on_epoch=True, sync_dist=True,
+            )
 
     def validation_step(self, batch, _):
         """One injected batch, scored for both halves.
