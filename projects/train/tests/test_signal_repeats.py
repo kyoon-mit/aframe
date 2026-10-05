@@ -17,7 +17,10 @@ class Stub(SupervisedAframeDataset):
 
     def __init__(self, batch_size, signal_repeats, training=True):
         self._hparams = AttributeDict(batch_size=batch_size, waveform_prob=1.0)
-        self.trainer = SimpleNamespace(training=training)
+        self.trainer = SimpleNamespace(
+            training=training, validating=not training, sanity_checking=False
+        )
+        self.val_snr_sampler = None
         self.signal_repeats = signal_repeats
         self.swap_prob = self.mute_prob = 0
         self.swapper = self.muter = None
@@ -93,3 +96,21 @@ def test_project_once_matches_projecting_each_copy():
         rep(projector(dec, psi, phi, cross=hc, plus=hp)), psds, rep(snrs)
     )
     assert torch.allclose(once, each, rtol=1e-5, atol=1e-5)
+
+
+def test_validation_uses_its_own_snr_sampler():
+    torch.manual_seed(0)
+    stub = Stub(32, signal_repeats=4, training=False)
+    stub.val_snr_sampler = torch.distributions.Uniform(4.0, 4.001)
+    X, waveforms, params = batch(stub, 32)
+    _, _, _, out = stub.inject(X, waveforms, params)
+    assert torch.all((out["snr"] >= 4.0) & (out["snr"] <= 4.001))
+
+
+def test_training_ignores_the_validation_sampler():
+    torch.manual_seed(0)
+    stub = Stub(32, signal_repeats=4, training=True)
+    stub.val_snr_sampler = torch.distributions.Uniform(4.0, 4.001)
+    X, waveforms, params = batch(stub, 8)
+    _, _, _, out = stub.inject(X, waveforms, params)
+    assert out["snr"].min() > 4.001

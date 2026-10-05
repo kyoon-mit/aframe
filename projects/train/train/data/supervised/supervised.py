@@ -49,6 +49,14 @@ class SupervisedAframeDataset(BaseAframeDataset):
             self.muter = None
             self.mute_prob = 0
 
+    def _active_snr_sampler(self):
+        """The validation sampler while validating, if one is set."""
+        trainer = self.trainer
+        validating = trainer.validating or trainer.sanity_checking
+        if validating and self.val_snr_sampler is not None:
+            return self.val_snr_sampler
+        return self.snr_sampler
+
     @property
     def waveforms_per_batch(self) -> int:
         return -(-self.hparams.batch_size // self.signal_repeats)
@@ -100,7 +108,7 @@ class SupervisedAframeDataset(BaseAframeDataset):
         idx = torch.randperm(waveforms.shape[0])[:n]
         waveforms = waveforms[idx].to(X.device).float()
         params = {k: v[idx].to(X.device).float() for k, v in params.items()}
-        snrs = self.snr_sampler.sample((n,)).to(X.device)
+        snrs = self._active_snr_sampler().sample((n,)).to(X.device)
         params.update(dec=dec, psi=psi, phi=phi, snr=snrs)
 
         responses = self.projector(

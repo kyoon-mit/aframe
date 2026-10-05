@@ -140,6 +140,9 @@ class BaseAframeDataset(pl.LightningDataModule):
         snr_sampler:
             A callable that samples SNRs for the injected signals.
             If `None`, SNRs will be left unchanged.
+        val_snr_sampler:
+            Sampler used for injected validation signals. If `None`,
+            validation uses `snr_sampler`.
         valid_stride:
             Stride in seconds for the validation timeslides.
             If `None`, will use `kernel_length + fduration`.
@@ -192,6 +195,9 @@ class BaseAframeDataset(pl.LightningDataModule):
         snr_sampler: Optional[
             Union[TransformedDist, Callable[[int], Tensor]]
         ] = None,
+        val_snr_sampler: Optional[
+            Union[TransformedDist, Callable[[int], Tensor]]
+        ] = None,
         # validation args
         valid_stride: Optional[float] = None,
         num_valid_views: int = 4,
@@ -234,6 +240,7 @@ class BaseAframeDataset(pl.LightningDataModule):
         # indicate that
         self.waveforms_from_disk = isinstance(waveform_sampler, WaveformLoader)
         self.snr_sampler = snr_sampler
+        self.val_snr_sampler = val_snr_sampler
 
         # generate our local node data directory
         # if our specified data source is remote
