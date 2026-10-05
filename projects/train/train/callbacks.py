@@ -492,7 +492,8 @@ class PlotParamEstCallback(Callback):
             # physical (already un-normalized) values, so the callback
             # does no normalization of its own.
             self.target_variables = list(
-                getattr(dm.hparams, "target_parameters", ["chirp_mass"])
+                getattr(pl_module, "param_names", None)
+                or getattr(dm.hparams, "target_parameters", ["chirp_mass"])
             )
             self.observed_variables = []
             self.normalize_variables = False
