@@ -133,6 +133,10 @@ class GaussianNLLRegressionAframeCustomLR(GaussianNLLRegressionAframe):
             ``warmup_epochs=8, T_0=10, T_mult=2, eta_min=1e-7``.
         lr_scheduler_interval:
             "epoch" or "step"; how often the scheduler is stepped.
+        lr_scheduler_monitor:
+            Metric a metric-driven scheduler steps on, such as
+            ``ReduceLROnPlateau`` on ``val/loss``. ``None`` for schedules
+            that need none.
         normalize_input:
             If True, divide each whitened channel by its own standard
             deviation before the network, matching the kyoon-dev models.
@@ -152,6 +156,7 @@ class GaussianNLLRegressionAframeCustomLR(GaussianNLLRegressionAframe):
             Callable[[torch.optim.Optimizer], object]
         ] = None,
         lr_scheduler_interval: str = "epoch",
+        lr_scheduler_monitor: Optional[str] = None,
         normalize_input: bool = False,
         warm_start_ckpt: Optional[str] = None,
         # required by AframeBase but unused here (OneCycle is replaced by
@@ -167,6 +172,7 @@ class GaussianNLLRegressionAframeCustomLR(GaussianNLLRegressionAframe):
             "ssm_lr",
             "lambda_spread",
             "lr_scheduler_interval",
+            "lr_scheduler_monitor",
             "normalize_input",
             "log_dt_min",
             "log_dt_max",
@@ -415,13 +421,13 @@ class GaussianNLLRegressionAframeCustomLR(GaussianNLLRegressionAframe):
                 T_mult=2,
                 eta_min=1e-7,
             )
-        return {
-            "optimizer": optimizer,
-            "lr_scheduler": {
-                "scheduler": scheduler,
-                "interval": self.hparams.lr_scheduler_interval,
-            },
+        config = {
+            "scheduler": scheduler,
+            "interval": self.hparams.lr_scheduler_interval,
         }
+        if self.hparams.lr_scheduler_monitor is not None:
+            config["monitor"] = self.hparams.lr_scheduler_monitor
+        return {"optimizer": optimizer, "lr_scheduler": config}
 
 
 class DenoisedGaussianNLLRegression(GaussianNLLRegressionAframeCustomLR):
