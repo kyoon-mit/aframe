@@ -2,7 +2,7 @@
 
 import torch
 
-from train.experimental.snr_series.loss import SNRSeriesLoss
+from train.experimental.snr_series.loss import SNRPeakMixtureLoss, SNRSeriesLoss
 from train.model.denoiser_ky import Denoiser
 
 
@@ -16,8 +16,8 @@ class SNRSeriesDenoiser(Denoiser):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        if not isinstance(self.denoiser_loss, SNRSeriesLoss):
-            raise TypeError("SNRSeriesDenoiser needs an SNRSeriesLoss")
+        if not isinstance(self.denoiser_loss, (SNRSeriesLoss, SNRPeakMixtureLoss)):
+            raise TypeError("SNRSeriesDenoiser needs an SNR-series loss")
         if self.hparams.predict_residual:
             raise ValueError("SNRSeriesDenoiser needs the waveform output")
 
