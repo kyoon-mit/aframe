@@ -1,0 +1,280 @@
+# Same as den_reg_sched_alpha_0.5_floor_1e-2_c_rho_5_lambda_amp_3_train_snr8_mc_q_lowband_prob0.96 except the regressor's last S4D layer outputs energy
+# (Re^2 + Im^2 of its complex response) and the head takes the maximum over
+# time instead of the mean.
+# lightning.pytorch==2.2.1
+seed_everything: 20260910
+trainer:
+  accelerator: gpu
+  strategy: auto
+  devices: '1'
+  num_nodes: 1
+  precision: null
+  logger:
+    class_path: lightning.pytorch.loggers.WandbLogger
+    init_args:
+      name: den_reg_sched_alpha_0.5_floor_1e-2_c_rho_5_lambda_amp_3_train_snr8_mc_q_lowband_prob0.96_energy_max
+      save_dir: /home/kyoon/SSM-BNS/aframe/dev/runs/claude_tests/den_reg_sched_alpha_0.5_floor_1e-2_c_rho_5_lambda_amp_3_train_snr8_mc_q_lowband_prob0.96_energy_max
+      version: null
+      offline: false
+      dir: null
+      id: den_reg_sched_alpha_0.5_floor_1e-2_c_rho_5_lambda_amp_3_train_snr8_mc_q_lowband_prob0.96_energy_max
+      anonymous: null
+      project: CLAUDE-TESTS
+      log_model: false
+      experiment: null
+      prefix: ''
+      checkpoint_name: null
+      entity: null
+      notes: null
+      tags: null
+      config: null
+      config_exclude_keys: null
+      config_include_keys: null
+      allow_val_change: null
+      group: null
+      job_type: null
+      mode: null
+      force: null
+      reinit: null
+      resume: null
+      resume_from: null
+      fork_from: null
+      save_code: null
+      tensorboard: null
+      sync_tensorboard: null
+      monitor_gym: null
+      settings: null
+  callbacks:
+  - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+    init_args:
+      dirpath: null
+      filename: den_{epoch:02d}
+      monitor: val/den_loss
+      verbose: false
+      save_last: true
+      save_top_k: 1
+      save_weights_only: false
+      mode: min
+      auto_insert_metric_name: false
+      every_n_train_steps: null
+      train_time_interval: null
+      every_n_epochs: null
+      save_on_train_epoch_end: null
+      enable_version_counter: true
+  - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+    init_args:
+      logging_interval: epoch
+      log_momentum: false
+      log_weight_decay: false
+  - class_path: train.callbacks.ReferenceEventCallback
+    init_args:
+      events_file: /home/kyoon/SSM-BNS/aframe/data/plot/merger_4s_2048Hz/plot_events.hdf5
+      every_n_epochs: 10
+      out_dir: /home/kyoon/SSM-BNS/aframe/dev/runs/claude_tests/den_reg_sched_alpha_0.5_floor_1e-2_c_rho_5_lambda_amp_3_train_snr8_mc_q_lowband_prob0.96_energy_max/reference_events
+      show_input: true
+      gif_fps: 4
+      max_gif_frames: 200
+  fast_dev_run: false
+  max_epochs: 800
+  min_epochs: null
+  max_steps: -1
+  min_steps: null
+  max_time: null
+  limit_train_batches: null
+  limit_val_batches: null
+  limit_test_batches: null
+  limit_predict_batches: null
+  overfit_batches: 0.0
+  val_check_interval: null
+  check_val_every_n_epoch: 1
+  log_every_n_steps: 50
+  enable_checkpointing: null
+  enable_progress_bar: null
+  enable_model_summary: null
+  accumulate_grad_batches: 1
+  gradient_clip_val: null
+  gradient_clip_algorithm: null
+  deterministic: null
+  benchmark: true
+  inference_mode: true
+  use_distributed_sampler: true
+  profiler: null
+  detect_anomaly: false
+  barebones: false
+  plugins: null
+  sync_batchnorm: false
+  reload_dataloaders_every_n_epochs: 0
+  default_root_dir: /home/kyoon/SSM-BNS/aframe/dev/runs/claude_tests/den_reg_sched_alpha_0.5_floor_1e-2_c_rho_5_lambda_amp_3_train_snr8_mc_q_lowband_prob0.96_energy_max
+model:
+  class_path: train.experimental.den_reg.task.DenoisedRegressionWithDenoiserMetrics
+  init_args:
+    denoiser_loss:
+      class_path: train.losses_denoiser_ky.ScheduledMixtureLoss
+      init_args:
+        alpha: 0.5
+        density: false
+        time_loss: mse
+        spectral_loss: msle
+        log_floor: 0.01
+        log_base: 10.0
+        huber_delta: 1.0
+        scale_momentum: 0.99
+        sig_thresh: 0.5
+        lambda_amp: 3.0
+        log_background: true
+        c_rho: 5.0
+    lambda_denoise: 1.0
+    lambda_regress: 1.0
+    regress_schedule:
+    - - 30
+      - 0.0
+    - - 60
+      - 1.0
+    alpha_schedule: null
+    denoiser_ckpt: null
+    freeze_denoiser: false
+    within_thresholds: null
+    within_unit: ''
+    ssm_lr: 0.001
+    lambda_spread: 0.2
+    lr_scheduler:
+      class_path: train.model.WarmupCosineAnnealingWarmRestarts
+      init_args:
+        warmup_epochs: 10
+        T_0: 20
+        T_mult: 2
+        eta_min: 1.0e-07
+        warmup_start_factor: 0.01
+        peak_decay: 0.9
+        last_epoch: -1
+    lr_scheduler_interval: epoch
+    lr_scheduler_monitor: null
+    normalize_input: false
+    warm_start_ckpt: null
+    pct_lr_ramp: 0.0
+    log_dt_min: -11.5
+    log_dt_max: 2.3
+    log_a_max: 4.6
+    arch:
+      class_path: train.experimental.s4d_energy.arch.RegressionTimeDomainS4DenoiseRegressNormEnergy
+      init_args:
+        d_output: 4
+        denoiser_d_model: 128
+        denoiser_d_state: 64
+        denoiser_n_layers: 6
+        denoiser_dropout: 0.2
+        regressor_d_model: 128
+        regressor_d_state: 64
+        regressor_n_layers: 6
+        regressor_dropout: 0.2
+        prenorm: true
+        num_groups: 32
+        dt_min: 0.0001
+        dt_max: 10.0
+        detach_denoiser: false
+        smooth_below: 20.0
+        smooth_coeffs: 4
+    param_names:
+    - chirp_mass
+    - mass_ratio
+    beta_nll: 0.3
+    y_mean:
+    - 1.8
+    - 0.77
+    y_std:
+    - 0.55
+    - 0.16
+    learning_rate: 0.0001
+    weight_decay: 0.01
+    verbose: false
+data:
+  class_path: train.data.supervised.DenoiserOnlyAframeDataset
+  init_args:
+    val_batches: 16
+    persistent_workers: true
+    swap_prob: 0.0
+    mute_prob: 0.0
+    signal_repeats: 4
+    background_dir: /home/kyoon/SSM-BNS/DATA/O3a_H1_L1_2048Hz
+    waveforms_dir: /home/kyoon/SSM-BNS/DATA/aframe/train
+    ifos:
+    - H1
+    - L1
+    sample_rate: 2048.0
+    dec:
+      class_path: ml4gw.distributions.Cosine
+      init_args:
+        low: -1.5707963267948966
+        high: 1.5707963267948966
+        validate_args: null
+    psi:
+      class_path: torch.distributions.Uniform
+      init_args:
+        low: 0.0
+        high: 3.14159
+        validate_args: false
+    phi:
+      class_path: torch.distributions.Uniform
+      init_args:
+        low: -3.14159
+        high: 3.14159
+        validate_args: false
+    batches_per_epoch: 391
+    num_files_per_batch: 1
+    waveform_sampler:
+      class_path: train.data.waveforms.WaveformLoader
+      init_args:
+        training_waveform_path: /home/kyoon/SSM-BNS/DATA/aframe/train/end_o3_ratesandpops_bns_uniform_chirp.hdf5
+        val_waveform_file: /home/kyoon/SSM-BNS/DATA/aframe/val/end_o3_ratesandpops_bns_snr4.hdf5
+        num_val_waveforms: 8192
+    batch_size: 128
+    kernel_length: 4.0
+    fduration: 1.0
+    psd_length: 20.0
+    model_input_sample_rate: null
+    waveform_prob: 0.96
+    left_pad: 3.5
+    right_pad: 0.0
+    fftlength: 2.0
+    highpass: 20.0
+    lowpass: null
+    snr_sampler:
+      class_path: train.augmentations.SnrSampler
+      init_args:
+        constant_params:
+          index: -3
+          maximum: 100.0
+        start_params:
+          minimum: 8.0
+        end_params:
+          minimum: 8.0
+        decay_steps: 1
+        distribution: ml4gw.distributions.PowerLaw
+    val_snr_sampler:
+      class_path: train.augmentations.SnrSampler
+      init_args:
+        constant_params:
+          index: -3
+          maximum: 100.0
+        start_params:
+          minimum: 4.0
+        end_params:
+          minimum: 4.0
+        decay_steps: 1
+        distribution: ml4gw.distributions.PowerLaw
+    valid_stride: 25.0
+    num_valid_views: 4
+    min_valid_duration: 15000.0
+    valid_livetime: 210000.0
+    max_num_workers: 8
+    test_background_dir: /home/kyoon/SSM-BNS/DATA/O3b_H1_L1_2048Hz
+    test_batches: 800
+    chunks_per_epoch: 25
+    chunk_size: 2000
+    verbose: false
+    param_transforms:
+    - class_path: train.transforms.ChirpMass
+    - class_path: train.transforms.MassRatio
+optimizer: null
+lr_scheduler: null
+ckpt_path: null
