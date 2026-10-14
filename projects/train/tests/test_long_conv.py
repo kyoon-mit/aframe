@@ -19,7 +19,7 @@ def _chirp(length=LENGTH, merge=7680):
     return torch.tensor(h, dtype=torch.float32)
 
 
-@pytest.mark.parametrize("kernel,d_state", [("s4d", 64), ("s4d", 512), ("free", 64)])
+@pytest.mark.parametrize("kernel,d_state", [("s4d", 64), ("s4d", 512), ("free", 64), ("taps", 64)])
 def test_shapes_and_unit_kernels(kernel, d_state):
     net = LongConvEnergyNet(channels=8, kernel=kernel, d_state=d_state)
     logits = net(torch.randn(3, 2, LENGTH))
@@ -30,12 +30,12 @@ def test_shapes_and_unit_kernels(kernel, d_state):
     assert torch.allclose(k.abs().pow(2).sum(-1), torch.ones(8), atol=1e-4)
 
 
-@pytest.mark.parametrize("kernel", ["s4d", "free"])
+@pytest.mark.parametrize("kernel", ["s4d", "free", "taps"])
 def test_gradients_reach_the_kernels(kernel):
     net = LongConvEnergyNet(channels=4, kernel=kernel, d_state=64)
     loss = net(torch.randn(2, 2, LENGTH)).logsumexp(-1).sum()
     loss.backward()
-    params = [net.kernel.C, net.kernel.A_imag] if kernel == "s4d" else [net.spectrum]
+    params = [net.kernel.C, net.kernel.A_imag] if kernel == "s4d" else [getattr(net, {"free": "spectrum", "taps": "taps"}[kernel])]
     for p in params + [net.out.weight]:
         assert p.grad is not None and p.grad.abs().sum() > 0
 
