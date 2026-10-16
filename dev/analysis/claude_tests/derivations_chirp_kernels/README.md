@@ -16,8 +16,9 @@ points, response at −3%) and where a 1%-off kernel peaks on a clean signal.
   `tuning.py`, `mvm.py`
 - [From damped tones to chirps](https://kyoon-mit.github.io/projects/bns/updates/2026-10-07-chirp-kernels/)
 
-The checks for #ck-chirp, #ck-quadratures, #ck-gelu-mean, #ck-fourier-tones
-and #ck-noise come from a script that is not in the repo.
+`checks.py` gives the checks for #ck-chirp, #ck-quadratures, #ck-gelu-mean,
+#ck-fourier-tones (BNS chirps only: its Project 8 part read local Project 8
+records and is left out) and #ck-noise.
 
 ## How it was run
 
