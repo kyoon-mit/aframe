@@ -1,0 +1,56 @@
+{
+ "written": "2026-10-15 22:52 EDT, before any manipulated window or test statistic existed",
+ "preregistration_sha256": "52761cf19dc7ae19ddfc606e22149e9bb8a4abd0fca9d065212704eb926c2b52",
+ "seen_before_writing": "kernel analysis of the clean S4D first layer (kernels/kernels.md) and harness accuracies on unmanipulated clean windows; no manipulated-window result",
+ "data": {"set": "clean", "n": 4000, "file": "harness/data/clean_X_f32.npy", "fs": 2048, "L": 8192},
+ "networks": {
+  "s4d": {"name": "sig_only_reg_s4d_max_dropout0_64x32x4", "primary": "ck_69", "check": "ck_81",
+          "why": "ck_66 named in the order no longer exists; ck_69 is the closest and the kernel analysis used it"},
+  "free": {"name": "sig_only_reg_free_kernel", "tag": "ck_46"},
+  "resnet": {"name": "sig_only_reg_resnet", "tag": "ck_37"},
+  "bank": {"templates": "kernels/templates_2048.npz", "key": "white",
+           "statistic": "sum over detectors of max over all lags |corr(data, analytic template)|^2 / ||template||^2, FFT zero-padded to 2L, each detector at its own lag",
+           "estimate": "chirp mass of the best template, no refinement"}
+ },
+ "accuracy": {"metric": "within_1pct", "bootstrap": {"resamples": 2000, "seed": 0, "paired_over_windows": true}},
+ "manipulation": {
+  "segments": 8, "segment_samples": 1024, "ramp_samples": 64,
+  "ramp": "0.5*(1-cos(pi*(n+0.5)/64)), n=0..63, both ends of every segment",
+  "same_for_both_detectors": true,
+  "T2": "output segment j = tapered input segment pi(j), pi random permutation",
+  "T3": "analytic signal (FFT zero-padded to 2L, one-sided); segment k = taper * Re(analytic * exp(i phi_k)), phi_k ~ U[0, 2pi) iid",
+  "match": "per detector max over all lags |sum_t y(t) conj(x_a(t-lag))| / (||y|| ||x||), x_a analytic signal of the untapered original; window match = max over detectors",
+  "match_threshold": 0.5,
+  "max_draws": 100, "draw_seed": "numpy default_rng((test_id, window_index)), test_id 2 for T2 and 3 for T3",
+  "pass_share_required": 0.9,
+  "evaluate_on": "passing windows; clean and taper-only accuracies on the same windows",
+  "first_draw_version": "also reported, descriptive",
+  "taper_check": "if the taper alone drops a network's within-1% by >= 30% of its clean value, its T2/T3 verdicts are reported as 'taper alone explains the drop: not counted as support'"
+ },
+ "rules": {
+  "T2_T3": {"relative_drop": "(clean - manipulated) / clean, within-1%", "H_local_max": 0.30, "H_global_min": 0.70, "else": "inconclusive"},
+  "T4": {
+   "channels": "first-layer channels with |dominant_f| in [20, 150] Hz (in-band mode with the largest energy share; kernels/clean_s4d_layer1_table.json for ck_69, recomputed with the kernel-analysis code for ck_81)",
+   "output": "first S4D layer: causal conv(K_h, W_h x) + D_h W_h x, W the encoder weight (pre-GELU output up to the GroupNorm per-window scale and the response to the per-window constant offset; decomposition checked numerically)",
+   "envelope": "|analytic signal|, FFT zero-padded to 2L", "peak": "argmax over the window",
+   "delta": "peak time - merger_sample/2048",
+   "rho": "per window Spearman across channels between delta and channel frequency, NaN -> 0, median over windows",
+   "rho_secondary": "Spearman between frequency and each channel's median delta",
+   "spread": "90th - 10th percentile across channels of each channel's median delta",
+   "clustered_share": "fraction of channels with median |delta| <= 0.1 s",
+   "H_local": "rho > 0.7 and spread >= 1.0 s and clustered_share <= 0.5",
+   "H_global": "clustered_share > 0.5 and not H_local",
+   "else": "inconclusive",
+   "references": {
+    "free": "channel frequency = f_peak (kernels/clean_free_table.json); output = sqrt(sum over detectors |complex conv|^2)",
+    "resnet": "first convolution (7 taps, stride 2) before its norm; channel frequency = peak of summed |H(f)|^2 over the two detector weights; envelope at 1024 Hz",
+    "bank": "each template's correlation output; time = data time of the template's merger; rho not defined"
+   }
+  },
+  "overall": "refuted if T2 and T3 both drop the clean S4D by >= 70% and T4 shows merger-clustered peaks; mixed results are inconclusive"
+ },
+ "T1": {"lengths_s": [0.25, 0.5, 1, 2], "end_before_merger_s": [0, 0.25, 0.5, 1, 1.5, 2, 3],
+        "constraint": "d + length <= 3.5 s", "full_window": "4 s with ramps at its two ends",
+        "ramp_samples": "64, or a quarter of the length if shorter", "outside": "zero",
+        "report": "within-1% of every estimator, descriptive"}
+}
