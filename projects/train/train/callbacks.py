@@ -1,6 +1,7 @@
 import io
 import json
 import os
+import re
 import shutil
 from typing import Optional, Union, Literal
 from pathlib import Path
@@ -13,7 +14,7 @@ import s3fs
 import torch
 from botocore.exceptions import ClientError, ConnectTimeoutError
 from lightning import pytorch as pl
-from lightning.pytorch.callbacks import Callback
+from lightning.pytorch.callbacks import Callback, EarlyStopping
 from lightning.pytorch.loggers import WandbLogger
 from lightning.pytorch.utilities import grad_norm
 
@@ -1661,3 +1662,58 @@ class ReferenceEventCallback(DenoiserEvolutionCallback):
             if event < len(self.names):
                 ax.set_ylabel(f"{self.names[event]} / ifo {ifo}")
         return fig
+
+
+class ResumableEarlyStopping(EarlyStopping):
+    """``EarlyStopping`` that, when a resumed run carries no saved state of its
+    own, starts from the matching ``ModelCheckpoint``'s best score and counts
+    the epochs completed since that best (read from a ``ck_<epoch>`` file name).
+    With ``cycle_aware``, a stop for lack of improvement waits until the run has
+    finished the warm-restart cycle (``warmup_epochs``, ``T_0``, ``T_mult`` of
+    the first scheduler) in which the best epoch fell."""
+
+    def __init__(self, *args, cycle_aware: bool = False, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.cycle_aware = cycle_aware
+        self._trainer = None
+
+    @staticmethod
+    def cycle_end_after(epoch: int, warmup: int, T_0: int, T_mult: int) -> int:
+        """Last epoch (lowest learning rate) of the cycle containing ``epoch``."""
+        end, T_i = warmup + T_0 - 1, T_0
+        while end < epoch:
+            T_i *= T_mult
+            end += T_i
+        return end
+
+    def _run_early_stopping_check(self, trainer):
+        self._trainer = trainer
+        super()._run_early_stopping_check(trainer)
+
+    def _evaluate_stopping_criteria(self, current):
+        should_stop, reason = super()._evaluate_stopping_criteria(current)
+        t = self._trainer
+        if not (should_stop and self.cycle_aware and t is not None and self.wait_count >= self.patience):
+            return should_stop, reason
+        configs = getattr(t, "lr_scheduler_configs", None) or []
+        sch = configs[0].scheduler if configs else None
+        if sch is None or not all(hasattr(sch, a) for a in ("warmup_epochs", "T_0", "T_mult")):
+            return should_stop, reason
+        best_epoch = t.current_epoch - self.wait_count
+        if t.current_epoch < self.cycle_end_after(best_epoch, sch.warmup_epochs, sch.T_0, sch.T_mult):
+            return False, None
+        return should_stop, reason
+
+    def on_train_start(self, trainer, pl_module):
+        super().on_train_start(trainer, pl_module)
+        if torch.isfinite(self.best_score) or self.wait_count:
+            return
+        for cb in trainer.checkpoint_callbacks:
+            if cb.monitor != self.monitor or cb.best_model_score is None:
+                continue
+            m = re.search(r"ck_(\d+)", os.path.basename(cb.best_model_path or ""))
+            if m is None:
+                return
+            self.best_score = cb.best_model_score.detach().clone().to(self.best_score.device)
+            self.wait_count = max(0, trainer.current_epoch - 1 - int(m.group(1)))
+            return

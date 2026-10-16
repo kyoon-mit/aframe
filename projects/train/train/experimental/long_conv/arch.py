@@ -9,7 +9,7 @@ by FFT at ``sample_rate / decimate``. A kernel is either
   complex output gives a phase-blind energy), or
 - ``"free"``: one free complex coefficient per positive frequency in the
   band, i.e. any analytic kernel of the window's length, or
-- ``"taps"``: one free complex value per time sample (a real kernel for each
+- ``"time"``: one free complex value per time sample (a real kernel for each
   quadrature), stored in time with no band restriction.
 
 Each kernel is scaled to unit norm, and the energy 2|y|^2 is the SNR^2 of
@@ -31,7 +31,7 @@ class LongConvEnergyNet(nn.Module):
     """Args:
         num_ifos: detectors in the input.
         channels: number of learned kernels.
-        kernel: ``"s4d"``, ``"free"`` or ``"taps"``.
+        kernel: ``"s4d"``, ``"free"`` or ``"time"``.
         d_state: S4D state size per channel (``d_state / 2`` tones).
         s4d_init: ``"lin"`` keeps S4D-Lin with timesteps in [dt_min, dt_max];
             ``"band"`` starts every channel's tones spread evenly over
@@ -71,8 +71,8 @@ class LongConvEnergyNet(nn.Module):
         grid_step: float = 0.005,
     ):
         super().__init__()
-        if kernel not in ("s4d", "free", "taps"):
-            raise ValueError(f"kernel must be 's4d', 'free' or 'taps', got {kernel!r}")
+        if kernel not in ("s4d", "free", "time"):
+            raise ValueError(f"kernel must be 's4d', 'free' or 'time', got {kernel!r}")
         self.kernel_type = kernel
         self.decimate = decimate
         self.length = int(kernel_length * sample_rate) // decimate
@@ -88,8 +88,9 @@ class LongConvEnergyNet(nn.Module):
                 self._band_init(sample_rate / decimate, highpass, memory)
             elif s4d_init != "lin":
                 raise ValueError(f"s4d_init must be 'lin' or 'band', got {s4d_init!r}")
-        elif kernel == "taps":
-            self.taps = nn.Parameter(torch.randn(channels, self.length, 2) / math.sqrt(self.length))
+        elif kernel == "time":
+            self.samples = nn.Parameter(torch.randn(channels, self.length, 2) / math.sqrt(self.length))
+            self._register_load_state_dict_pre_hook(_rename_old_samples)
         else:
             freqs = torch.fft.fftfreq(self.length, decimate / sample_rate)
             band = (freqs >= highpass) & (freqs < sample_rate / decimate / 2)
@@ -117,8 +118,8 @@ class LongConvEnergyNet(nn.Module):
             k = self.kernel(self.length)
             if self.mix_from:
                 k = torch.view_as_complex(self.mix) @ k
-        elif self.kernel_type == "taps":
-            k = torch.view_as_complex(self.taps)
+        elif self.kernel_type == "time":
+            k = torch.view_as_complex(self.samples)
         else:
             w = torch.view_as_complex(self.spectrum) * self.band
             k = torch.fft.ifft(w, dim=-1)
@@ -155,6 +156,12 @@ class LongConvEnergyNet(nn.Module):
         """Log chirp mass at the logits' peak, refined by a parabola through
         the peak and its neighbours, and the softmax spread."""
         return grid_estimate(logits, self.grid_log_mc)
+
+
+def _rename_old_samples(state_dict, prefix, *args):
+    """Load checkpoints that stored the time-sample kernels as ``taps``."""
+    if prefix + "taps" in state_dict:
+        state_dict[prefix + "samples"] = state_dict.pop(prefix + "taps")
 
 
 def grid_estimate(logits: torch.Tensor, g: torch.Tensor):

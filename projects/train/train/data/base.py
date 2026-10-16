@@ -162,6 +162,12 @@ class BaseAframeDataset(pl.LightningDataModule):
         chunk_size:
             Number of waveforms to load in each chunk.
             Not used if generating waveforms during training.
+        pin_waveforms:
+            Whether the waveform chunk loader pins its chunks in host
+            memory. Each pinned chunk occupies a cached 2 GiB block.
+        waveform_workers:
+            Worker processes of the waveform chunk loader. 0 loads each
+            chunk in the main process, holding one chunk at a time.
         verbose:
             Whether to log debug information during training.
     """
@@ -210,6 +216,8 @@ class BaseAframeDataset(pl.LightningDataModule):
         # dataloading args
         chunks_per_epoch: int = 1,
         chunk_size: int = 10000,
+        pin_waveforms: bool = True,
+        waveform_workers: int = 2,
         verbose: bool = False,
         param_transforms: Optional[list[Callable]] = None,
     ) -> None:
@@ -855,9 +863,9 @@ class BaseAframeDataset(pl.LightningDataModule):
         # so we don't have to wait for waveforms
         waveform_loader = torch.utils.data.DataLoader(
             waveform_loader,
-            num_workers=2,
-            pin_memory=pin_memory,
-            persistent_workers=True,
+            num_workers=self.hparams.waveform_workers,
+            pin_memory=pin_memory and self.hparams.pin_waveforms,
+            persistent_workers=self.hparams.waveform_workers > 0,
         )
 
         # build a dataset that will sample from

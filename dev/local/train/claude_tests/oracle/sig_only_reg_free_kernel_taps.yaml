@@ -50,7 +50,7 @@ model:
         sample_rate: 2048.0
         kernel_length: 4.0
         highpass: 20.0
-        kernel: taps
+        kernel: time
 
     param_names: [chirp_mass]
     beta_nll: 0.3
