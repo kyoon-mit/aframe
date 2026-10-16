@@ -1,0 +1,2248 @@
+{
+ "runs": [
+  {
+   "name": "den_reg_sched_alpha_0.5_floor_1e-2_c_rho_5_lambda_amp_3_powerlaw_m2_snr_d128_n6_mc_q_rep4_smooth20_wp0.96_ddp",
+   "folder": "2026-10-01",
+   "updates": [
+    "2026-10-01-recipe-on-bns",
+    "2026-10-05-recipe-at-epoch-630",
+    "2026-10-05-window-bound-and-prior-conditioning",
+    "2026-10-07-chirp-kernels",
+    "2026-10-07-matched-filter-benchmark",
+    "2026-10-07-why-denoising-does-not-detect",
+    "2026-10-08-chirp-kernels-work",
+    "2026-10-09-shape-and-amplitude-terms",
+    "2026-10-14-slides-chirps-tones-filters",
+    "2026-10-15-oscillators-and-chirps"
+   ],
+   "status": "stopped by hand: SIGTERM on 5 Oct about 10:25, during epoch 635 (0-based) of 800; last.ckpt holds epoch 634 (10:21); train log ends 'RuntimeError: DataLoader worker (pid 292056) is killed by signal: Terminated.'; reason not logged (experiment log starts 7 Oct); ft_m3 fine-tune started from this last.ckpt at 11:05",
+   "description": "Joint S4D denoiser and regressor, 128 channels by 6 layers, chirp mass and mass ratio, SNR power law index -2.",
+   "checkpoints": [
+    {
+     "file": "DENOISER-SCAN/den_reg_sched_alpha_0.5_floor_1e-2_c_rho_5_lambda_amp_3_powerlaw_m2_snr_d128_n6_mc_q_rep4_smooth20_wp0.96_ddp/checkpoints/den_603.ckpt",
+     "epoch": 603,
+     "loads": true
+    },
+    {
+     "file": "DENOISER-SCAN/den_reg_sched_alpha_0.5_floor_1e-2_c_rho_5_lambda_amp_3_powerlaw_m2_snr_d128_n6_mc_q_rep4_smooth20_wp0.96_ddp/checkpoints/last.ckpt",
+     "epoch": 634,
+     "loads": true
+    },
+    {
+     "file": "test_powerlaw_ep630/last_ep630.ckpt",
+     "epoch": 630,
+     "loads": true
+    }
+   ],
+   "configs": [
+    "/home/kyoon/SSM-BNS/aframe/dev/runs/claude_tests/den_reg_sched_alpha_0.5_floor_1e-2_c_rho_5_lambda_amp_3_powerlaw_m2_snr_d128_n6_mc_q_rep4_smooth20_wp0.96_ddp/config.yaml",
+    "/home/kyoon/SSM-BNS/aframe/dev/runs/claude_tests/den_reg_sched_alpha_0.5_floor_1e-2_c_rho_5_lambda_amp_3_powerlaw_m2_snr_d128_n6_mc_q_rep4_smooth20_wp0.96_ddp/wandb/run-20261001_011358-den_reg_sched_alpha_0.5_floor_1e-2_c_rho_5_lambda_amp_3_powerlaw_m2_snr_d128_n6_mc_q_rep4_smooth20_wp0.96_ddp/files/config.yaml",
+    "/home/kyoon/SSM-BNS/aframe/dev/configs/denoise/den_reg_sched_alpha_0.5_floor_1e-1_c_rho_5_lambda_amp_1_uniform_snr/den_reg_sched_alpha_0.5_floor_1e-1_c_rho_5_lambda_amp_1_uniform_snr.yaml"
+   ],
+   "best": {
+    "metric": "val/within_1pct_chirp_mass",
+    "value": 0.29087,
+    "epoch": 634
+   },
+   "evidence": "CONFIRMED. 2026-10-01: '128 wide, 6 layers each', 'Power law, index -2', '800 epochs on two GPUs'; 2026-10-05: 'reached epoch 630 of 800'; later pages use the epoch-630 network (SV, matched-filter benchmark, S4D memory read-off); 10-15 lecture cites it ('together with four others was better at SNR 8 to 25'). Run-folder config.yaml was overwritten by the epoch-630 test (has PlotParamEstCallback, waveform_prob 0.5); training config = launch base + CLI args in the wandb config.yaml."
+  },
+  {
+   "name": "den_reg_sched_alpha_0.5_floor_1e-2_c_rho_5_lambda_amp_3_powerlaw_snr_d128",
+   "folder": "2026-09-29",
+   "updates": [
+    "2026-09-23-denoiser-scans",
+    "2026-09-29-den-reg-and-project-8",
+    "2026-10-01-recipe-on-bns",
+    "2026-10-05-recipe-at-epoch-630",
+    "2026-10-14-slides-chirps-tones-filters"
+   ],
+   "status": "finished, max epochs: 'Trainer.fit stopped: max_epochs=2000 reached.' (last.ckpt 5 Oct 00:37); a first launch 25 Sep 11:09 at batch 256 died at start with 'torch.OutOfMemoryError: CUDA out of memory', relaunched 11:11 at batch 128 (the run kept)",
+   "description": "Joint S4D denoiser and chirp-mass regressor, 128 channels by 4 layers, 4 s merger window, SNR power law index -3.",
+   "checkpoints": [
+    {
+     "file": "DENOISER-SCAN/den_reg_sched_alpha_0.5_floor_1e-2_c_rho_5_lambda_amp_3_powerlaw_snr_d128/checkpoints/den_1958.ckpt",
+     "epoch": 1958,
+     "loads": true
+    },
+    {
+     "file": "DENOISER-SCAN/den_reg_sched_alpha_0.5_floor_1e-2_c_rho_5_lambda_amp_3_powerlaw_snr_d128/checkpoints/last.ckpt",
+     "epoch": 1999,
+     "loads": true
+    }
+   ],
+   "configs": [
+    "/home/kyoon/SSM-BNS/aframe/dev/runs/claude_tests/den_reg_sched_alpha_0.5_floor_1e-2_c_rho_5_lambda_amp_3_powerlaw_snr_d128/config.yaml",
+    "/home/kyoon/SSM-BNS/aframe/dev/runs/claude_tests/den_reg_sched_alpha_0.5_floor_1e-2_c_rho_5_lambda_amp_3_powerlaw_snr_d128/wandb/run-20260925_111131-den_reg_sched_alpha_0.5_floor_1e-2_c_rho_5_lambda_amp_3_powerlaw_snr_d128/files/config.yaml",
+    "/home/kyoon/SSM-BNS/aframe/dev/configs/denoise/den_reg_sched_alpha_0.5_floor_1e-1_c_rho_5_lambda_amp_1_uniform_snr/den_reg_sched_alpha_0.5_floor_1e-1_c_rho_5_lambda_amp_1_uniform_snr.yaml",
+    "/home/kyoon/SSM-BNS/aframe/dev/local/train/denoiser/claude_tests/test/den_reg_sched_alpha_0.5_floor_1e-2_c_rho_5_lambda_amp_3_powerlaw_snr_d128_powerlaw.yaml"
+   ],
+   "best": {
+    "metric": "val/within_1pct_chirp_mass",
+    "value": 0.1543,
+    "epoch": 1782
+   },
+   "evidence": "CORRECTED folder 2026-09-23 -> 2026-09-29. 2026-09-29 is its own report: '128 wide, 4 layers each', 'Checkpoint: Epoch 970' (that checkpoint is gone; save_top_k=1). The 09-23 mention is a forward pointer ('the joint model of the next update reaches a validation rho of only 0.18'); it was not added on 14 Oct as first stated: the first commit of the page (290a26c, 1 Oct, same commit as the 09-29 page) already had 'reaches only about 0.18; see the next update', and 14 Oct only reworded it. Run started 25 Sep, after the 09-23 date. Also 2026-10-01 figure 'epoch 1320 of the previous run' and 2026-10-05 'baseline 128/4'. Strict earliest-page rule would give 2026-09-23. Run-folder config.yaml was overwritten by the 29 Sep test."
+  },
+  {
+   "name": "den_reg_sched_alpha_0.5_floor_1e-2_c_rho_5_lambda_amp_3_train_snr8_mc_q_lowband_prob0.5",
+   "folder": "2026-10-07",
+   "updates": [
+    "2026-10-07-why-denoising-does-not-detect",
+    "2026-10-09-shape-and-amplitude-terms"
+   ],
+   "status": "stopped by hand: '[rank: 0] Received SIGTERM: 15' on 7 Oct about 08:53, during epoch 420 of 800; last.ckpt epoch 419 (08:47); the matched 96% rerun launched 08:54",
+   "description": "Joint S4D denoiser and regressor (128 by 6) with shape and amplitude terms, trained from SNR 8, half windows noise-only.",
+   "checkpoints": [
+    {
+     "file": "DENOISER-SCAN/den_reg_sched_alpha_0.5_floor_1e-2_c_rho_5_lambda_amp_3_train_snr8_mc_q_lowband_prob0.96/checkpoints/den_336.ckpt",
+     "epoch": 336,
+     "loads": true
+    },
+    {
+     "file": "DENOISER-SCAN/den_reg_sched_alpha_0.5_floor_1e-2_c_rho_5_lambda_amp_3_train_snr8_mc_q_lowband_prob0.96/checkpoints/last.ckpt",
+     "epoch": 419,
+     "loads": true
+    },
+    {
+     "file": "test_ep336/den_336.ckpt",
+     "epoch": 336,
+     "loads": true
+    }
+   ],
+   "configs": [
+    "/home/kyoon/SSM-BNS/aframe/dev/runs/claude_tests/den_reg_sched_alpha_0.5_floor_1e-2_c_rho_5_lambda_amp_3_train_snr8_mc_q_lowband_prob0.5/config.yaml",
+    "/home/kyoon/SSM-BNS/aframe/dev/runs/claude_tests/den_reg_sched_alpha_0.5_floor_1e-2_c_rho_5_lambda_amp_3_train_snr8_mc_q_lowband_prob0.5/base_config.yaml"
+   ],
+   "best": {
+    "metric": "val/within_1pct_chirp_mass",
+    "value": 0.12438,
+    "epoch": 401
+   },
+   "evidence": "CONFIRMED. 2026-10-07: one of 'Two runs trained only on SNR 8 and above', 'the SNR-8 model at epoch 336', 'that run had a signal in 50% of its training windows'; 2026-10-09: 'trained with half of its windows as pure background by mistake'. Launched 5 Oct 16:43 under the name ..._prob0.96 (wandb dir and checkpoint subfolder carry that name); launch --config was the 96% folder's base_config.yaml, md5-identical to this folder's."
+  },
+  {
+   "name": "den_reg_sched_alpha_0.5_floor_1e-2_c_rho_5_lambda_amp_3_train_snr8_mc_q_lowband_prob0.96",
+   "folder": "2026-10-07",
+   "updates": [
+    "2026-10-07-why-denoising-does-not-detect",
+    "2026-10-09-shape-and-amplitude-terms",
+    "2026-10-12-template-bank-network",
+    "2026-10-13-learned-long-kernels",
+    "2026-10-14-den-reg-final",
+    "2026-10-14-s4d-project-8-vs-bns",
+    "2026-10-14-slides-chirps-tones-filters",
+    "2026-10-15-oscillators-and-chirps",
+    "2026-10-16-status-dropout-and-signal-only"
+   ],
+   "status": "finished, max epochs: 'Trainer.fit stopped: max_epochs=800 reached.' (last.ckpt 11 Oct 17:37)",
+   "description": "Joint S4D denoiser and regressor (128 by 6) with shape and amplitude terms, trained from SNR 8, 96% signal windows.",
+   "checkpoints": [
+    {
+     "file": "DENOISER-SCAN/keej8hie/checkpoints/den_704.ckpt",
+     "epoch": 704,
+     "loads": true
+    },
+    {
+     "file": "DENOISER-SCAN/keej8hie/checkpoints/last.ckpt",
+     "epoch": 799,
+     "loads": true
+    },
+    {
+     "file": "sv_ep365/sv.ckpt",
+     "epoch": 365,
+     "loads": true
+    },
+    {
+     "file": "sv_ep799/sv.ckpt",
+     "epoch": 799,
+     "loads": true
+    },
+    {
+     "file": "test_ep339/test.ckpt",
+     "epoch": 339,
+     "loads": true
+    },
+    {
+     "file": "test_ep799/test.ckpt",
+     "epoch": 799,
+     "loads": true
+    }
+   ],
+   "configs": [
+    "/home/kyoon/SSM-BNS/aframe/dev/runs/claude_tests/den_reg_sched_alpha_0.5_floor_1e-2_c_rho_5_lambda_amp_3_train_snr8_mc_q_lowband_prob0.96/config.yaml",
+    "/home/kyoon/SSM-BNS/aframe/dev/runs/claude_tests/den_reg_sched_alpha_0.5_floor_1e-2_c_rho_5_lambda_amp_3_train_snr8_mc_q_lowband_prob0.96/base_config.yaml"
+   ],
+   "best": {
+    "metric": "val/within_1pct_chirp_mass",
+    "value": 0.16097,
+    "epoch": 580
+   },
+   "evidence": "CONFIRMED. 2026-10-07 original post (commit 0f7d90f, 7 Oct 11:13) has 'so a matched rerun is in progress' (setup; run launched 08:54); first results in 2026-10-09; 'the den-reg' of all later pages (wandb id keej8hie). Train log is train.log in the run folder."
+  },
+  {
+   "name": "den_reg_sched_alpha_0.5_floor_1e-2_c_rho_5_lambda_amp_3_train_snr8_mc_q_lowband_prob0.96_energy_max",
+   "folder": "2026-10-14",
+   "updates": [
+    "2026-10-14-slides-chirps-tones-filters"
+   ],
+   "status": "finished, max epochs: 'Trainer.fit stopped: max_epochs=800 reached.' (last.ckpt 12 Oct 20:10)",
+   "description": "Joint S4D denoiser and regressor (128 by 6, shape and amplitude terms, from SNR 8) with energy and time-maximum read-out.",
+   "checkpoints": [
+    {
+     "file": "CLAUDE-TESTS/den_reg_sched_alpha_0.5_floor_1e-2_c_rho_5_lambda_amp_3_train_snr8_mc_q_lowband_prob0.96_energy_max/checkpoints/den_507.ckpt",
+     "epoch": 507,
+     "loads": true
+    },
+    {
+     "file": "CLAUDE-TESTS/den_reg_sched_alpha_0.5_floor_1e-2_c_rho_5_lambda_amp_3_train_snr8_mc_q_lowband_prob0.96_energy_max/checkpoints/last.ckpt",
+     "epoch": 799,
+     "loads": true
+    }
+   ],
+   "configs": [
+    "/home/kyoon/SSM-BNS/aframe/dev/local/train/claude_tests/s4d_energy/den_reg_sched_alpha_0.5_floor_1e-2_c_rho_5_lambda_amp_3_train_snr8_mc_q_lowband_prob0.96_energy_max.yaml",
+    "/home/kyoon/SSM-BNS/aframe/dev/runs/claude_tests/den_reg_sched_alpha_0.5_floor_1e-2_c_rho_5_lambda_amp_3_train_snr8_mc_q_lowband_prob0.96_energy_max/config.yaml"
+   ],
+   "best": {
+    "metric": "val/within_1pct_chirp_mass",
+    "value": 0.1436,
+    "epoch": 790
+   },
+   "evidence": "CONFIRMED. Only in slide 04 image of 2026-10-14 slides: 'Den-reg + loudest-moment read-out | 11.3% | did not help'; rechecked: its mean val within 1% over epochs 600 to 799 is 11.23% (the 96% run 13.62%, the slide's den-reg 13.6%). No other page mentions it. Slides page dated 14 Oct, committed 15 Oct 14:27."
+  },
+  {
+   "name": "den_reg_sched_alpha_0.5_floor_1e-2_train_snr8_mc_q_lowband_prob0.96",
+   "folder": "2026-10-07",
+   "updates": [
+    "2026-10-07-why-denoising-does-not-detect",
+    "2026-10-09-shape-and-amplitude-terms"
+   ],
+   "status": "stopped by hand: '[rank: 0] Received SIGTERM: 15' on 9 Oct about 11:10, during epoch 679 of 800; last.ckpt epoch 678 (11:06); 2026-10-09: 'The run without the terms has been stopped.'",
+   "description": "Joint S4D denoiser and regressor (128 by 6) without shape and amplitude terms, trained from SNR 8, 96% signal windows.",
+   "checkpoints": [
+    {
+     "file": "DENOISER-SCAN/den_reg_sched_alpha_0.5_floor_1e-2_train_snr8_mc_q_lowband_prob0.96/checkpoints/den_633.ckpt",
+     "epoch": 633,
+     "loads": true
+    },
+    {
+     "file": "DENOISER-SCAN/den_reg_sched_alpha_0.5_floor_1e-2_train_snr8_mc_q_lowband_prob0.96/checkpoints/last.ckpt",
+     "epoch": 678,
+     "loads": true
+    }
+   ],
+   "configs": [
+    "/home/kyoon/SSM-BNS/aframe/dev/runs/claude_tests/den_reg_sched_alpha_0.5_floor_1e-2_train_snr8_mc_q_lowband_prob0.96/config.yaml",
+    "/home/kyoon/SSM-BNS/aframe/dev/runs/claude_tests/den_reg_sched_alpha_0.5_floor_1e-2_train_snr8_mc_q_lowband_prob0.96/base_config.yaml"
+   ],
+   "best": {
+    "metric": "val/within_1pct_chirp_mass",
+    "value": 0.12219,
+    "epoch": 655
+   },
+   "evidence": "CONFIRMED. 2026-10-07: the other of 'Two runs trained only on SNR 8 and above' (overlap 0.06); 2026-10-09: 'Without: the time and spectral mixture only', '19% (epoch 678)'. Started 6 Oct, after both 5 Oct pages."
+  },
+  {
+   "name": "den_sched_alpha_0.5_floor_1e-2_snr_series_peak_train_snr8_prob0.5",
+   "folder": "unreported",
+   "updates": [],
+   "status": "stopped by hand: '[rank: 0] Received SIGTERM: 15' on 9 Oct about 11:07, during epoch 250 of 800; last.ckpt epoch 249 (10:57)",
+   "description": "S4D denoiser (128 by 6), time and spectrum loss plus matched-filter SNR term near the true peak, from SNR 8.",
+   "checkpoints": [
+    {
+     "file": "DENOISER-SCAN/den_sched_alpha_0.5_floor_1e-2_snr_series_peak_train_snr8_prob0.5/checkpoints/den_246.ckpt",
+     "epoch": 246,
+     "loads": true
+    },
+    {
+     "file": "DENOISER-SCAN/den_sched_alpha_0.5_floor_1e-2_snr_series_peak_train_snr8_prob0.5/checkpoints/last.ckpt",
+     "epoch": 249,
+     "loads": true
+    }
+   ],
+   "configs": [
+    "/home/kyoon/SSM-BNS/aframe/dev/local/train/denoiser/merger/snr_series/den_sched_alpha_0.5_floor_1e-2_snr_series_peak_train_snr8_prob0.5.yaml",
+    "/home/kyoon/SSM-BNS/aframe/dev/runs/claude_tests/den_sched_alpha_0.5_floor_1e-2_snr_series_peak_train_snr8_prob0.5/config.yaml"
+   ],
+   "best": {
+    "metric": "val/den_loss",
+    "value": 0.65182,
+    "epoch": 246
+   },
+   "evidence": "CONFIRMED unreported. No dated update mentions it: the 7 Oct SNR-series text and figure (committed 11:13) are the eps0.3 run; this run started 17:10. Only the undated brainstorm page mentions it ('a version scored only near the true peak also failed (overlap 0.02)'). Config: 128 by 6, waveform_prob 0.5."
+  },
+  {
+   "name": "den_snr_series_eps0.3_train_snr8_prob0.5",
+   "folder": "2026-10-07",
+   "updates": [
+    "2026-10-07-why-denoising-does-not-detect"
+   ],
+   "status": "stopped by hand: '[rank: 0] Received SIGTERM: 15' on 7 Oct about 17:02, during epoch 54 of 800; last.ckpt epoch 53 (16:56); experiment log: stopped after the output collapsed (overlap 0.001)",
+   "description": "S4D denoiser (128 by 6) trained only to reproduce the matched-filter SNR series over all lags, from SNR 8.",
+   "checkpoints": [
+    {
+     "file": "DENOISER-SCAN/den_snr_series_eps0.3_train_snr8_prob0.5/checkpoints/den_16.ckpt",
+     "epoch": 16,
+     "loads": true
+    },
+    {
+     "file": "DENOISER-SCAN/den_snr_series_eps0.3_train_snr8_prob0.5/checkpoints/last.ckpt",
+     "epoch": 53,
+     "loads": true
+    }
+   ],
+   "configs": [
+    "/home/kyoon/SSM-BNS/aframe/dev/local/train/denoiser/merger/snr_series/den_snr_series_eps0.3_train_snr8_prob0.5.yaml",
+    "/home/kyoon/SSM-BNS/aframe/dev/runs/claude_tests/den_snr_series_eps0.3_train_snr8_prob0.5/config.yaml"
+   ],
+   "best": {
+    "metric": "val/den_loss",
+    "value": 0.38703,
+    "epoch": 16
+   },
+   "evidence": "CONFIRMED. 2026-10-07 'Next: a loss built on the matched filter': 'A new denoiser loss asks the network's output to reproduce that series', figure 'SNR-series denoiser, first epochs ... After 15 epochs they are not yet separated' (figure in the 11:13 commit; run at about epoch 15 then)."
+  },
+  {
+   "name": "film_all_wsched_alpha_0.5_beta_1_floor_1e-1_c_rho_5_lambda_amp_1_uniform_snr",
+   "folder": "2026-09-23",
+   "updates": [
+    "2026-09-23-denoiser-scans"
+   ],
+   "status": "finished, max epochs: 'Trainer.fit stopped: max_epochs=1000 reached.' (last.ckpt 18 Sep 18:24)",
+   "description": "S4D denoiser (64 by 4) on the 4 s merger window, FiLM-conditioned on 16 true injection parameters; uniform SNR.",
+   "checkpoints": [
+    {
+     "file": "DENOISER-SCAN/film_all_wsched_alpha_0.5_beta_1_floor_1e-1_c_rho_5_lambda_amp_1_uniform_snr/checkpoints/den_942.ckpt",
+     "epoch": 942,
+     "loads": true
+    },
+    {
+     "file": "DENOISER-SCAN/film_all_wsched_alpha_0.5_beta_1_floor_1e-1_c_rho_5_lambda_amp_1_uniform_snr/checkpoints/last.ckpt",
+     "epoch": 999,
+     "loads": true
+    }
+   ],
+   "configs": [
+    "/home/kyoon/SSM-BNS/aframe/dev/local/train/denoiser/claude_tests/film_all_wsched_alpha_0.5_beta_1_floor_1e-1_c_rho_5_lambda_amp_1_uniform_snr.yaml",
+    "/home/kyoon/SSM-BNS/aframe/dev/runs/claude_tests/film_all_wsched_alpha_0.5_beta_1_floor_1e-1_c_rho_5_lambda_amp_1_uniform_snr/config.yaml"
+   ],
+   "best": {
+    "metric": "val/den_loss",
+    "value": 1.03974,
+    "epoch": 942
+   },
+   "evidence": "CONFIRMED. 2026-09-23 merger table: 'same, conditioned on every injection parameter (FiLM) | 0.795 | 1000'. Config cond_params lists 16 parameters. No later page mentions it."
+  },
+  {
+   "name": "film_wsched_alpha_0.5_beta_1_floor_1e-1_c_rho_5_lambda_amp_1_uniform_snr",
+   "folder": "2026-09-23",
+   "updates": [
+    "2026-09-23-denoiser-scans"
+   ],
+   "status": "finished, max epochs: 'Trainer.fit stopped: max_epochs=1000 reached.' (last.ckpt 18 Sep 12:17)",
+   "description": "S4D denoiser (64 by 4) on the 4 s merger window, FiLM-conditioned on true chirp mass and SNR; uniform SNR.",
+   "checkpoints": [
+    {
+     "file": "DENOISER-SCAN/film_wsched_alpha_0.5_beta_1_floor_1e-1_c_rho_5_lambda_amp_1_uniform_snr/checkpoints/den_875.ckpt",
+     "epoch": 875,
+     "loads": true
+    },
+    {
+     "file": "DENOISER-SCAN/film_wsched_alpha_0.5_beta_1_floor_1e-1_c_rho_5_lambda_amp_1_uniform_snr/checkpoints/last.ckpt",
+     "epoch": 999,
+     "loads": true
+    }
+   ],
+   "configs": [
+    "/home/kyoon/SSM-BNS/aframe/dev/local/train/denoiser/claude_tests/film_wsched_alpha_0.5_beta_1_floor_1e-1_c_rho_5_lambda_amp_1_uniform_snr.yaml",
+    "/home/kyoon/SSM-BNS/aframe/dev/runs/claude_tests/film_wsched_alpha_0.5_beta_1_floor_1e-1_c_rho_5_lambda_amp_1_uniform_snr/config.yaml"
+   ],
+   "best": {
+    "metric": "val/den_loss",
+    "value": 1.02624,
+    "epoch": 875
+   },
+   "evidence": "CONFIRMED. 2026-09-23 merger table: 'same, conditioned on chirp mass and SNR (FiLM) | 0.803 | 1000'."
+  },
+  {
+   "name": "ft_m3_snr8_rop_from_d128_n6_ep634",
+   "folder": "2026-10-05",
+   "updates": [
+    "2026-10-05-window-bound-and-prior-conditioning",
+    "2026-10-07-why-denoising-does-not-detect"
+   ],
+   "status": "finished, early stopping: EarlyStopping on val/loss (patience 15) stopped it after epoch 22 of max 150 (state in last.ckpt: wait 15, stopped_epoch 22, best val/loss 0.5793 at epoch 7); last.ckpt 5 Oct 12:54",
+   "description": "Fine-tune of epoch-634 joint denoiser and regressor (128 by 6) on SNR 8 and up; learning rate halved on plateaus.",
+   "checkpoints": [
+    {
+     "file": "DENOISER-SCAN/ft_m3_snr8_rop_from_d128_n6_ep634/checkpoints/den_20.ckpt",
+     "epoch": 20,
+     "loads": true
+    },
+    {
+     "file": "DENOISER-SCAN/ft_m3_snr8_rop_from_d128_n6_ep634/checkpoints/last.ckpt",
+     "epoch": 22,
+     "loads": true
+    },
+    {
+     "file": "parent_ep634.ckpt",
+     "epoch": 634,
+     "loads": true
+    },
+    {
+     "file": "test_last/last.ckpt",
+     "epoch": 22,
+     "loads": true
+    }
+   ],
+   "configs": [
+    "/home/kyoon/SSM-BNS/aframe/dev/runs/claude_tests/ft_m3_snr8_rop_from_d128_n6_ep634/config.yaml",
+    "/home/kyoon/SSM-BNS/aframe/dev/runs/claude_tests/ft_m3_snr8_rop_from_d128_n6_ep634/parent_config.yaml",
+    "/home/kyoon/SSM-BNS/aframe/dev/runs/claude_tests/ft_m3_snr8_rop_from_d128_n6_ep634/wandb/run-20261005_110540-ft_m3_snr8_rop_from_d128_n6_ep634/files/config.yaml"
+   ],
+   "best": {
+    "metric": "val/within_1pct_chirp_mass",
+    "value": 0.15028,
+    "epoch": 5
+   },
+   "evidence": "CONFIRMED. 2026-10-05 window-bound page (committed 5 Oct 11:21, run launched 11:05), 'Also started today': 'A fine-tune of the Project 8 recipe run on SNR >= 8 only'; 2026-10-07: 'stopped improving within 20 epochs'. ReduceLROnPlateau factor 0.5, patience 5. Run-folder config.yaml was overwritten by its 5 Oct test; parent_config.yaml is the launch --config."
+  },
+  {
+   "name": "het_mcsig_1e-3_prenorm_wsched_alpha_0.5_beta_1_floor_1e-1_c_rho_5_lambda_amp_1_uniform_snr",
+   "folder": "2026-09-23",
+   "updates": [
+    "2026-09-23-denoiser-scans",
+    "2026-10-15-oscillators-and-chirps"
+   ],
+   "status": "finished, max epochs: 'Trainer.fit stopped: max_epochs=1000 reached.' (last.ckpt 24 Sep 16:36)",
+   "description": "S4D denoiser (64 by 4) on the 4 s merger window, heterodyned with true chirp mass plus 0.1% Gaussian error.",
+   "checkpoints": [
+    {
+     "file": "DENOISER-SCAN/het_mcsig_1e-3_prenorm_wsched_alpha_0.5_beta_1_floor_1e-1_c_rho_5_lambda_amp_1_uniform_snr/checkpoints/den_236.ckpt",
+     "epoch": 236,
+     "loads": true
+    },
+    {
+     "file": "DENOISER-SCAN/het_mcsig_1e-3_prenorm_wsched_alpha_0.5_beta_1_floor_1e-1_c_rho_5_lambda_amp_1_uniform_snr/checkpoints/last.ckpt",
+     "epoch": 999,
+     "loads": true
+    }
+   ],
+   "configs": [
+    "/home/kyoon/SSM-BNS/aframe/dev/runs/claude_tests/het_mcsig_1e-3_prenorm_wsched_alpha_0.5_beta_1_floor_1e-1_c_rho_5_lambda_amp_1_uniform_snr/config.yaml",
+    "/home/kyoon/SSM-BNS/aframe/dev/configs/denoise/het_prenorm_wsched_alpha_0.5_beta_1_floor_1e-1_c_rho_5_lambda_amp_1_uniform_snr/het_prenorm_wsched_alpha_0.5_beta_1_floor_1e-1_c_rho_5_lambda_amp_1_uniform_snr.yaml"
+   ],
+   "best": {
+    "metric": "val/den_loss",
+    "value": 0.6382,
+    "epoch": 236
+   },
+   "evidence": "CONFIRMED. 2026-09-23: 'With a Gaussian chirp-mass error of 0.1% (standard deviation) it still reached 0.873'; 10-15 lecture (also in its 15 Oct text): 'heterodyning with a random chirp-mass error of 0.1% still gave 0.873'. ADDED config: shared launch base (wandb --config), git-tracked."
+  },
+  {
+   "name": "het_premerger_16s_wsched_alpha_0.5_beta_1_floor_1e-1_c_rho_5_lambda_amp_1_uniform_snr",
+   "folder": "2026-09-23",
+   "updates": [
+    "2026-09-23-denoiser-scans",
+    "2026-09-29-den-reg-and-project-8",
+    "2026-10-15-oscillators-and-chirps"
+   ],
+   "status": "finished, max epochs: 'Trainer.fit stopped: max_epochs=1000 reached.' (last.ckpt 25 Sep 05:17)",
+   "description": "S4D denoiser (64 by 4) on a 4 s window 16 s before merger, heterodyned with the true chirp mass.",
+   "checkpoints": [
+    {
+     "file": "DENOISER-SCAN/het_premerger_16s_wsched_alpha_0.5_beta_1_floor_1e-1_c_rho_5_lambda_amp_1_uniform_snr/checkpoints/den_989.ckpt",
+     "epoch": 989,
+     "loads": true
+    },
+    {
+     "file": "DENOISER-SCAN/het_premerger_16s_wsched_alpha_0.5_beta_1_floor_1e-1_c_rho_5_lambda_amp_1_uniform_snr/checkpoints/last.ckpt",
+     "epoch": 999,
+     "loads": true
+    }
+   ],
+   "configs": [
+    "/home/kyoon/SSM-BNS/aframe/dev/runs/claude_tests/het_premerger_16s_wsched_alpha_0.5_beta_1_floor_1e-1_c_rho_5_lambda_amp_1_uniform_snr/config.yaml",
+    "/home/kyoon/SSM-BNS/aframe/dev/configs/denoise/het_prenorm_wsched_alpha_0.5_beta_1_floor_1e-1_c_rho_5_lambda_amp_1_uniform_snr/het_prenorm_wsched_alpha_0.5_beta_1_floor_1e-1_c_rho_5_lambda_amp_1_uniform_snr.yaml"
+   ],
+   "best": {
+    "metric": "val/den_loss",
+    "value": 0.52715,
+    "epoch": 989
+   },
+   "evidence": "CONFIRMED. 2026-09-23 pre-merger table: 'heterodyned with the true chirp mass | 0.917 | 1000' and figure het_vs_plain_rho.png; 09-29 talk summary; 10-15: '0.917 with heterodyning, against 0.900 without'. DESCRIPTION CORRECTED: config kernel_length 4.0 (right_pad -16), so the window is 4 s long, not 16 s. ADDED config: shared launch base."
+  },
+  {
+   "name": "prob0.9_prenorm_wsched_alpha_0.5_beta_1_floor_1e-1_c_rho_5_lambda_amp_1_uniform_snr",
+   "folder": "2026-09-23",
+   "updates": [
+    "2026-09-23-denoiser-scans"
+   ],
+   "status": "finished, max epochs: 'Trainer.fit stopped: max_epochs=1000 reached.' (last.ckpt 25 Sep 05:43)",
+   "description": "S4D denoiser (64 by 4) on the 4 s merger window with 10% noise-only windows; uniform SNR 4 to 100.",
+   "checkpoints": [
+    {
+     "file": "DENOISER-SCAN/prob0.9_prenorm_wsched_alpha_0.5_beta_1_floor_1e-1_c_rho_5_lambda_amp_1_uniform_snr/checkpoints/den_929.ckpt",
+     "epoch": 929,
+     "loads": true
+    },
+    {
+     "file": "DENOISER-SCAN/prob0.9_prenorm_wsched_alpha_0.5_beta_1_floor_1e-1_c_rho_5_lambda_amp_1_uniform_snr/checkpoints/last.ckpt",
+     "epoch": 999,
+     "loads": true
+    }
+   ],
+   "configs": [
+    "/home/kyoon/SSM-BNS/aframe/dev/runs/claude_tests/prob0.9_prenorm_wsched_alpha_0.5_beta_1_floor_1e-1_c_rho_5_lambda_amp_1_uniform_snr/config.yaml",
+    "/home/kyoon/SSM-BNS/aframe/dev/configs/denoise/merger/prenorm_wsched_alpha_0.5_beta_1_floor_1e-1_c_rho_5_lambda_amp_1_uniform_snr.yaml"
+   ],
+   "best": {
+    "metric": "val/den_loss",
+    "value": 1.72193,
+    "epoch": 929
+   },
+   "evidence": "CONFIRMED. 2026-09-23 merger table: 'same, plus 10% noise-only samples | 0.699 | 1000'. ADDED config: launch base (wandb --config), git-tracked."
+  },
+  {
+   "name": "test_ddp_smooth_rep4",
+   "folder": "exclude",
+   "updates": [],
+   "status": "finished, max epochs: 'Trainer.fit stopped: max_epochs=2 reached.' (test.log, 1 Oct 01:03)",
+   "description": "Two-epoch smoke test of two-GPU training, low-band smoothing and four backgrounds per waveform for the joint model.",
+   "checkpoints": [
+    {
+     "file": "DENOISER-SCAN/test_ddp_1790830876/checkpoints/den_01.ckpt",
+     "epoch": 1,
+     "loads": true
+    },
+    {
+     "file": "DENOISER-SCAN/test_ddp_1790830876/checkpoints/last.ckpt",
+     "epoch": 1,
+     "loads": true
+    }
+   ],
+   "configs": [
+    "/home/kyoon/SSM-BNS/aframe/dev/runs/claude_tests/test_ddp_smooth_rep4/config.yaml"
+   ],
+   "best": {
+    "metric": "val/den_loss",
+    "value": 18.49317,
+    "epoch": 1
+   },
+   "evidence": "CONFIRMED exclude: smoke test (2 epochs of 40 batches) before the 1 Oct recipe run (launched 01:13). Not on the site."
+  },
+  {
+   "name": "test_rop",
+   "folder": "exclude",
+   "updates": [],
+   "status": "finished, max epochs: 'Trainer.fit stopped: max_epochs=2 reached.' (test.log, 5 Oct 11:01)",
+   "description": "Two-epoch smoke test, logger off, of the plateau learning-rate schedule for the fine-tune.",
+   "checkpoints": [
+    {
+     "file": "lightning_logs/version_0/checkpoints/epoch=1-step=6.ckpt",
+     "epoch": 1,
+     "loads": true
+    }
+   ],
+   "configs": [
+    "/home/kyoon/SSM-BNS/aframe/dev/runs/claude_tests/test_rop/config.yaml",
+    "/home/kyoon/SSM-BNS/aframe/dev/runs/claude_tests/test_rop/base.yaml"
+   ],
+   "best": {
+    "metric": "none logged (logger: false)",
+    "value": null,
+    "epoch": null
+   },
+   "evidence": "CONFIRMED exclude: smoke test (2 epochs of 6 batches, no logger, no monitor) just before ft_m3 (11:05). Not on the site."
+  },
+  {
+   "name": "test_signal_repeats_d128_n6_mc_q",
+   "folder": "exclude",
+   "updates": [],
+   "status": "finished, max epochs: 'Trainer.fit stopped: max_epochs=2 reached.' (test.log, 1 Oct 00:18)",
+   "description": "Two-epoch smoke test of four backgrounds per waveform on the 128 by 6 joint denoiser and regressor.",
+   "checkpoints": [
+    {
+     "file": "DENOISER-SCAN/test_signal_repeats_1790828183/checkpoints/den_01.ckpt",
+     "epoch": 1,
+     "loads": true
+    },
+    {
+     "file": "DENOISER-SCAN/test_signal_repeats_1790828183/checkpoints/last.ckpt",
+     "epoch": 1,
+     "loads": true
+    }
+   ],
+   "configs": [
+    "/home/kyoon/SSM-BNS/aframe/dev/runs/claude_tests/test_signal_repeats_d128_n6_mc_q/config.yaml"
+   ],
+   "best": {
+    "metric": "val/den_loss",
+    "value": 22.13051,
+    "epoch": 1
+   },
+   "evidence": "CONFIRMED exclude: smoke test before the 1 Oct recipe run. Not on the site."
+  },
+  {
+   "name": "test_smooth_rep4_d128_n6_mc_q",
+   "folder": "exclude",
+   "updates": [],
+   "status": "finished, max epochs: 'Trainer.fit stopped: max_epochs=2 reached.' (test.log, 1 Oct 00:58)",
+   "description": "Two-epoch smoke test of low-band smoothing with four backgrounds per waveform on the 128 by 6 joint model.",
+   "checkpoints": [
+    {
+     "file": "DENOISER-SCAN/test_smooth_1790830544/checkpoints/den_01.ckpt",
+     "epoch": 1,
+     "loads": true
+    },
+    {
+     "file": "DENOISER-SCAN/test_smooth_1790830544/checkpoints/last.ckpt",
+     "epoch": 1,
+     "loads": true
+    }
+   ],
+   "configs": [
+    "/home/kyoon/SSM-BNS/aframe/dev/runs/claude_tests/test_smooth_rep4_d128_n6_mc_q/config.yaml"
+   ],
+   "best": {
+    "metric": "val/den_loss",
+    "value": 18.45652,
+    "epoch": 1
+   },
+   "evidence": "CONFIRMED exclude: smoke test before the 1 Oct recipe run. Not on the site."
+  },
+  {
+   "name": "testjob",
+   "folder": "exclude",
+   "updates": [],
+   "status": "finished, max epochs: 'Trainer.fit stopped: max_epochs=20 reached.' (23 Sep 16:51)",
+   "description": "Twenty-epoch trial of the heterodyned S4D denoiser config (64 by 4, 4 s merger window, true chirp mass).",
+   "checkpoints": [
+    {
+     "file": "DENOISER-SCAN/testjob/checkpoints/den_19.ckpt",
+     "epoch": 19,
+     "loads": true
+    },
+    {
+     "file": "DENOISER-SCAN/testjob/checkpoints/last.ckpt",
+     "epoch": 19,
+     "loads": true
+    }
+   ],
+   "configs": [
+    "/home/kyoon/SSM-BNS/aframe/dev/runs/claude_tests/testjob/config.yaml",
+    "/home/kyoon/SSM-BNS/aframe/dev/configs/denoise/het_prenorm_wsched_alpha_0.5_beta_1_floor_1e-1_c_rho_5_lambda_amp_1_uniform_snr/het_prenorm_wsched_alpha_0.5_beta_1_floor_1e-1_c_rho_5_lambda_amp_1_uniform_snr.yaml"
+   ],
+   "best": {
+    "metric": "val/den_loss",
+    "value": 1.51021,
+    "epoch": 19
+   },
+   "evidence": "CONFIRMED exclude: name starts with test; 20-epoch check of the shared het config on 23 Sep. The 09-23 sentence 'lifted rho from about 0.77 to 0.86' is another het run (not in claude_tests), not this one (0.789 at epoch 19). ADDED config: launch base."
+  },
+  {
+   "name": "aframe_resnet1d_3463_softmax_train_snr8_prob0.96",
+   "folder": "2026-10-13",
+   "updates": [
+    "2026-10-13-learned-long-kernels",
+    "2026-10-14-slides-chirps-tones-filters",
+    "2026-10-15-oscillators-and-chirps"
+   ],
+   "status": "crashed: killed by the host out-of-memory event of 15 Oct 01:41 during epoch 252 (train.log stops mid-epoch, no error line); never resumed; earlier OOM kill 14 Oct 01:11 at epoch 196, resumed 14 Oct 20:48",
+   "description": "aframe's time-domain ResNet1D (blocks 3,4,6,3, kernel 3) at 2048 Hz on noisy strain, softmax over 235 chirp-mass bins.",
+   "checkpoints": [
+    {
+     "file": "CLAUDE-TESTS/aframe_resnet1d_3463_softmax_train_snr8_prob0.96/checkpoints/ck_244.ckpt",
+     "epoch": 244,
+     "loads": true
+    },
+    {
+     "file": "CLAUDE-TESTS/aframe_resnet1d_3463_softmax_train_snr8_prob0.96/checkpoints/last.ckpt",
+     "epoch": 251,
+     "loads": true
+    }
+   ],
+   "configs": [
+    "/home/kyoon/SSM-BNS/aframe/dev/local/train/claude_tests/long_conv/aframe_resnet1d_3463_softmax_train_snr8_prob0.96.yaml",
+    "/home/kyoon/SSM-BNS/aframe/dev/runs/claude_tests/aframe_resnet1d_3463_softmax_train_snr8_prob0.96/config.yaml"
+   ],
+   "best": {
+    "metric": "val/within_1pct_chirp_mass",
+    "value": 0.11164,
+    "epoch": 244
+   },
+   "evidence": "CONFIRMED. 2026-10-13 run table 'aframe ResNet | aframe's time-domain ResNet [3, 4, 6, 3] | 7.3M | 13 Oct'; slide 11 curve; 10-15 lecture caption 'the ResNet a deep network of another kind'."
+  },
+  {
+   "name": "chirp_kernel_512_frozen_energy_s4d_4layer_softmax_train_snr8_prob0.96",
+   "folder": "2026-10-08",
+   "updates": [
+    "2026-10-08-chirp-kernels-work"
+   ],
+   "status": "finished, max epochs: '`Trainer.fit` stopped: `max_epochs=200` reached.' (11 Oct 01:09)",
+   "description": "512 frozen chirp kernels, per-detector energy maps, four S4D layers, time maximum, added to bank logits; chirp-mass softmax.",
+   "checkpoints": [
+    {
+     "file": "CLAUDE-TESTS/chirp_kernel_512_frozen_energy_s4d_4layer_softmax_train_snr8_prob0.96/checkpoints/ck_84.ckpt",
+     "epoch": 84,
+     "loads": true
+    },
+    {
+     "file": "CLAUDE-TESTS/chirp_kernel_512_frozen_energy_s4d_4layer_softmax_train_snr8_prob0.96/checkpoints/last.ckpt",
+     "epoch": 199,
+     "loads": true
+    }
+   ],
+   "configs": [
+    "/home/kyoon/SSM-BNS/aframe/dev/local/train/claude_tests/chirp_kernel/chirp_kernel_512_frozen_energy_s4d_4layer_softmax_train_snr8_prob0.96.yaml",
+    "/home/kyoon/SSM-BNS/aframe/dev/runs/claude_tests/chirp_kernel_512_frozen_energy_s4d_4layer_softmax_train_snr8_prob0.96/config.yaml"
+   ],
+   "best": {
+    "metric": "val/within_1pct_chirp_mass",
+    "value": 0.34449,
+    "epoch": 6
+   },
+   "evidence": "Folder CONFIRMED: 2026-10-08 section 5, 'That version is training: frozen kernels, per-detector energy maps, four S4D layers...' (added to the 8 Oct page in commit 062a63e, 9 Oct 11:13; run launched 10:50); results never posted. BEST CHANGED to val within 1% per the instruction for chirp-mass regressors (local wandb max 0.34449 at epoch 6); the checkpoint monitors val/within_2pct_chirp_mass, best 0.51708 at epoch 84 (= ck_84). Train log: /home/kyoon/SSM-BNS/aframe/dev/local/train/claude_tests/chirp_kernel/<run>.log."
+  },
+  {
+   "name": "chirp_kernel_512_learned_mc_softmax_train_snr8_prob0.96",
+   "folder": "2026-10-08",
+   "updates": [
+    "2026-10-08-chirp-kernels-work",
+    "2026-10-12-template-bank-network",
+    "2026-10-14-slides-chirps-tones-filters"
+   ],
+   "status": "finished, max epochs: '`Trainer.fit` stopped: `max_epochs=200` reached.' (9 Oct 11:52)",
+   "description": "512 Newtonian chirp kernels with learned chirp masses, energy, time maximum, softmax over kernel chirp masses; noisy 2048 Hz strain.",
+   "checkpoints": [
+    {
+     "file": "CLAUDE-TESTS/chirp_kernel_512_learned_mc_softmax_train_snr8_prob0.96/checkpoints/ck_38.ckpt",
+     "epoch": 38,
+     "loads": true
+    },
+    {
+     "file": "CLAUDE-TESTS/chirp_kernel_512_learned_mc_softmax_train_snr8_prob0.96/checkpoints/last.ckpt",
+     "epoch": 199,
+     "loads": true
+    },
+    {
+     "file": "test_ep38/test.ckpt",
+     "epoch": 38,
+     "loads": true
+    },
+    {
+     "file": "test_latest/test.ckpt",
+     "epoch": 24,
+     "loads": true
+    }
+   ],
+   "configs": [
+    "/home/kyoon/SSM-BNS/aframe/dev/local/train/claude_tests/chirp_kernel/chirp_kernel_512_learned_mc_softmax_train_snr8_prob0.96.yaml",
+    "/home/kyoon/SSM-BNS/aframe/dev/runs/claude_tests/chirp_kernel_512_learned_mc_softmax_train_snr8_prob0.96/config.yaml"
+   ],
+   "best": {
+    "metric": "val/within_1pct_chirp_mass",
+    "value": 0.42378,
+    "epoch": 58
+   },
+   "evidence": "Folder CONFIRMED: 2026-10-08 by name ('The wandb run is CLAUDE-TESTS/chirp_kernel_512_learned_mc_softmax_train_snr8_prob0.96'), 'The epoch-38 checkpoint', 'Against the epoch-24 checkpoint' (= test_latest); 10-12 cost table 'chirp kernels (512)'; slide 3 'Oct 8-11'. BEST CHANGED to val within 1% (local wandb max 0.42378 at epoch 58); monitored val/within_2pct_chirp_mass best 0.48990 at epoch 38 (= ck_38)."
+  },
+  {
+   "name": "chirp_kernel_eval",
+   "folder": "2026-10-08",
+   "updates": [
+    "2026-10-08-chirp-kernels-work"
+   ],
+   "status": "not a training run: evaluation folder (eval.py, arch_figs.py, pop_plots.py); eval.log stops after the first population ('snr4_powerlaw done')",
+   "description": "Evaluation folder: epoch-23 copy of the learned-chirp-mass kernel run's checkpoint, used for 8 October figures.",
+   "checkpoints": [
+    {
+     "file": "eval_ckpt.ckpt",
+     "epoch": 23,
+     "loads": true
+    }
+   ],
+   "configs": [],
+   "best": {
+    "metric": "none (evaluation folder, not a training run)",
+    "value": null,
+    "epoch": null
+   },
+   "evidence": "CONFIRMED. 2026-10-08 figures ck_architecture.png, ck_kernels.png, ck_energy_map.png match chirp_kernel_eval/figs (md5, per agent). eval_ckpt.ckpt: epoch 23, step 37536, unique md5; its callback state (best within 2% 0.4558 at ck_17) matches the learned_mc run's epoch-24 file. Could be merged into the learned_mc entry."
+  },
+  {
+   "name": "free_kernel_energy_max_256ch_softmax_train_snr4_prob0.96",
+   "folder": "unreported",
+   "updates": [],
+   "status": "crashed: killed (SIGKILL, no error line) at 20:47 on 14 Oct during epoch 99; relaunch_queue6.out prints 'Killed'; not in the experiment log, most likely the out-of-memory killer; never resumed; earlier OOM kills 14 Oct 01:11 (epoch 69) and 13:53 (epoch 83), resumed 11:55 and 18:50",
+   "description": "One-layer CNN: 256 free 4 s kernels at 1024 Hz, energy, time maximum, chirp-mass softmax; noisy, train SNR from 4.",
+   "checkpoints": [
+    {
+     "file": "CLAUDE-TESTS/free_kernel_energy_max_256ch_softmax_train_snr4_prob0.96/checkpoints/ck_68.ckpt",
+     "epoch": 68,
+     "loads": true
+    },
+    {
+     "file": "CLAUDE-TESTS/free_kernel_energy_max_256ch_softmax_train_snr4_prob0.96/checkpoints/last.ckpt",
+     "epoch": 98,
+     "loads": true
+    }
+   ],
+   "configs": [
+    "/home/kyoon/SSM-BNS/aframe/dev/local/train/claude_tests/long_conv/free_kernel_energy_max_256ch_softmax_train_snr4_prob0.96.yaml",
+    "/home/kyoon/SSM-BNS/aframe/dev/runs/claude_tests/free_kernel_energy_max_256ch_softmax_train_snr4_prob0.96/config.yaml"
+   ],
+   "best": {
+    "metric": "val/within_1pct_chirp_mass",
+    "value": 0.32787,
+    "epoch": 68
+   },
+   "evidence": "CONFIRMED unreported (judgment). 2026-10-13 has only the plan 'Next: Train the free kernels from SNR 4, not only SNR 8.' (commit 15:20; run launched 15:32). Slide 17 lists only the 2048 Hz SNR-4 run (this run was stopped at 16:20, last epoch 82 at 13:50). The 10-14 S4D page's 'Next for it: 2048 Hz, training from SNR 4 (running)' (commit 14 Oct 12:16, both SNR-4 runs running then) matches slide 19's wording for the 2048 Hz run, so assigned there. Undated brainstorm page mentions this run. If the plan counts: 2026-10-13."
+  },
+  {
+   "name": "free_kernel_energy_max_256ch_softmax_train_snr8_prob0.96",
+   "folder": "2026-10-13",
+   "updates": [
+    "2026-10-13-learned-long-kernels",
+    "2026-10-14-den-reg-final",
+    "2026-10-14-s4d-project-8-vs-bns",
+    "2026-10-14-signal-only-test",
+    "2026-10-14-slides-chirps-tones-filters",
+    "2026-10-15-oscillators-and-chirps",
+    "2026-10-16-what-s4d-computes"
+   ],
+   "status": "stopped by hand: '[rank: 0] Received SIGTERM: 15' 13 Oct about 14:55, during epoch 253; last.ckpt epoch 252; the 13 Oct update says 'stopped 13 Oct at epoch 253'",
+   "description": "One-layer CNN: 256 free 4 s kernels at 1024 Hz, energy, time maximum, chirp-mass softmax; noisy, train SNR from 8.",
+   "checkpoints": [
+    {
+     "file": "CLAUDE-TESTS/free_kernel_energy_max_256ch_softmax_train_snr8_prob0.96/checkpoints/ck_248.ckpt",
+     "epoch": 248,
+     "loads": true
+    },
+    {
+     "file": "CLAUDE-TESTS/free_kernel_energy_max_256ch_softmax_train_snr8_prob0.96/checkpoints/last.ckpt",
+     "epoch": 252,
+     "loads": true
+    },
+    {
+     "file": "test_ck_141/test.ckpt",
+     "epoch": 141,
+     "loads": true
+    },
+    {
+     "file": "test_ck_248/test.ckpt",
+     "epoch": 248,
+     "loads": true
+    }
+   ],
+   "configs": [
+    "/home/kyoon/SSM-BNS/aframe/dev/local/train/claude_tests/long_conv/free_kernel_energy_max_256ch_softmax_train_snr8_prob0.96.yaml",
+    "/home/kyoon/SSM-BNS/aframe/dev/runs/claude_tests/free_kernel_energy_max_256ch_softmax_train_snr8_prob0.96/config.yaml"
+   ],
+   "best": {
+    "metric": "val/within_1pct_chirp_mass",
+    "value": 0.41943,
+    "epoch": 248
+   },
+   "evidence": "CONFIRMED; ADDED update 2026-10-14-den-reg-final ('The learned long kernels stay 2.6 to 2.9 times ahead of the final den-reg within 1% at SNR 8 to 12 (71, 72 and 77%...)'). 2026-10-13 table 'free kernels | 256 free 4 s kernels | 1.07M | 12 Oct, stopped 13 Oct at epoch 253', tests of epochs 141 (test_ck_141, the only copy) and 248."
+  },
+  {
+   "name": "free_kernel_taps_energy_max_256ch_softmax_train_snr8_prob0.96",
+   "folder": "2026-10-14",
+   "updates": [
+    "2026-10-14-slides-chirps-tones-filters",
+    "2026-10-15-oscillators-and-chirps"
+   ],
+   "status": "crashed: killed by the host out-of-memory event of 15 Oct 02:20 during epoch 250 (train.log stops mid-epoch, no error line); never resumed",
+   "description": "As the SNR-8 free-kernel run, but each kernel stored as free time samples instead of a spectrum; 1024 Hz.",
+   "checkpoints": [
+    {
+     "file": "CLAUDE-TESTS/free_kernel_taps_energy_max_256ch_softmax_train_snr8_prob0.96/checkpoints/ck_133.ckpt",
+     "epoch": 133,
+     "loads": true
+    },
+    {
+     "file": "CLAUDE-TESTS/free_kernel_taps_energy_max_256ch_softmax_train_snr8_prob0.96/checkpoints/last.ckpt",
+     "epoch": 249,
+     "loads": true
+    }
+   ],
+   "configs": [
+    "/home/kyoon/SSM-BNS/aframe/dev/local/train/claude_tests/long_conv/free_kernel_taps_energy_max_256ch_softmax_train_snr8_prob0.96.yaml",
+    "/home/kyoon/SSM-BNS/aframe/dev/runs/claude_tests/free_kernel_taps_energy_max_256ch_softmax_train_snr8_prob0.96/config.yaml"
+   ],
+   "best": {
+    "metric": "val/within_1pct_chirp_mass",
+    "value": 0.38887,
+    "epoch": 133
+   },
+   "evidence": "Folder CONFIRMED: slide 17 'run (with noise)': 'Free kernels stored as time samples | running, ep 44 | 33-35%' (wandb at 16:20: epoch 45, 32.5%, best 34.8%). ADDED update 2026-10-15: 'Free kernels stored as 4,096 time samples ... put 36.0% ... over epochs 200 to 250' (already in the 15 Oct text, lecture_rev/original.md). Run config says kernel: taps; repo config says kernel: time (renamed 14 Oct, load hook maps keys)."
+  },
+  {
+   "name": "free_kernel_time_energy_max_256ch_softmax_train_snr4_2048hz_prob0.96",
+   "folder": "2026-10-14",
+   "updates": [
+    "2026-10-14-s4d-project-8-vs-bns",
+    "2026-10-14-slides-chirps-tones-filters"
+   ],
+   "status": "paused by the shutdown of 16 Oct 12:05: resumed 11:58 from last.ckpt, 'Received SIGTERM: 15' during the validation of epoch 295 (its first epoch after the resume); no new checkpoint, so last.ckpt is epoch 294 (15 Oct 16:12); earlier OOM kills 15 Oct 02:20 (epoch 290) and 15 Oct 16:20 (epoch 295)",
+   "description": "256 free 4 s kernels stored as time samples, full 2048 Hz, time maximum, chirp-mass softmax; train SNR from 4.",
+   "checkpoints": [
+    {
+     "file": "CLAUDE-TESTS/free_kernel_time_energy_max_256ch_softmax_train_snr4_2048hz_prob0.96/checkpoints/ck_274.ckpt",
+     "epoch": 274,
+     "loads": true
+    },
+    {
+     "file": "CLAUDE-TESTS/free_kernel_time_energy_max_256ch_softmax_train_snr4_2048hz_prob0.96/checkpoints/last.ckpt",
+     "epoch": 294,
+     "loads": true
+    }
+   ],
+   "configs": [
+    "/home/kyoon/SSM-BNS/aframe/dev/local/train/claude_tests/long_conv/free_kernel_time_energy_max_256ch_softmax_train_snr4_2048hz_prob0.96.yaml",
+    "/home/kyoon/SSM-BNS/aframe/dev/runs/claude_tests/free_kernel_time_energy_max_256ch_softmax_train_snr4_2048hz_prob0.96/config.yaml"
+   ],
+   "best": {
+    "metric": "val/within_1pct_chirp_mass",
+    "value": 0.25418,
+    "epoch": 274
+   },
+   "evidence": "CONFIRMED folder: slide 17 'Free kernels, 2048 Hz, from SNR 4 | running, ep 119 | 16-17%' (wandb: epoch 119 at 16:17, latest 15.5%, best 17.4%); slide 19 'Full 2048 Hz, train down to SNR 4 (running)'. ADDED 2026-10-14-s4d-project-8-vs-bns: 'Next for it: 2048 Hz, training from SNR 4 (running)' (same pairing as slide 19; written 12:16 when this run had started at 11:38; the 1024 Hz SNR-4 run was also running, so not certain). last.ckpt holds no early-stopping state."
+  },
+  {
+   "name": "s4d_energy_max_1024ch_dstate64_mixed_256_softmax_train_snr8_prob0.96",
+   "folder": "2026-10-13",
+   "updates": [
+    "2026-10-13-learned-long-kernels",
+    "2026-10-14-slides-chirps-tones-filters",
+    "2026-10-15-oscillators-and-chirps"
+   ],
+   "status": "crashed: killed by the host out-of-memory event of 15 Oct 02:20 during epoch 421 (no error line); never resumed; earlier stopped by script (taps_launch.sh) 14 Oct about 10:04 early in epoch 358 to free memory, resumed 20:55",
+   "description": "S4D layer of 1024 channels (32 tones each) mixed into 256 complex kernels, energy, time maximum, chirp-mass softmax; noisy.",
+   "checkpoints": [
+    {
+     "file": "CLAUDE-TESTS/s4d_energy_max_1024ch_dstate64_mixed_256_softmax_train_snr8_prob0.96/checkpoints/ck_377.ckpt",
+     "epoch": 377,
+     "loads": true
+    },
+    {
+     "file": "CLAUDE-TESTS/s4d_energy_max_1024ch_dstate64_mixed_256_softmax_train_snr8_prob0.96/checkpoints/last.ckpt",
+     "epoch": 420,
+     "loads": true
+    }
+   ],
+   "configs": [
+    "/home/kyoon/SSM-BNS/aframe/dev/local/train/claude_tests/long_conv/s4d_energy_max_1024ch_dstate64_mixed_256_softmax_train_snr8_prob0.96.yaml",
+    "/home/kyoon/SSM-BNS/aframe/dev/runs/claude_tests/s4d_energy_max_1024ch_dstate64_mixed_256_softmax_train_snr8_prob0.96/config.yaml"
+   ],
+   "best": {
+    "metric": "val/within_1pct_chirp_mass",
+    "value": 0.07597,
+    "epoch": 377
+   },
+   "evidence": "CONFIRMED. 2026-10-13 table 'S4D width | 1024 channels of 32 tones, linearly mixed into 256 | 717k | 12 Oct'; slide 4 'S4D, 1024 channels wide | 6%'; 10-15 lecture table 'S4D, wider ... 6%'."
+  },
+  {
+   "name": "s4d_energy_max_256ch_dstate512_bandinit_softmax_train_snr8_prob0.96",
+   "folder": "2026-10-13",
+   "updates": [
+    "2026-10-13-learned-long-kernels",
+    "2026-10-14-s4d-project-8-vs-bns",
+    "2026-10-14-slides-chirps-tones-filters",
+    "2026-10-15-oscillators-and-chirps",
+    "2026-10-16-what-s4d-computes"
+   ],
+   "status": "crashed: killed at 18:48 on 14 Oct during epoch 123 (train.log stops mid-epoch, no error line; not in the experiment log, most likely the out-of-memory killer); never resumed; earlier OOM kills 14 Oct 01:11 (epoch 77) and 13:53 (epoch 93)",
+   "description": "One S4D layer, 256 channels of 256 tones started inside 20-512 Hz with 4 s memory; chirp-mass softmax, noisy.",
+   "checkpoints": [
+    {
+     "file": "CLAUDE-TESTS/s4d_energy_max_256ch_dstate512_bandinit_softmax_train_snr8_prob0.96/checkpoints/ck_122.ckpt",
+     "epoch": 122,
+     "loads": true
+    },
+    {
+     "file": "CLAUDE-TESTS/s4d_energy_max_256ch_dstate512_bandinit_softmax_train_snr8_prob0.96/checkpoints/last.ckpt",
+     "epoch": 122,
+     "loads": true
+    }
+   ],
+   "configs": [
+    "/home/kyoon/SSM-BNS/aframe/dev/local/train/claude_tests/long_conv/s4d_energy_max_256ch_dstate512_bandinit_softmax_train_snr8_prob0.96.yaml",
+    "/home/kyoon/SSM-BNS/aframe/dev/runs/claude_tests/s4d_energy_max_256ch_dstate512_bandinit_softmax_train_snr8_prob0.96/config.yaml"
+   ],
+   "best": {
+    "metric": "val/within_1pct_chirp_mass",
+    "value": 0.10533,
+    "epoch": 122
+   },
+   "evidence": "CONFIRMED. 2026-10-13 table 'S4D, d_state 512, band initialization ... 13 Oct'; 10-14 S4D page 'Starting every tone inside the band did not help'; slides 4, 17; 10-15 table; 10-16 What S4D computes 'band init (9.4%)'. ck_122 and last.ckpt are byte-identical."
+  },
+  {
+   "name": "s4d_energy_max_256ch_dstate512_softmax_train_snr8_prob0.96",
+   "folder": "2026-10-13",
+   "updates": [
+    "2026-10-13-learned-long-kernels",
+    "2026-10-14-s4d-project-8-vs-bns",
+    "2026-10-14-slides-chirps-tones-filters",
+    "2026-10-15-oscillators-and-chirps",
+    "2026-10-16-status-dropout-and-signal-only",
+    "2026-10-16-what-s4d-computes"
+   ],
+   "status": "crashed: killed at 20:47 on 14 Oct during epoch 344 (train.log stops mid-epoch, no error line; not in the experiment log, most likely the out-of-memory killer); never resumed; earlier OOM kill 14 Oct 01:11 (epoch 295)",
+   "description": "One S4D layer, 256 channels of 256 tones (default start), energy, time maximum, chirp-mass softmax; noisy, train SNR from 8.",
+   "checkpoints": [
+    {
+     "file": "CLAUDE-TESTS/s4d_energy_max_256ch_dstate512_softmax_train_snr8_prob0.96/checkpoints/ck_288.ckpt",
+     "epoch": 288,
+     "loads": true
+    },
+    {
+     "file": "CLAUDE-TESTS/s4d_energy_max_256ch_dstate512_softmax_train_snr8_prob0.96/checkpoints/last.ckpt",
+     "epoch": 343,
+     "loads": true
+    }
+   ],
+   "configs": [
+    "/home/kyoon/SSM-BNS/aframe/dev/local/train/claude_tests/long_conv/s4d_energy_max_256ch_dstate512_softmax_train_snr8_prob0.96.yaml",
+    "/home/kyoon/SSM-BNS/aframe/dev/runs/claude_tests/s4d_energy_max_256ch_dstate512_softmax_train_snr8_prob0.96/config.yaml"
+   ],
+   "best": {
+    "metric": "val/within_1pct_chirp_mass",
+    "value": 0.23654,
+    "epoch": 288
+   },
+   "evidence": "CONFIRMED. 2026-10-13 table 'S4D, d_state 512 | 256 S4D channels of 256 tones | 323k | 12 Oct'; 10-14 S4D page '7% of the tones of our 256-tone run'; 10-16 status (GPU FFT offset, two S4D runs); What S4D computes 'S4D, 256 per channel (21.2%)'. Its validation numbers include the GPU FFT offset."
+  },
+  {
+   "name": "s4d_energy_max_256ch_dstate64_softmax_train_snr8_prob0.96",
+   "folder": "2026-10-13",
+   "updates": [
+    "2026-10-13-learned-long-kernels",
+    "2026-10-14-slides-chirps-tones-filters",
+    "2026-10-15-oscillators-and-chirps",
+    "2026-10-16-status-dropout-and-signal-only",
+    "2026-10-16-what-s4d-computes"
+   ],
+   "status": "crashed: killed (SIGKILL, no error line) at 20:47 on 14 Oct during epoch 331; relaunch_queue6.out prints 'Killed'; most likely the out-of-memory killer; never resumed; earlier OOM kill 14 Oct 01:11 (epoch 322)",
+   "description": "One S4D layer, 256 channels of 32 tones, energy, time maximum, chirp-mass softmax; noisy, train SNR from 8.",
+   "checkpoints": [
+    {
+     "file": "CLAUDE-TESTS/s4d_energy_max_256ch_dstate64_softmax_train_snr8_prob0.96/checkpoints/ck_266.ckpt",
+     "epoch": 266,
+     "loads": true
+    },
+    {
+     "file": "CLAUDE-TESTS/s4d_energy_max_256ch_dstate64_softmax_train_snr8_prob0.96/checkpoints/last.ckpt",
+     "epoch": 330,
+     "loads": true
+    }
+   ],
+   "configs": [
+    "/home/kyoon/SSM-BNS/aframe/dev/local/train/claude_tests/long_conv/s4d_energy_max_256ch_dstate64_softmax_train_snr8_prob0.96.yaml",
+    "/home/kyoon/SSM-BNS/aframe/dev/runs/claude_tests/s4d_energy_max_256ch_dstate64_softmax_train_snr8_prob0.96/config.yaml"
+   ],
+   "best": {
+    "metric": "val/within_1pct_chirp_mass",
+    "value": 0.09663,
+    "epoch": 266
+   },
+   "evidence": "CONFIRMED. 2026-10-13 table 'S4D, d_state 64 | 256 S4D channels of 32 tones (the den-reg's size) | 93k | 12 Oct'; What S4D computes 'S4D, 32 per channel (7.2%)'. Description shortened (removed the 'den-reg' label). Validation includes the GPU FFT offset."
+  },
+  {
+   "name": "s4d_regressor_6layer_dstate64_energy_max_softmax_train_snr8_prob0.96",
+   "folder": "2026-10-13",
+   "updates": [
+    "2026-10-13-learned-long-kernels",
+    "2026-10-14-slides-chirps-tones-filters",
+    "2026-10-15-oscillators-and-chirps"
+   ],
+   "status": "crashed: killed by the host out-of-memory event of 15 Oct 01:41 during epoch 288 (no error line); never resumed; earlier stopped by script (taps_launch.sh) 14 Oct about 10:16 early in epoch 256 to free memory, resumed 21:06",
+   "description": "Six S4D layers (128 channels, 32 tones each; the joint model's regressor alone), complex energy, time maximum, chirp-mass softmax; noisy.",
+   "checkpoints": [
+    {
+     "file": "CLAUDE-TESTS/s4d_regressor_6layer_dstate64_energy_max_softmax_train_snr8_prob0.96/checkpoints/ck_268.ckpt",
+     "epoch": 268,
+     "loads": true
+    },
+    {
+     "file": "CLAUDE-TESTS/s4d_regressor_6layer_dstate64_energy_max_softmax_train_snr8_prob0.96/checkpoints/last.ckpt",
+     "epoch": 287,
+     "loads": true
+    }
+   ],
+   "configs": [
+    "/home/kyoon/SSM-BNS/aframe/dev/local/train/claude_tests/long_conv/s4d_regressor_6layer_dstate64_energy_max_softmax_train_snr8_prob0.96.yaml",
+    "/home/kyoon/SSM-BNS/aframe/dev/runs/claude_tests/s4d_regressor_6layer_dstate64_energy_max_softmax_train_snr8_prob0.96/config.yaml"
+   ],
+   "best": {
+    "metric": "val/within_1pct_chirp_mass",
+    "value": 0.15083,
+    "epoch": 268
+   },
+   "evidence": "CONFIRMED. 2026-10-13 table 'S4D depth | the den-reg regressor alone (6 S4D layers) | 347k | 12 Oct'; slide 4 'S4D, 6 layers deep | 14%'; 10-15 lecture (deeper network, dropout 0.2 caveat)."
+  },
+  {
+   "name": "template_bank_235_1024hz_train_snr8_prob0.96",
+   "folder": "2026-10-12",
+   "updates": [
+    "2026-10-12-template-bank-network"
+   ],
+   "status": "stopped by hand, 12 Oct about 01:27 (SIGTERM tracebacks at the end of train.log) during epoch 7, after 7 completed epochs (last.ckpt epoch 6); epoch 0 is the reported model",
+   "description": "Matched filter as a network: 235 fixed whitened templates (one spin), network SNR, time maximum, learned chirp-mass posterior read-out.",
+   "checkpoints": [
+    {
+     "file": "CLAUDE-TESTS/template_bank_235_1024hz_train_snr8_prob0.96/checkpoints/ck_00.ckpt",
+     "epoch": 0,
+     "loads": true
+    },
+    {
+     "file": "CLAUDE-TESTS/template_bank_235_1024hz_train_snr8_prob0.96/checkpoints/last.ckpt",
+     "epoch": 6,
+     "loads": true
+    },
+    {
+     "file": "test_ep00/test.ckpt",
+     "epoch": 0,
+     "loads": true
+    }
+   ],
+   "configs": [
+    "/home/kyoon/SSM-BNS/aframe/dev/local/train/claude_tests/template_bank/template_bank_235_1024hz_train_snr8_prob0.96.yaml",
+    "/home/kyoon/SSM-BNS/aframe/dev/runs/claude_tests/template_bank_235_1024hz_train_snr8_prob0.96/config.yaml"
+   ],
+   "best": {
+    "metric": "val/within_1pct_chirp_mass",
+    "value": 0.47022,
+    "epoch": 0
+   },
+   "evidence": "CONFIRMED. 2026-10-12 results table 'template bank, 235 templates'; 'from 47 to 39% (235 templates)'; cost table. Checkpoints hold only the read-out; templates come from /home/kyoon/SSM-BNS/aframe/dev/runs/claude_tests/template_bank/bank_mc0.5pct_spin0_q0.8.npz."
+  },
+  {
+   "name": "template_bank_703_spin3_1024hz_detection_mlp_train_snr4_prob0.5",
+   "folder": "2026-10-12",
+   "updates": [
+    "2026-10-12-template-bank-network"
+   ],
+   "status": "finished, max epochs: '`Trainer.fit` stopped: `max_epochs=20` reached.' (12 Oct 03:00)",
+   "description": "703-template bank (three spins) with a small MLP detection score on per-window SNR and chi-squared features; train SNR from 4.",
+   "checkpoints": [
+    {
+     "file": "CLAUDE-TESTS/template_bank_703_spin3_1024hz_detection_mlp_train_snr4_prob0.5/checkpoints/ck_15.ckpt",
+     "epoch": 15,
+     "loads": true
+    },
+    {
+     "file": "CLAUDE-TESTS/template_bank_703_spin3_1024hz_detection_mlp_train_snr4_prob0.5/checkpoints/last.ckpt",
+     "epoch": 19,
+     "loads": true
+    }
+   ],
+   "configs": [
+    "/home/kyoon/SSM-BNS/aframe/dev/local/train/claude_tests/template_bank/template_bank_703_spin3_1024hz_detection_mlp_train_snr4_prob0.5.yaml",
+    "/home/kyoon/SSM-BNS/aframe/dev/runs/claude_tests/template_bank_703_spin3_1024hz_detection_mlp_train_snr4_prob0.5/config.yaml"
+   ],
+   "best": {
+    "metric": "val/loss_detection (min)",
+    "value": 0.52666,
+    "epoch": 15
+   },
+   "evidence": "CONFIRMED. 2026-10-12: 'I also trained a small network (two hidden layers of 32) on per-window features ... It is not clearly better'; SV figure 'with the detection MLP'. Detection run, so the monitored detection loss is kept (its val within 1% peaks at 0.504, epoch 4). Needs bank_mc0.5pct_spin3_q0.8.npz."
+  },
+  {
+   "name": "template_bank_703_spin3_1024hz_train_snr8_prob0.96",
+   "folder": "2026-10-12",
+   "updates": [
+    "2026-10-12-template-bank-network",
+    "2026-10-13-learned-long-kernels",
+    "2026-10-14-den-reg-final",
+    "2026-10-14-s4d-project-8-vs-bns",
+    "2026-10-14-slides-chirps-tones-filters"
+   ],
+   "status": "stopped by hand, 12 Oct about 01:27 (SIGTERM tracebacks at the end of train.log) during epoch 7, after 7 completed epochs (last.ckpt epoch 6); best and reported epoch is 0",
+   "description": "Matched filter as a network: 703 fixed whitened templates (three spins), network SNR, time maximum, learned chirp-mass posterior read-out.",
+   "checkpoints": [
+    {
+     "file": "CLAUDE-TESTS/template_bank_703_spin3_1024hz_train_snr8_prob0.96/checkpoints/ck_00.ckpt",
+     "epoch": 0,
+     "loads": true
+    },
+    {
+     "file": "CLAUDE-TESTS/template_bank_703_spin3_1024hz_train_snr8_prob0.96/checkpoints/last.ckpt",
+     "epoch": 6,
+     "loads": true
+    },
+    {
+     "file": "sv/sv.ckpt",
+     "epoch": 0,
+     "loads": true
+    },
+    {
+     "file": "test_ep00/test.ckpt",
+     "epoch": 0,
+     "loads": true
+    }
+   ],
+   "configs": [
+    "/home/kyoon/SSM-BNS/aframe/dev/local/train/claude_tests/template_bank/template_bank_703_spin3_1024hz_train_snr8_prob0.96.yaml",
+    "/home/kyoon/SSM-BNS/aframe/dev/runs/claude_tests/template_bank_703_spin3_1024hz_train_snr8_prob0.96/config.yaml"
+   ],
+   "best": {
+    "metric": "val/within_1pct_chirp_mass",
+    "value": 0.49404,
+    "epoch": 0
+   },
+   "evidence": "CONFIRMED. 2026-10-12 results 'template bank, 703 templates'; 'from 49 to 45% (703 templates)'; chi-squared SV from ck_00 (sv/); reused as 'the template bank' in 10-13, 10-14 den-reg-final, 10-14 S4D page and slides. Needs bank_mc0.5pct_spin3_q0.8.npz."
+  },
+  {
+   "name": "sig_only_reg_dilated_cnn_energy_max",
+   "folder": "2026-10-16",
+   "updates": [
+    "2026-10-15-oscillators-and-chirps",
+    "2026-10-16-status-dropout-and-signal-only"
+   ],
+   "status": "finished, early stopping: stopped at epoch 235 on 16 Oct 11:14, one epoch after an 11:12 resume under the new stopping rule (state: wait 207, stopped_epoch 235); best epoch 28",
+   "description": "Clean-signal chirp mass: dilated CNN (9 residual blocks, dilations 1 to 256, 128 channels), energy and maximum over time.",
+   "checkpoints": [
+    {
+     "file": "CLAUDE-TESTS/sig_only_reg_dilated_cnn_energy_max/checkpoints/ck_28.ckpt",
+     "epoch": 28,
+     "loads": true
+    },
+    {
+     "file": "CLAUDE-TESTS/sig_only_reg_dilated_cnn_energy_max/checkpoints/last.ckpt",
+     "epoch": 235,
+     "loads": true
+    }
+   ],
+   "configs": [
+    "/home/kyoon/SSM-BNS/aframe/dev/local/train/claude_tests/oracle/sig_only_reg_dilated_cnn_energy_max.yaml",
+    "/home/kyoon/SSM-BNS/aframe/dev/runs/claude_tests/sig_only_reg_dilated_cnn_energy_max/config.yaml"
+   ],
+   "best": {
+    "metric": "val/within_1pct_chirp_mass",
+    "value": 1,
+    "epoch": 28
+   },
+   "evidence": "CONFIRMED. 16 Oct status table 'dilated CNN ... 100 / 100 / 100 / 100 | [log]'. The 10-15 lecture mentions it only in text revised 16 Oct (absent from lecture_rev/original.md, the pre-revision copy); run first launched 15 Oct 20:59."
+  },
+  {
+   "name": "sig_only_reg_free_kernel",
+   "folder": "2026-10-14",
+   "updates": [
+    "2026-10-14-signal-only-test",
+    "2026-10-14-s4d-project-8-vs-bns",
+    "2026-10-14-slides-chirps-tones-filters",
+    "2026-10-15-oscillators-and-chirps",
+    "2026-10-16-status-dropout-and-signal-only",
+    "2026-10-16-what-s4d-computes"
+   ],
+   "status": "stopped by hand, 14 Oct 10:55 (experiment log: user, plateaued; train.log ends with SIGTERM DataLoader tracebacks at 10:56, in epoch 49); last checkpoint epoch 48",
+   "description": "Clean-signal chirp mass: one layer of 256 learned 4 s kernels stored as spectra, energy, maximum over time.",
+   "checkpoints": [
+    {
+     "file": "CLAUDE-TESTS/sig_only_reg_free_kernel/checkpoints/ck_46.ckpt",
+     "epoch": 46,
+     "loads": true
+    },
+    {
+     "file": "CLAUDE-TESTS/sig_only_reg_free_kernel/checkpoints/last.ckpt",
+     "epoch": 48,
+     "loads": true
+    },
+    {
+     "file": "CLAUDE-TESTS/sig_only_reg_free_kernel/checkpoints/resume_cos.ckpt",
+     "epoch": 41,
+     "loads": true
+    }
+   ],
+   "configs": [
+    "/home/kyoon/SSM-BNS/aframe/dev/local/train/claude_tests/oracle/sig_only_reg_free_kernel.yaml",
+    "/home/kyoon/SSM-BNS/aframe/dev/local/train/claude_tests/oracle/sig_only_reg_free_kernel.plateau_ep0.yaml",
+    "/home/kyoon/SSM-BNS/aframe/dev/runs/claude_tests/sig_only_reg_free_kernel/config.yaml"
+   ],
+   "best": {
+    "metric": "val/within_1pct_chirp_mass",
+    "value": 0.998046875,
+    "epoch": 46
+   },
+   "evidence": "CONFIRMED. 14 Oct signal-only test 'free kernels ... 99.7%'; 14 Oct S4D page; slide 13; 10-15 lecture; 16 Oct status (wandb link, 'stopped at epoch 48, with its best, 99.8%, at epoch 46'); What S4D computes ('free-kernel CNN'). resume_cos.ckpt = converted checkpoint for the cosine resume at epoch 42."
+  },
+  {
+   "name": "sig_only_reg_free_kernel_taps",
+   "folder": "2026-10-14",
+   "updates": [
+    "2026-10-14-signal-only-test",
+    "2026-10-14-slides-chirps-tones-filters"
+   ],
+   "status": "crashed (killed, no error line): train.log stops mid-epoch 78 at 20:47 on 14 Oct; cause not logged; other jobs ended the same minute, two reported 'Killed' by their launcher (most likely the out-of-memory killer); last checkpoint epoch 77",
+   "description": "Clean-signal chirp mass: one layer of 256 learned 4 s kernels stored as time samples, energy, maximum over time.",
+   "checkpoints": [
+    {
+     "file": "CLAUDE-TESTS/sig_only_reg_free_kernel_taps/checkpoints/ck_42.ckpt",
+     "epoch": 42,
+     "loads": true
+    },
+    {
+     "file": "CLAUDE-TESTS/sig_only_reg_free_kernel_taps/checkpoints/last.ckpt",
+     "epoch": 77,
+     "loads": true
+    }
+   ],
+   "configs": [
+    "/home/kyoon/SSM-BNS/aframe/dev/local/train/claude_tests/oracle/sig_only_reg_free_kernel_taps.yaml",
+    "/home/kyoon/SSM-BNS/aframe/dev/runs/claude_tests/sig_only_reg_free_kernel_taps/config.yaml"
+   ],
+   "best": {
+    "metric": "val/within_1pct_chirp_mass",
+    "value": 0.99951171875,
+    "epoch": 42
+   },
+   "evidence": "Folder CONFIRMED: 14 Oct signal-only test 'Running now ... the free kernels stored as time samples instead of a spectrum'. ADDED 2026-10-14 slides (probable): slide 17 'Training now ... Clean signal: free kernels 99.9%'; at 16:20 this was the only clean free-kernel run training, at 99.90 to 99.95% from 15:08 to 16:18; the spectrum run had stopped at 10:55 and never passed 99.80%."
+  },
+  {
+   "name": "sig_only_reg_resnet",
+   "folder": "2026-10-16",
+   "updates": [
+    "2026-10-15-oscillators-and-chirps",
+    "2026-10-16-status-dropout-and-signal-only"
+   ],
+   "status": "finished, early stopping: stopped at epoch 255 on 16 Oct 08:29, one epoch after a resume (state: wait 142, stopped_epoch 255); best epoch 113",
+   "description": "Clean-signal chirp mass: aframe ResNet, 16 residual blocks of 3-sample convolutions, average over time.",
+   "checkpoints": [
+    {
+     "file": "CLAUDE-TESTS/sig_only_reg_resnet/checkpoints/ck_113.ckpt",
+     "epoch": 113,
+     "loads": true
+    },
+    {
+     "file": "CLAUDE-TESTS/sig_only_reg_resnet/checkpoints/last.ckpt",
+     "epoch": 255,
+     "loads": true
+    }
+   ],
+   "configs": [
+    "/home/kyoon/SSM-BNS/aframe/dev/local/train/claude_tests/oracle/sig_only_reg_resnet.yaml",
+    "/home/kyoon/SSM-BNS/aframe/dev/runs/claude_tests/sig_only_reg_resnet/config.yaml"
+   ],
+   "best": {
+    "metric": "val/within_1pct_chirp_mass",
+    "value": 1,
+    "epoch": 113
+   },
+   "evidence": "CONFIRMED. 16 Oct status 'aframe ResNet | a deep CNN ... | 100 / 100 / 100 / 100 | [log]'. 10-15 lecture mentions it only in its 16 Oct revision (not in original.md); first launched 15 Oct 20:07."
+  },
+  {
+   "name": "sig_only_reg_resnet_energy_max",
+   "folder": "2026-10-16",
+   "updates": [
+    "2026-10-16-status-dropout-and-signal-only"
+   ],
+   "status": "paused by the shutdown of 16 Oct 12:05 (in epoch 37; last checkpoint epoch 36)",
+   "description": "Clean-signal chirp mass: aframe ResNet body ending in energy and maximum over time instead of the average.",
+   "checkpoints": [
+    {
+     "file": "CLAUDE-TESTS/sig_only_reg_resnet_energy_max/checkpoints/ck_36.ckpt",
+     "epoch": 36,
+     "loads": true
+    },
+    {
+     "file": "CLAUDE-TESTS/sig_only_reg_resnet_energy_max/checkpoints/last.ckpt",
+     "epoch": 36,
+     "loads": true
+    }
+   ],
+   "configs": [
+    "/home/kyoon/SSM-BNS/aframe/dev/local/train/claude_tests/oracle/sig_only_reg_resnet_energy_max.yaml",
+    "/home/kyoon/SSM-BNS/aframe/dev/runs/claude_tests/sig_only_reg_resnet_energy_max/config.yaml"
+   ],
+   "best": {
+    "metric": "val/within_1pct_chirp_mass",
+    "value": 0.9990234375,
+    "epoch": 36
+   },
+   "evidence": "CONFIRMED. 16 Oct status 'ResNet, free-kernel ending ... (epoch 36; training paused) | [log]'."
+  },
+  {
+   "name": "sig_only_reg_s4d_256x256x4",
+   "folder": "2026-10-14",
+   "updates": [
+    "2026-10-14-signal-only-test",
+    "2026-10-14-s4d-project-8-vs-bns",
+    "2026-10-14-slides-chirps-tones-filters",
+    "2026-10-16-status-dropout-and-signal-only"
+   ],
+   "status": "stopped by hand, 14 Oct (experiment log 11:01, user: overtraining); train.log ends 10:59 with '[rank: 0] Received SIGTERM: 15' in epoch 26; last checkpoint epoch 25",
+   "description": "Clean-signal chirp mass: four-layer S4D, 256 channels, state size 256, mean over time, dropout 0.2.",
+   "checkpoints": [
+    {
+     "file": "CLAUDE-TESTS/sig_only_reg_s4d_256x256x4/checkpoints/ck_11.ckpt",
+     "epoch": 11,
+     "loads": true
+    },
+    {
+     "file": "CLAUDE-TESTS/sig_only_reg_s4d_256x256x4/checkpoints/last.ckpt",
+     "epoch": 25,
+     "loads": true
+    },
+    {
+     "file": "CLAUDE-TESTS/sig_only_reg_s4d_256x256x4/checkpoints/resume_cos.ckpt",
+     "epoch": 21,
+     "loads": true
+    }
+   ],
+   "configs": [
+    "/home/kyoon/SSM-BNS/aframe/dev/local/train/claude_tests/oracle/sig_only_reg_s4d_256x256x4.yaml",
+    "/home/kyoon/SSM-BNS/aframe/dev/local/train/claude_tests/oracle/sig_only_reg_s4d_256x256x4.plateau_ep0.yaml",
+    "/home/kyoon/SSM-BNS/aframe/dev/runs/claude_tests/sig_only_reg_s4d_256x256x4/config.yaml"
+   ],
+   "best": {
+    "metric": "val/within_1pct_chirp_mass",
+    "value": 0.7783203125,
+    "epoch": 11
+   },
+   "evidence": "CONFIRMED. 14 Oct signal-only test 'S4D 256 x 256 x 4 ... 54.0%', 'peaked at 77.8% within 1% at epoch 11'; 14 Oct S4D page; slide 13; 16 Oct status ('Both used S4D regressors with dropout 0.2'). Not in the 10-15 lecture."
+  },
+  {
+   "name": "sig_only_reg_s4d_64x32x4",
+   "folder": "2026-10-14",
+   "updates": [
+    "2026-10-14-signal-only-test",
+    "2026-10-14-s4d-project-8-vs-bns",
+    "2026-10-14-slides-chirps-tones-filters",
+    "2026-10-15-oscillators-and-chirps",
+    "2026-10-16-status-dropout-and-signal-only",
+    "2026-10-16-why-dropout-broke-our-s4d"
+   ],
+   "status": "stopped by hand, 14 Oct (experiment log 11:00, user: would not improve); train.log ends 10:58 with '[rank: 0] Received SIGTERM: 15' in epoch 49; last checkpoint epoch 48",
+   "description": "Clean-signal chirp mass: four-layer S4D, 64 channels, state size 32, mean over time, dropout 0.2.",
+   "checkpoints": [
+    {
+     "file": "CLAUDE-TESTS/sig_only_reg_s4d_64x32x4/checkpoints/ck_19.ckpt",
+     "epoch": 19,
+     "loads": true
+    },
+    {
+     "file": "CLAUDE-TESTS/sig_only_reg_s4d_64x32x4/checkpoints/last.ckpt",
+     "epoch": 48,
+     "loads": true
+    },
+    {
+     "file": "CLAUDE-TESTS/sig_only_reg_s4d_64x32x4/checkpoints/resume_cos.ckpt",
+     "epoch": 41,
+     "loads": true
+    }
+   ],
+   "configs": [
+    "/home/kyoon/SSM-BNS/aframe/dev/local/train/claude_tests/oracle/sig_only_reg_s4d_64x32x4.yaml",
+    "/home/kyoon/SSM-BNS/aframe/dev/local/train/claude_tests/oracle/sig_only_reg_s4d_64x32x4.plateau_ep0.yaml",
+    "/home/kyoon/SSM-BNS/aframe/dev/runs/claude_tests/sig_only_reg_s4d_64x32x4/config.yaml"
+   ],
+   "best": {
+    "metric": "val/within_1pct_chirp_mass",
+    "value": 0.36865234375,
+    "epoch": 19
+   },
+   "evidence": "CONFIRMED. 14 Oct signal-only test 'S4D 64 x 32 x 4' (32.6%); 10-15 lecture (32.6%, also in the 15 Oct text); 16 Oct status and why-dropout link it ('36.9% (epoch 19)')."
+  },
+  {
+   "name": "sig_only_reg_s4d_64x32x4_warp_merger",
+   "folder": "2026-10-16",
+   "updates": [
+    "2026-10-16-status-dropout-and-signal-only"
+   ],
+   "status": "crashed 15 Oct about 19:32 in epoch 97: 'RuntimeError: unable to allocate shared memory(shm) for file </torch_...>: Resource temporarily unavailable (11)'; not resumed (superseded by the dropout-0 redo); last checkpoint epoch 96",
+   "description": "Clean-signal chirp mass: S4D 64x32x4, mean over time, dropout 0.2; merger window, time axis warped.",
+   "checkpoints": [
+    {
+     "file": "CLAUDE-TESTS/sig_only_reg_s4d_64x32x4_warp_merger/checkpoints/ck_94.ckpt",
+     "epoch": 94,
+     "loads": true
+    },
+    {
+     "file": "CLAUDE-TESTS/sig_only_reg_s4d_64x32x4_warp_merger/checkpoints/last.ckpt",
+     "epoch": 96,
+     "loads": true
+    }
+   ],
+   "configs": [
+    "/home/kyoon/SSM-BNS/aframe/dev/local/train/claude_tests/oracle/sig_only_reg_s4d_64x32x4_warp_merger.yaml",
+    "/home/kyoon/SSM-BNS/aframe/dev/runs/claude_tests/sig_only_reg_s4d_64x32x4_warp_merger/config.yaml"
+   ],
+   "best": {
+    "metric": "val/within_1pct_chirp_mass",
+    "value": 0.396484375,
+    "epoch": 94
+   },
+   "evidence": "Setup only, as one of a set: 16 Oct status 'The 15 October warp tests compare four endings of the same small S4D on three inputs ... All twelve runs had dropout 0.2.' No result published. Alternative folder: unreported."
+  },
+  {
+   "name": "sig_only_reg_s4d_64x32x4_warp_premerger",
+   "folder": "2026-10-16",
+   "updates": [
+    "2026-10-16-status-dropout-and-signal-only"
+   ],
+   "status": "crashed 15 Oct about 19:33 in epoch 172: 'RuntimeError: unable to allocate shared memory(shm) for file </torch_...>: Resource temporarily unavailable (11)'; not resumed (superseded by the dropout-0 redo); last checkpoint epoch 171",
+   "description": "Clean-signal chirp mass: S4D 64x32x4, mean over time, dropout 0.2; window 25 s before merger, warped, 256 Hz.",
+   "checkpoints": [
+    {
+     "file": "CLAUDE-TESTS/sig_only_reg_s4d_64x32x4_warp_premerger/checkpoints/ck_145.ckpt",
+     "epoch": 145,
+     "loads": true
+    },
+    {
+     "file": "CLAUDE-TESTS/sig_only_reg_s4d_64x32x4_warp_premerger/checkpoints/last.ckpt",
+     "epoch": 171,
+     "loads": true
+    }
+   ],
+   "configs": [
+    "/home/kyoon/SSM-BNS/aframe/dev/local/train/claude_tests/oracle/sig_only_reg_s4d_64x32x4_warp_premerger.yaml",
+    "/home/kyoon/SSM-BNS/aframe/dev/runs/claude_tests/sig_only_reg_s4d_64x32x4_warp_premerger/config.yaml"
+   ],
+   "best": {
+    "metric": "val/within_1pct_chirp_mass",
+    "value": 0.6650390625,
+    "epoch": 145
+   },
+   "evidence": "Setup only, as one of the set of twelve in the 16 Oct status. No result published. Alternative folder: unreported."
+  },
+  {
+   "name": "sig_only_reg_s4d_complex_energy_max_64x32x4",
+   "folder": "2026-10-14",
+   "updates": [
+    "2026-10-14-signal-only-test",
+    "2026-10-14-s4d-project-8-vs-bns",
+    "2026-10-14-slides-chirps-tones-filters",
+    "2026-10-15-oscillators-and-chirps",
+    "2026-10-16-status-dropout-and-signal-only",
+    "2026-10-16-why-dropout-broke-our-s4d"
+   ],
+   "status": "crashed (killed, no error line): train.log stops at the start of epoch 63 at 18:47 on 14 Oct; cause not logged (the band-init noisy run died the same minute); last checkpoint epoch 62; earlier OOM kill 14 Oct 13:53 (epoch 29), resumed 13:54",
+   "description": "Clean-signal chirp mass: S4D 64x32x4 with complex last layer, energy and maximum over time, dropout 0.2.",
+   "checkpoints": [
+    {
+     "file": "CLAUDE-TESTS/sig_only_reg_s4d_complex_energy_max_64x32x4/checkpoints/ck_55.ckpt",
+     "epoch": 55,
+     "loads": true
+    },
+    {
+     "file": "CLAUDE-TESTS/sig_only_reg_s4d_complex_energy_max_64x32x4/checkpoints/last.ckpt",
+     "epoch": 62,
+     "loads": true
+    }
+   ],
+   "configs": [
+    "/home/kyoon/SSM-BNS/aframe/dev/local/train/claude_tests/oracle/sig_only_reg_s4d_complex_energy_max_64x32x4.yaml",
+    "/home/kyoon/SSM-BNS/aframe/dev/runs/claude_tests/sig_only_reg_s4d_complex_energy_max_64x32x4/config.yaml"
+   ],
+   "best": {
+    "metric": "val/within_1pct_chirp_mass",
+    "value": 0.97509765625,
+    "epoch": 55
+   },
+   "evidence": "CONFIRMED. 14 Oct signal-only test (setup, 'Running now ... energy and maximum'); slides 13 and 17 '96.9% (running)' (wandb ep 44 at 16:11 = 96.88%); 10-15 lecture (96.9%, in the 15 Oct text); 16 Oct status '97.5% (energy and maximum)'; why-dropout '97.5% (epoch 55)'."
+  },
+  {
+   "name": "sig_only_reg_s4d_complex_energy_max_64x32x4_warp_merger",
+   "folder": "2026-10-16",
+   "updates": [
+    "2026-10-16-status-dropout-and-signal-only"
+   ],
+   "status": "crashed 15 Oct about 19:32 in epoch 53: 'RuntimeError: unable to allocate shared memory(shm) for file </torch_...>: Resource temporarily unavailable (11)'; not resumed (superseded by the dropout-0 redo); last checkpoint epoch 52",
+   "description": "Clean-signal chirp mass: S4D 64x32x4, complex last layer, energy and maximum, dropout 0.2; merger window, time warped.",
+   "checkpoints": [
+    {
+     "file": "CLAUDE-TESTS/sig_only_reg_s4d_complex_energy_max_64x32x4_warp_merger/checkpoints/ck_50.ckpt",
+     "epoch": 50,
+     "loads": true
+    },
+    {
+     "file": "CLAUDE-TESTS/sig_only_reg_s4d_complex_energy_max_64x32x4_warp_merger/checkpoints/last.ckpt",
+     "epoch": 52,
+     "loads": true
+    }
+   ],
+   "configs": [
+    "/home/kyoon/SSM-BNS/aframe/dev/local/train/claude_tests/oracle/sig_only_reg_s4d_complex_energy_max_64x32x4_warp_merger.yaml",
+    "/home/kyoon/SSM-BNS/aframe/dev/runs/claude_tests/sig_only_reg_s4d_complex_energy_max_64x32x4_warp_merger/config.yaml"
+   ],
+   "best": {
+    "metric": "val/within_1pct_chirp_mass",
+    "value": 0.546875,
+    "epoch": 50
+   },
+   "evidence": "Setup only, as one of the set of twelve in the 16 Oct status. No result published. Alternative folder: unreported."
+  },
+  {
+   "name": "sig_only_reg_s4d_complex_energy_max_64x32x4_warp_premerger",
+   "folder": "2026-10-16",
+   "updates": [
+    "2026-10-16-status-dropout-and-signal-only"
+   ],
+   "status": "finished, max epochs: '`Trainer.fit` stopped: `max_epochs=800` reached.' (15 Oct 12:24)",
+   "description": "Clean-signal chirp mass: S4D 64x32x4, complex last layer, energy and maximum, dropout 0.2; window 25 s pre-merger, warped, 256 Hz.",
+   "checkpoints": [
+    {
+     "file": "CLAUDE-TESTS/sig_only_reg_s4d_complex_energy_max_64x32x4_warp_premerger/checkpoints/ck_193.ckpt",
+     "epoch": 193,
+     "loads": true
+    },
+    {
+     "file": "CLAUDE-TESTS/sig_only_reg_s4d_complex_energy_max_64x32x4_warp_premerger/checkpoints/last.ckpt",
+     "epoch": 799,
+     "loads": true
+    }
+   ],
+   "configs": [
+    "/home/kyoon/SSM-BNS/aframe/dev/local/train/claude_tests/oracle/sig_only_reg_s4d_complex_energy_max_64x32x4_warp_premerger.yaml",
+    "/home/kyoon/SSM-BNS/aframe/dev/runs/claude_tests/sig_only_reg_s4d_complex_energy_max_64x32x4_warp_premerger/config.yaml"
+   ],
+   "best": {
+    "metric": "val/within_1pct_chirp_mass",
+    "value": 1,
+    "epoch": 193
+   },
+   "evidence": "Setup only, as one of the set of twelve in the 16 Oct status; its 100% result is not published. Alternative folder: unreported."
+  },
+  {
+   "name": "sig_only_reg_s4d_complex_energy_max_dropout0_64x32x4",
+   "folder": "2026-10-16",
+   "updates": [
+    "2026-10-16-status-dropout-and-signal-only"
+   ],
+   "status": "paused by the shutdown of 16 Oct 12:05 (in epoch 3; last checkpoint epoch 2)",
+   "description": "Clean-signal chirp mass: S4D 64x32x4 with complex last layer, energy and maximum over time, dropout 0.",
+   "checkpoints": [
+    {
+     "file": "CLAUDE-TESTS/sig_only_reg_s4d_complex_energy_max_dropout0_64x32x4/checkpoints/ck_02.ckpt",
+     "epoch": 2,
+     "loads": true
+    },
+    {
+     "file": "CLAUDE-TESTS/sig_only_reg_s4d_complex_energy_max_dropout0_64x32x4/checkpoints/last.ckpt",
+     "epoch": 2,
+     "loads": true
+    }
+   ],
+   "configs": [
+    "/home/kyoon/SSM-BNS/aframe/dev/local/train/claude_tests/oracle/sig_only_reg_s4d_complex_energy_max_dropout0_64x32x4.yaml",
+    "/home/kyoon/SSM-BNS/aframe/dev/runs/claude_tests/sig_only_reg_s4d_complex_energy_max_dropout0_64x32x4/config.yaml"
+   ],
+   "best": {
+    "metric": "val/within_1pct_chirp_mass",
+    "value": 0.31103515625,
+    "epoch": 2
+   },
+   "evidence": "CONFIRMED. 16 Oct status dropout-0 warp table, 'complex, energy and maximum', merger: '31.1 / 54.2 / 89.3 / 98.0, epoch 2, paused at 2 [log]'."
+  },
+  {
+   "name": "sig_only_reg_s4d_complex_energy_max_dropout0_64x32x4_warp_merger",
+   "folder": "2026-10-16",
+   "updates": [
+    "2026-10-16-status-dropout-and-signal-only"
+   ],
+   "status": "paused by the shutdown of 16 Oct 12:05 (in epoch 3; last checkpoint epoch 2)",
+   "description": "Clean-signal chirp mass: S4D 64x32x4, complex last layer, energy and maximum, dropout 0; merger window, time warped.",
+   "checkpoints": [
+    {
+     "file": "CLAUDE-TESTS/sig_only_reg_s4d_complex_energy_max_dropout0_64x32x4_warp_merger/checkpoints/ck_02.ckpt",
+     "epoch": 2,
+     "loads": true
+    },
+    {
+     "file": "CLAUDE-TESTS/sig_only_reg_s4d_complex_energy_max_dropout0_64x32x4_warp_merger/checkpoints/last.ckpt",
+     "epoch": 2,
+     "loads": true
+    }
+   ],
+   "configs": [
+    "/home/kyoon/SSM-BNS/aframe/dev/local/train/claude_tests/oracle/sig_only_reg_s4d_complex_energy_max_dropout0_64x32x4_warp_merger.yaml",
+    "/home/kyoon/SSM-BNS/aframe/dev/runs/claude_tests/sig_only_reg_s4d_complex_energy_max_dropout0_64x32x4_warp_merger/config.yaml"
+   ],
+   "best": {
+    "metric": "val/within_1pct_chirp_mass",
+    "value": 0.1865234375,
+    "epoch": 2
+   },
+   "evidence": "CONFIRMED. 16 Oct status: '18.7 / 33.9 / 68.5 / 93.5, epoch 2, paused at 2 [log]'."
+  },
+  {
+   "name": "sig_only_reg_s4d_complex_energy_max_dropout0_64x32x4_warp_premerger",
+   "folder": "2026-10-16",
+   "updates": [
+    "2026-10-16-status-dropout-and-signal-only"
+   ],
+   "status": "paused by the shutdown of 16 Oct 12:05 (in epoch 2; last checkpoint epoch 1)",
+   "description": "Clean-signal chirp mass: S4D 64x32x4, complex last layer, energy and maximum, dropout 0; window 25 s pre-merger, warped, 256 Hz.",
+   "checkpoints": [
+    {
+     "file": "CLAUDE-TESTS/sig_only_reg_s4d_complex_energy_max_dropout0_64x32x4_warp_premerger/checkpoints/ck_01.ckpt",
+     "epoch": 1,
+     "loads": true
+    },
+    {
+     "file": "CLAUDE-TESTS/sig_only_reg_s4d_complex_energy_max_dropout0_64x32x4_warp_premerger/checkpoints/last.ckpt",
+     "epoch": 1,
+     "loads": true
+    }
+   ],
+   "configs": [
+    "/home/kyoon/SSM-BNS/aframe/dev/local/train/claude_tests/oracle/sig_only_reg_s4d_complex_energy_max_dropout0_64x32x4_warp_premerger.yaml",
+    "/home/kyoon/SSM-BNS/aframe/dev/runs/claude_tests/sig_only_reg_s4d_complex_energy_max_dropout0_64x32x4_warp_premerger/config.yaml"
+   ],
+   "best": {
+    "metric": "val/within_1pct_chirp_mass",
+    "value": 0.39990234375,
+    "epoch": 1
+   },
+   "evidence": "CONFIRMED. 16 Oct status: '40.0 / 66.9 / 90.2 / 97.1, epoch 1, paused at 1 [log]'."
+  },
+  {
+   "name": "sig_only_reg_s4d_complex_mean_64x32x4",
+   "folder": "2026-10-14",
+   "updates": [
+    "2026-10-14-signal-only-test",
+    "2026-10-14-s4d-project-8-vs-bns",
+    "2026-10-16-status-dropout-and-signal-only"
+   ],
+   "status": "crashed (killed, no error line): train.log stops at the start of epoch 82 at 20:47 on 14 Oct; cause not logged; other jobs ended the same minute, two reported 'Killed' (most likely the out-of-memory killer); last checkpoint epoch 81",
+   "description": "Clean-signal chirp mass: S4D 64x32x4 with complex last layer, mean over time, dropout 0.2.",
+   "checkpoints": [
+    {
+     "file": "CLAUDE-TESTS/sig_only_reg_s4d_complex_mean_64x32x4/checkpoints/ck_73.ckpt",
+     "epoch": 73,
+     "loads": true
+    },
+    {
+     "file": "CLAUDE-TESTS/sig_only_reg_s4d_complex_mean_64x32x4/checkpoints/last.ckpt",
+     "epoch": 81,
+     "loads": true
+    }
+   ],
+   "configs": [
+    "/home/kyoon/SSM-BNS/aframe/dev/local/train/claude_tests/oracle/sig_only_reg_s4d_complex_mean_64x32x4.yaml",
+    "/home/kyoon/SSM-BNS/aframe/dev/runs/claude_tests/sig_only_reg_s4d_complex_mean_64x32x4/config.yaml"
+   ],
+   "best": {
+    "metric": "val/within_1pct_chirp_mass",
+    "value": 0.80224609375,
+    "epoch": 73
+   },
+   "evidence": "CONFIRMED. 14 Oct signal-only test (setup: 'complex last layer (averaged, ...)'); 14 Oct S4D page 'are running'; 16 Oct status '80.2% (mean) on the merger window'."
+  },
+  {
+   "name": "sig_only_reg_s4d_complex_mean_64x32x4_warp_merger",
+   "folder": "2026-10-16",
+   "updates": [
+    "2026-10-16-status-dropout-and-signal-only"
+   ],
+   "status": "crashed 15 Oct about 19:33 in epoch 81: stopped 19:27 at an epoch end for a swap to unpinned waveforms, relaunched 19:29, trained about one minute, then 'RuntimeError: unable to allocate shared memory(shm) for file </torch_...>: Resource temporarily unavailable (11)'; not resumed; last checkpoint epoch 80",
+   "description": "Clean-signal chirp mass: S4D 64x32x4, complex last layer, mean over time, dropout 0.2; merger window, time warped.",
+   "checkpoints": [
+    {
+     "file": "CLAUDE-TESTS/sig_only_reg_s4d_complex_mean_64x32x4_warp_merger/checkpoints/ck_80.ckpt",
+     "epoch": 80,
+     "loads": true
+    },
+    {
+     "file": "CLAUDE-TESTS/sig_only_reg_s4d_complex_mean_64x32x4_warp_merger/checkpoints/last.ckpt",
+     "epoch": 80,
+     "loads": true
+    }
+   ],
+   "configs": [
+    "/home/kyoon/SSM-BNS/aframe/dev/local/train/claude_tests/oracle/sig_only_reg_s4d_complex_mean_64x32x4_warp_merger.yaml",
+    "/home/kyoon/SSM-BNS/aframe/dev/runs/claude_tests/sig_only_reg_s4d_complex_mean_64x32x4_warp_merger/config.yaml"
+   ],
+   "best": {
+    "metric": "val/within_1pct_chirp_mass",
+    "value": 0.76171875,
+    "epoch": 80
+   },
+   "evidence": "STATUS CORRECTED: it did not die at startup; after the 19:29 relaunch it reached 23% of epoch 81 (log line 'Epoch 81: 23% 359/1564') before the shm error (launch_1015c.out: stopped 19:27, launched 19:29). Setup only, one of the set of twelve in the 16 Oct status. Alternative folder: unreported."
+  },
+  {
+   "name": "sig_only_reg_s4d_complex_mean_64x32x4_warp_premerger",
+   "folder": "2026-10-16",
+   "updates": [
+    "2026-10-16-status-dropout-and-signal-only"
+   ],
+   "status": "crashed 15 Oct about 19:32 in epoch 129: 'RuntimeError: unable to allocate shared memory(shm) for file </torch_...>: Resource temporarily unavailable (11)'; not resumed; last checkpoint epoch 128",
+   "description": "Clean-signal chirp mass: S4D 64x32x4, complex last layer, mean over time, dropout 0.2; window 25 s pre-merger, warped, 256 Hz.",
+   "checkpoints": [
+    {
+     "file": "CLAUDE-TESTS/sig_only_reg_s4d_complex_mean_64x32x4_warp_premerger/checkpoints/ck_126.ckpt",
+     "epoch": 126,
+     "loads": true
+    },
+    {
+     "file": "CLAUDE-TESTS/sig_only_reg_s4d_complex_mean_64x32x4_warp_premerger/checkpoints/last.ckpt",
+     "epoch": 128,
+     "loads": true
+    }
+   ],
+   "configs": [
+    "/home/kyoon/SSM-BNS/aframe/dev/local/train/claude_tests/oracle/sig_only_reg_s4d_complex_mean_64x32x4_warp_premerger.yaml",
+    "/home/kyoon/SSM-BNS/aframe/dev/runs/claude_tests/sig_only_reg_s4d_complex_mean_64x32x4_warp_premerger/config.yaml"
+   ],
+   "best": {
+    "metric": "val/within_1pct_chirp_mass",
+    "value": 0.99169921875,
+    "epoch": 126
+   },
+   "evidence": "Setup only, one of the set of twelve in the 16 Oct status. No result published. Alternative folder: unreported."
+  },
+  {
+   "name": "sig_only_reg_s4d_complex_mean_dropout0_64x32x4",
+   "folder": "2026-10-16",
+   "updates": [
+    "2026-10-16-status-dropout-and-signal-only"
+   ],
+   "status": "paused by the shutdown of 16 Oct 12:05 (in epoch 6; last checkpoint epoch 5)",
+   "description": "Clean-signal chirp mass: S4D 64x32x4 with complex last layer, mean over time, dropout 0.",
+   "checkpoints": [
+    {
+     "file": "CLAUDE-TESTS/sig_only_reg_s4d_complex_mean_dropout0_64x32x4/checkpoints/ck_05.ckpt",
+     "epoch": 5,
+     "loads": true
+    },
+    {
+     "file": "CLAUDE-TESTS/sig_only_reg_s4d_complex_mean_dropout0_64x32x4/checkpoints/last.ckpt",
+     "epoch": 5,
+     "loads": true
+    }
+   ],
+   "configs": [
+    "/home/kyoon/SSM-BNS/aframe/dev/local/train/claude_tests/oracle/sig_only_reg_s4d_complex_mean_dropout0_64x32x4.yaml",
+    "/home/kyoon/SSM-BNS/aframe/dev/runs/claude_tests/sig_only_reg_s4d_complex_mean_dropout0_64x32x4/config.yaml"
+   ],
+   "best": {
+    "metric": "val/within_1pct_chirp_mass",
+    "value": 0.63037109375,
+    "epoch": 5
+   },
+   "evidence": "CONFIRMED. 16 Oct status: '63.0 / 90.0 / 98.8 / 99.8, epoch 5, paused at 5 [log]'."
+  },
+  {
+   "name": "sig_only_reg_s4d_complex_mean_dropout0_64x32x4_warp_merger",
+   "folder": "2026-10-16",
+   "updates": [
+    "2026-10-16-status-dropout-and-signal-only"
+   ],
+   "status": "paused by the shutdown of 16 Oct 12:05 (in epoch 5; last checkpoint epoch 4)",
+   "description": "Clean-signal chirp mass: S4D 64x32x4, complex last layer, mean over time, dropout 0; merger window, time warped.",
+   "checkpoints": [
+    {
+     "file": "CLAUDE-TESTS/sig_only_reg_s4d_complex_mean_dropout0_64x32x4_warp_merger/checkpoints/ck_03.ckpt",
+     "epoch": 3,
+     "loads": true
+    },
+    {
+     "file": "CLAUDE-TESTS/sig_only_reg_s4d_complex_mean_dropout0_64x32x4_warp_merger/checkpoints/last.ckpt",
+     "epoch": 4,
+     "loads": true
+    }
+   ],
+   "configs": [
+    "/home/kyoon/SSM-BNS/aframe/dev/local/train/claude_tests/oracle/sig_only_reg_s4d_complex_mean_dropout0_64x32x4_warp_merger.yaml",
+    "/home/kyoon/SSM-BNS/aframe/dev/runs/claude_tests/sig_only_reg_s4d_complex_mean_dropout0_64x32x4_warp_merger/config.yaml"
+   ],
+   "best": {
+    "metric": "val/within_1pct_chirp_mass",
+    "value": 0.18603515625,
+    "epoch": 3
+   },
+   "evidence": "CONFIRMED. 16 Oct status: '18.6 / 37.1 / 79.6 / 98.1, epoch 3, paused at 4 [log]'."
+  },
+  {
+   "name": "sig_only_reg_s4d_complex_mean_dropout0_64x32x4_warp_premerger",
+   "folder": "2026-10-16",
+   "updates": [
+    "2026-10-16-status-dropout-and-signal-only"
+   ],
+   "status": "paused by the shutdown of 16 Oct 12:05 (in epoch 6; last checkpoint epoch 5)",
+   "description": "Clean-signal chirp mass: S4D 64x32x4, complex last layer, mean over time, dropout 0; window 25 s pre-merger, warped, 256 Hz.",
+   "checkpoints": [
+    {
+     "file": "CLAUDE-TESTS/sig_only_reg_s4d_complex_mean_dropout0_64x32x4_warp_premerger/checkpoints/ck_05.ckpt",
+     "epoch": 5,
+     "loads": true
+    },
+    {
+     "file": "CLAUDE-TESTS/sig_only_reg_s4d_complex_mean_dropout0_64x32x4_warp_premerger/checkpoints/last.ckpt",
+     "epoch": 5,
+     "loads": true
+    }
+   ],
+   "configs": [
+    "/home/kyoon/SSM-BNS/aframe/dev/local/train/claude_tests/oracle/sig_only_reg_s4d_complex_mean_dropout0_64x32x4_warp_premerger.yaml",
+    "/home/kyoon/SSM-BNS/aframe/dev/runs/claude_tests/sig_only_reg_s4d_complex_mean_dropout0_64x32x4_warp_premerger/config.yaml"
+   ],
+   "best": {
+    "metric": "val/within_1pct_chirp_mass",
+    "value": 0.9326171875,
+    "epoch": 5
+   },
+   "evidence": "CONFIRMED. 16 Oct status: '93.3 / 98.6 / 99.8 / 99.9, epoch 5, paused at 5 [log]'."
+  },
+  {
+   "name": "sig_only_reg_s4d_dropout0_64x32x4",
+   "folder": "2026-10-16",
+   "updates": [
+    "2026-10-14-signal-only-test",
+    "2026-10-14-s4d-project-8-vs-bns",
+    "2026-10-15-oscillators-and-chirps",
+    "2026-10-16-status-dropout-and-signal-only",
+    "2026-10-16-why-dropout-broke-our-s4d"
+   ],
+   "status": "paused by the shutdown of 16 Oct 12:05 (in epoch 245; last checkpoint epoch 244); it had early-stopped at epoch 231 and was resumed at 11:19 to run past epoch 289 under the cycle-aware stopping rule",
+   "description": "Clean-signal chirp mass: four-layer S4D, 64 channels, state size 32, mean over time, dropout 0.",
+   "checkpoints": [
+    {
+     "file": "CLAUDE-TESTS/sig_only_reg_s4d_dropout0_64x32x4/checkpoints/ck_151.ckpt",
+     "epoch": 151,
+     "loads": true
+    },
+    {
+     "file": "CLAUDE-TESTS/sig_only_reg_s4d_dropout0_64x32x4/checkpoints/last.ckpt",
+     "epoch": 244,
+     "loads": true
+    }
+   ],
+   "configs": [
+    "/home/kyoon/SSM-BNS/aframe/dev/local/train/claude_tests/oracle/sig_only_reg_s4d_dropout0_64x32x4.yaml",
+    "/home/kyoon/SSM-BNS/aframe/dev/runs/claude_tests/sig_only_reg_s4d_dropout0_64x32x4/config.yaml"
+   ],
+   "best": {
+    "metric": "val/within_1pct_chirp_mass",
+    "value": 0.9990234375,
+    "epoch": 151
+   },
+   "evidence": "CONFIRMED. 16 Oct status '99.9 / 100 / 100 / 100 | [log]', warp table 'epoch 151, paused at 244'; why-dropout '99.9% (epoch 151)'. The 14 Oct pages mention it only in 'Correction, 16 October' notes that point to the 16 Oct status (uncommitted edits), the lecture only in its 16 Oct revision; run first launched 15 Oct 21:30. Strict earliest-page rule would give 2026-10-14."
+  },
+  {
+   "name": "sig_only_reg_s4d_dropout0_64x32x4_warp_merger",
+   "folder": "2026-10-16",
+   "updates": [
+    "2026-10-16-status-dropout-and-signal-only"
+   ],
+   "status": "paused by the shutdown of 16 Oct 12:05 (in epoch 111; last checkpoint epoch 110)",
+   "description": "Clean-signal chirp mass: S4D 64x32x4, mean over time, dropout 0; merger window, time axis warped.",
+   "checkpoints": [
+    {
+     "file": "CLAUDE-TESTS/sig_only_reg_s4d_dropout0_64x32x4_warp_merger/checkpoints/ck_108.ckpt",
+     "epoch": 108,
+     "loads": true
+    },
+    {
+     "file": "CLAUDE-TESTS/sig_only_reg_s4d_dropout0_64x32x4_warp_merger/checkpoints/last.ckpt",
+     "epoch": 110,
+     "loads": true
+    }
+   ],
+   "configs": [
+    "/home/kyoon/SSM-BNS/aframe/dev/local/train/claude_tests/oracle/sig_only_reg_s4d_dropout0_64x32x4_warp_merger.yaml",
+    "/home/kyoon/SSM-BNS/aframe/dev/runs/claude_tests/sig_only_reg_s4d_dropout0_64x32x4_warp_merger/config.yaml"
+   ],
+   "best": {
+    "metric": "val/within_1pct_chirp_mass",
+    "value": 0.9423828125,
+    "epoch": 108
+   },
+   "evidence": "CONFIRMED. 16 Oct status: '94.2 / 99.3 / 100 / 100, epoch 108, paused at 110 [log]'."
+  },
+  {
+   "name": "sig_only_reg_s4d_dropout0_64x32x4_warp_premerger",
+   "folder": "2026-10-16",
+   "updates": [
+    "2026-10-16-status-dropout-and-signal-only"
+   ],
+   "status": "finished, early stopping: stopped at epoch 179 on 16 Oct 09:34 (state: wait 80, stopped_epoch 179); best epoch 99",
+   "description": "Clean-signal chirp mass: S4D 64x32x4, mean over time, dropout 0; window 25 s before merger, warped, 256 Hz.",
+   "checkpoints": [
+    {
+     "file": "CLAUDE-TESTS/sig_only_reg_s4d_dropout0_64x32x4_warp_premerger/checkpoints/ck_99.ckpt",
+     "epoch": 99,
+     "loads": true
+    },
+    {
+     "file": "CLAUDE-TESTS/sig_only_reg_s4d_dropout0_64x32x4_warp_premerger/checkpoints/last.ckpt",
+     "epoch": 179,
+     "loads": true
+    }
+   ],
+   "configs": [
+    "/home/kyoon/SSM-BNS/aframe/dev/local/train/claude_tests/oracle/sig_only_reg_s4d_dropout0_64x32x4_warp_premerger.yaml",
+    "/home/kyoon/SSM-BNS/aframe/dev/runs/claude_tests/sig_only_reg_s4d_dropout0_64x32x4_warp_premerger/config.yaml"
+   ],
+   "best": {
+    "metric": "val/within_1pct_chirp_mass",
+    "value": 1,
+    "epoch": 99
+   },
+   "evidence": "CONFIRMED. 16 Oct status: '100 / 100 / 100 / 100, epoch 99, done [log]'."
+  },
+  {
+   "name": "sig_only_reg_s4d_max_64x32x4",
+   "folder": "2026-10-14",
+   "updates": [
+    "2026-10-14-signal-only-test",
+    "2026-10-14-s4d-project-8-vs-bns",
+    "2026-10-15-oscillators-and-chirps",
+    "2026-10-16-status-dropout-and-signal-only",
+    "2026-10-16-why-dropout-broke-our-s4d"
+   ],
+   "status": "crashed: killed by the host out-of-memory event of 15 Oct 02:20 during the validation of epoch 233 (no error line; the OOM is in the experiment log); not resumed; last checkpoint epoch 232",
+   "description": "Clean-signal chirp mass: four-layer S4D, 64 channels, state size 32, maximum over time, dropout 0.2.",
+   "checkpoints": [
+    {
+     "file": "CLAUDE-TESTS/sig_only_reg_s4d_max_64x32x4/checkpoints/ck_63.ckpt",
+     "epoch": 63,
+     "loads": true
+    },
+    {
+     "file": "CLAUDE-TESTS/sig_only_reg_s4d_max_64x32x4/checkpoints/last.ckpt",
+     "epoch": 232,
+     "loads": true
+    }
+   ],
+   "configs": [
+    "/home/kyoon/SSM-BNS/aframe/dev/local/train/claude_tests/oracle/sig_only_reg_s4d_max_64x32x4.yaml",
+    "/home/kyoon/SSM-BNS/aframe/dev/runs/claude_tests/sig_only_reg_s4d_max_64x32x4/config.yaml"
+   ],
+   "best": {
+    "metric": "val/within_1pct_chirp_mass",
+    "value": 0.15966796875,
+    "epoch": 63
+   },
+   "evidence": "CONFIRMED. 14 Oct signal-only test (setup 'the small S4D with a maximum over time'); 14 Oct S4D page 'are running'; 16 Oct status and why-dropout '16.0% (epoch 63)'."
+  },
+  {
+   "name": "sig_only_reg_s4d_max_64x32x4_warp_merger",
+   "folder": "2026-10-16",
+   "updates": [
+    "2026-10-16-status-dropout-and-signal-only"
+   ],
+   "status": "crashed 15 Oct about 19:33 in epoch 85: 'RuntimeError: unable to allocate shared memory(shm) for file </torch_...>: Resource temporarily unavailable (11)'; not resumed (superseded by the dropout-0 redo); last checkpoint epoch 84",
+   "description": "Clean-signal chirp mass: S4D 64x32x4, maximum over time, dropout 0.2; merger window, time axis warped.",
+   "checkpoints": [
+    {
+     "file": "CLAUDE-TESTS/sig_only_reg_s4d_max_64x32x4_warp_merger/checkpoints/ck_50.ckpt",
+     "epoch": 50,
+     "loads": true
+    },
+    {
+     "file": "CLAUDE-TESTS/sig_only_reg_s4d_max_64x32x4_warp_merger/checkpoints/last.ckpt",
+     "epoch": 84,
+     "loads": true
+    }
+   ],
+   "configs": [
+    "/home/kyoon/SSM-BNS/aframe/dev/local/train/claude_tests/oracle/sig_only_reg_s4d_max_64x32x4_warp_merger.yaml",
+    "/home/kyoon/SSM-BNS/aframe/dev/runs/claude_tests/sig_only_reg_s4d_max_64x32x4_warp_merger/config.yaml"
+   ],
+   "best": {
+    "metric": "val/within_1pct_chirp_mass",
+    "value": 0.1875,
+    "epoch": 50
+   },
+   "evidence": "Setup only, one of the set of twelve in the 16 Oct status. No result published. Alternative folder: unreported."
+  },
+  {
+   "name": "sig_only_reg_s4d_max_64x32x4_warp_premerger",
+   "folder": "2026-10-16",
+   "updates": [
+    "2026-10-16-status-dropout-and-signal-only"
+   ],
+   "status": "crashed 15 Oct about 19:33 in epoch 140: stopped about 18:50 for a swap, relaunched 19:28 (relaunch_maxpre.sh), trained to 66% of epoch 140, then 'RuntimeError: unable to allocate shared memory(shm) for file </torch_...>: Resource temporarily unavailable (11)'; not resumed; last checkpoint epoch 139 (written 18:49)",
+   "description": "Clean-signal chirp mass: S4D 64x32x4, maximum over time, dropout 0.2; window 25 s before merger, warped, 256 Hz.",
+   "checkpoints": [
+    {
+     "file": "CLAUDE-TESTS/sig_only_reg_s4d_max_64x32x4_warp_premerger/checkpoints/ck_06.ckpt",
+     "epoch": 6,
+     "loads": true
+    },
+    {
+     "file": "CLAUDE-TESTS/sig_only_reg_s4d_max_64x32x4_warp_premerger/checkpoints/last.ckpt",
+     "epoch": 139,
+     "loads": true
+    }
+   ],
+   "configs": [
+    "/home/kyoon/SSM-BNS/aframe/dev/local/train/claude_tests/oracle/sig_only_reg_s4d_max_64x32x4_warp_premerger.yaml",
+    "/home/kyoon/SSM-BNS/aframe/dev/runs/claude_tests/sig_only_reg_s4d_max_64x32x4_warp_premerger/config.yaml"
+   ],
+   "best": {
+    "metric": "val/within_1pct_chirp_mass",
+    "value": 0.29833984375,
+    "epoch": 6
+   },
+   "evidence": "STATUS CORRECTED: it did not die at startup; after the 19:28 relaunch the log reaches 'Epoch 140: 66% 1038/1564' before the shm error. Setup only, one of the set of twelve in the 16 Oct status. Alternative folder: unreported."
+  },
+  {
+   "name": "sig_only_reg_s4d_max_dropout0_64x32x4",
+   "folder": "2026-10-16",
+   "updates": [
+    "2026-10-14-signal-only-test",
+    "2026-10-15-oscillators-and-chirps",
+    "2026-10-16-status-dropout-and-signal-only",
+    "2026-10-16-why-dropout-broke-our-s4d",
+    "2026-10-16-what-s4d-computes"
+   ],
+   "status": "finished, early stopping: stopped at epoch 289 on 16 Oct 12:04, just before the shutdown ('Monitored metric val/within_1pct_chirp_mass did not improve in the last 91 records'); best epoch 198",
+   "description": "Clean-signal chirp mass: four-layer S4D, 64 channels, state size 32, maximum over time, dropout 0.",
+   "checkpoints": [
+    {
+     "file": "CLAUDE-TESTS/sig_only_reg_s4d_max_dropout0_64x32x4/checkpoints/ck_198.ckpt",
+     "epoch": 198,
+     "loads": true
+    },
+    {
+     "file": "CLAUDE-TESTS/sig_only_reg_s4d_max_dropout0_64x32x4/checkpoints/last.ckpt",
+     "epoch": 289,
+     "loads": true
+    }
+   ],
+   "configs": [
+    "/home/kyoon/SSM-BNS/aframe/dev/local/train/claude_tests/oracle/sig_only_reg_s4d_max_dropout0_64x32x4.yaml",
+    "/home/kyoon/SSM-BNS/aframe/dev/runs/claude_tests/sig_only_reg_s4d_max_dropout0_64x32x4/config.yaml"
+   ],
+   "best": {
+    "metric": "val/within_1pct_chirp_mass",
+    "value": 0.9990234375,
+    "epoch": 198
+   },
+   "evidence": "CONFIRMED. 16 Oct status (three links, 'epoch 198, done'); why-dropout '99.9% (epoch 198)'; What S4D computes analyses its epoch 69, 81 and 135 checkpoints (confirmed: the pre-registration names this run); those checkpoints are no longer on disk. 14 Oct correction note and lecture revision are 16 Oct pointers; effective training started 15 Oct 18:51."
+  },
+  {
+   "name": "sig_only_reg_s4d_max_dropout0_64x32x4_warp_merger",
+   "folder": "2026-10-16",
+   "updates": [
+    "2026-10-16-status-dropout-and-signal-only"
+   ],
+   "status": "paused by the shutdown of 16 Oct 12:05 (at the start of epoch 25; last checkpoint epoch 24, written 12:05)",
+   "description": "Clean-signal chirp mass: S4D 64x32x4, maximum over time, dropout 0; merger window, time axis warped.",
+   "checkpoints": [
+    {
+     "file": "CLAUDE-TESTS/sig_only_reg_s4d_max_dropout0_64x32x4_warp_merger/checkpoints/ck_24.ckpt",
+     "epoch": 24,
+     "loads": true
+    },
+    {
+     "file": "CLAUDE-TESTS/sig_only_reg_s4d_max_dropout0_64x32x4_warp_merger/checkpoints/last.ckpt",
+     "epoch": 24,
+     "loads": true
+    }
+   ],
+   "configs": [
+    "/home/kyoon/SSM-BNS/aframe/dev/local/train/claude_tests/oracle/sig_only_reg_s4d_max_dropout0_64x32x4_warp_merger.yaml",
+    "/home/kyoon/SSM-BNS/aframe/dev/runs/claude_tests/sig_only_reg_s4d_max_dropout0_64x32x4_warp_merger/config.yaml"
+   ],
+   "best": {
+    "metric": "val/within_1pct_chirp_mass",
+    "value": 0.6279296875,
+    "epoch": 24
+   },
+   "evidence": "CONFIRMED. 16 Oct status: '62.8 / 90.3 / 99.1 / 100, epoch 24, paused at 24 [log]'."
+  },
+  {
+   "name": "sig_only_reg_s4d_max_dropout0_64x32x4_warp_premerger",
+   "folder": "2026-10-16",
+   "updates": [
+    "2026-10-16-status-dropout-and-signal-only"
+   ],
+   "status": "paused by the shutdown of 16 Oct 12:05: '[rank: 0] Received SIGTERM: 15' during the validation of epoch 274 (63 of 64 validation batches done); last checkpoint epoch 273",
+   "description": "Clean-signal chirp mass: S4D 64x32x4, maximum over time, dropout 0; window 25 s before merger, warped, 256 Hz.",
+   "checkpoints": [
+    {
+     "file": "CLAUDE-TESTS/sig_only_reg_s4d_max_dropout0_64x32x4_warp_premerger/checkpoints/ck_207.ckpt",
+     "epoch": 207,
+     "loads": true
+    },
+    {
+     "file": "CLAUDE-TESTS/sig_only_reg_s4d_max_dropout0_64x32x4_warp_premerger/checkpoints/last.ckpt",
+     "epoch": 273,
+     "loads": true
+    }
+   ],
+   "configs": [
+    "/home/kyoon/SSM-BNS/aframe/dev/local/train/claude_tests/oracle/sig_only_reg_s4d_max_dropout0_64x32x4_warp_premerger.yaml",
+    "/home/kyoon/SSM-BNS/aframe/dev/runs/claude_tests/sig_only_reg_s4d_max_dropout0_64x32x4_warp_premerger/config.yaml"
+   ],
+   "best": {
+    "metric": "val/within_1pct_chirp_mass",
+    "value": 1,
+    "epoch": 207
+   },
+   "evidence": "CONFIRMED (status wording corrected: SIGTERM came during validation, not before it). 16 Oct status: '100 / 100 / 100 / 100, epoch 207, paused at 273 [log]'."
+  },
+  {
+   "name": "sig_only_reg_free_kernel_cos",
+   "folder": "exclude",
+   "updates": [],
+   "status": "stopped by hand, 14 Oct 09:34 ('[rank: 0] Received SIGTERM: 15' at the start of epoch 0); replaced by resuming the original run",
+   "description": "Not an inventory row: fresh cosine-schedule restart of sig_only_reg_free_kernel, stopped within minutes; superseded by resuming the original.",
+   "checkpoints": [],
+   "configs": [
+    "/home/kyoon/SSM-BNS/aframe/dev/local/train/claude_tests/oracle/sig_only_reg_free_kernel_cos.yaml",
+    "/home/kyoon/SSM-BNS/aframe/dev/runs/claude_tests/sig_only_reg_free_kernel_cos/config.yaml"
+   ],
+   "best": {
+    "metric": "val/within_1pct_chirp_mass",
+    "value": null,
+    "epoch": null
+   },
+   "evidence": "EXTRA (not an inventory row). No checkpoint, no validation epoch; experiment log: the *_cos wandb runs are to be ignored."
+  },
+  {
+   "name": "sig_only_reg_s4d_256x256x4_cos",
+   "folder": "exclude",
+   "updates": [],
+   "status": "stopped by hand, 14 Oct 09:34 ('[rank: 0] Received SIGTERM: 15' in epoch 0, batch 201 of 1564); replaced by resuming the original run",
+   "description": "Not an inventory row: fresh cosine-schedule restart of sig_only_reg_s4d_256x256x4, stopped within minutes; superseded by resuming the original.",
+   "checkpoints": [],
+   "configs": [
+    "/home/kyoon/SSM-BNS/aframe/dev/local/train/claude_tests/oracle/sig_only_reg_s4d_256x256x4_cos.yaml",
+    "/home/kyoon/SSM-BNS/aframe/dev/runs/claude_tests/sig_only_reg_s4d_256x256x4_cos/config.yaml"
+   ],
+   "best": {
+    "metric": "val/within_1pct_chirp_mass",
+    "value": null,
+    "epoch": null
+   },
+   "evidence": "EXTRA (not an inventory row). No checkpoint, no validation epoch."
+  },
+  {
+   "name": "sig_only_reg_s4d_64x32x4_cos",
+   "folder": "exclude",
+   "updates": [],
+   "status": "stopped by hand, 14 Oct 09:32, during data loading before epoch 0 (train.log ends at 'Constructing validation timeslides'); replaced by resuming the original run",
+   "description": "Not an inventory row: fresh cosine-schedule restart of sig_only_reg_s4d_64x32x4, stopped before training; superseded by resuming the original.",
+   "checkpoints": [],
+   "configs": [
+    "/home/kyoon/SSM-BNS/aframe/dev/local/train/claude_tests/oracle/sig_only_reg_s4d_64x32x4_cos.yaml"
+   ],
+   "best": {
+    "metric": "val/within_1pct_chirp_mass",
+    "value": null,
+    "epoch": null
+   },
+   "evidence": "EXTRA (not an inventory row). No checkpoint, no config.yaml in the run folder (train.log and wandb only)."
+  }
+ ],
+ "extras": [
+  {
+   "src": "template_bank",
+   "glob": "bank_*.npz",
+   "dest": "2026-10-12/template_bank_files",
+   "note": "template bank read by the template_bank_* configs (their bank file path points to dev/runs/claude_tests/template_bank/)"
+  },
+  {
+   "src": "s4d_energy_diag",
+   "glob": "model_*.pt",
+   "dest": "2026-10-08/s4d_energy_diag",
+   "note": "weights of the CPU tests in section 1 of the 8 October update; their 8.3 GB training-window file is not uploaded"
+  }
+ ]
+}
