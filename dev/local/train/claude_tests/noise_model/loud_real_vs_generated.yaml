@@ -1,0 +1,19 @@
+# Loud windows only: saved real windows of the generator's training period against saved
+# generator windows, each with a value beyond 10 (save_windows.py --loud 10).
+data:
+  class_path: train.experimental.noise_model.data.NoiseData
+  init_args:
+    ifos: [H1, L1]
+    sample_rate: 2048.0
+    kernel_length: 4.0
+    psd_length: 20.0
+    fduration: 1.0
+    fftlength: 2.0
+    highpass: 20.0
+    batch_size: 32        # windows per source per step
+    batches_per_epoch: 500
+    val_batches: 50
+    test_windows: 20000   # per source; a saved source's test part (the last 0.2 of its file) can hold fewer
+    num_workers: 4
+    first: {kind: saved, path: /home/kyoon/SSM-BNS/aframe/dev/runs/claude_tests/noise_model/generator_period_loud_windows.h5, test_fraction: 0.2}
+    second: {kind: saved, path: /home/kyoon/SSM-BNS/aframe/dev/runs/claude_tests/noise_model/generated_loud_windows.h5, test_fraction: 0.2}

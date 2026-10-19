@@ -1,0 +1,20 @@
+# Settings shared by every noise-model run. run.sh adds each run's name and folder.
+trainer:
+  accelerator: gpu
+  devices: 1
+  max_epochs: 40
+  log_every_n_steps: 50
+  logger:
+    class_path: lightning.pytorch.loggers.WandbLogger
+    init_args:
+      entity: kyoon-mit-massachusetts-institute-of-technology
+      project: CLAUDE-TESTS
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        save_last: true
+        save_top_k: 0
+        enable_version_counter: false   # overwrite last.ckpt instead of adding last-v1.ckpt
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: step

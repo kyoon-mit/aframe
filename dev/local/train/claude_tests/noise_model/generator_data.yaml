@@ -1,0 +1,17 @@
+# Generator training: aframe's O3a training files; validation on its O3a validation files.
+data:
+  class_path: train.experimental.noise_model.data.NoiseData
+  init_args:
+    ifos: [H1, L1]
+    sample_rate: 2048.0
+    kernel_length: 4.0
+    psd_length: 20.0
+    fduration: 1.0
+    fftlength: 2.0
+    highpass: 20.0
+    batch_size: 32        # windows per source per step
+    batches_per_epoch: 500
+    val_batches: 50
+    test_windows: 20000   # per source
+    num_workers: 4
+    first: {kind: real, fit_dir: /home/kyoon/SSM-BNS/DATA/O3a_H1_L1_2048Hz, fit_span: [1238166018, 1238384700], test_dir: /home/kyoon/SSM-BNS/DATA/O3a_H1_L1_2048Hz, test_span: [1238384700, 1238426682]}

@@ -1,0 +1,27 @@
+# Generator: diffusion with S4D layers, trained on real noise only (use with generator_data.yaml).
+trainer:
+  max_epochs: 200
+model:
+  class_path: train.experimental.noise_model.tasks.GeneratorTask
+  init_args:
+    learning_rate: 0.0002
+    weight_decay: 0.0
+    diffusion:
+      class_path: train.experimental.noise_model.diffusion.Diffusion
+      init_args:
+        # Karras et al. 2022 settings with every strength doubled, for data of spread 1
+        data_scale: 1.0
+        min_strength: 0.004
+        max_strength: 160.0
+        schedule_power: 7.0
+        train_log_strength_mean: -0.506853   # -1.2 + ln 2
+        train_log_strength_spread: 1.2
+        net:
+          class_path: train.experimental.noise_model.diffusion.StaticRemoverNet
+          init_args:
+            num_ifos: 2
+            widths: [64, 128, 256]
+            blocks: 2
+            stride: 4
+            d_state: 64
+            features: 128

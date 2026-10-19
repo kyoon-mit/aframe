@@ -1,0 +1,13 @@
+# Judge: a 2-D CNN (ResNet) on each detector's time-frequency image.
+model:
+  class_path: train.experimental.noise_model.tasks.JudgeTask
+  init_args:
+    learning_rate: 0.001
+    weight_decay: 0.01
+    judge:
+      class_path: train.experimental.noise_model.judges.TimeFrequencyJudge
+      init_args:
+        num_ifos: 2
+        fft_size: 256   # 0.125 s at 2048 Hz
+        hop: 64
+        layers: [2, 2, 2, 2]

@@ -1,0 +1,14 @@
+# Judge: simple numbers per detector (value sizes, band powers, moments, largest value).
+model:
+  class_path: train.experimental.noise_model.tasks.JudgeTask
+  init_args:
+    learning_rate: 0.001
+    weight_decay: 0.01
+    judge:
+      class_path: train.experimental.noise_model.judges.StatisticsJudge
+      init_args:
+        num_ifos: 2
+        sample_rate: 2048.0   # these two must match the data section
+        highpass: 20.0
+        bands: 16
+        hidden: 64

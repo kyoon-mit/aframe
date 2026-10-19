@@ -1,0 +1,15 @@
+# Judge: S4D layers reading the whole window both ways.
+model:
+  class_path: train.experimental.noise_model.tasks.JudgeTask
+  init_args:
+    learning_rate: 0.001
+    weight_decay: 0.01
+    judge:
+      class_path: train.experimental.noise_model.judges.S4DJudge
+      init_args:
+        num_ifos: 2
+        width: 64
+        blocks: 4
+        d_state: 64
+        dt_min: 0.001   # ml4gw's default; the longest memory is about 2 / dt_min samples
+        dt_max: 0.1

@@ -1,0 +1,18 @@
+# Control: two independent draws of the same Gaussian noise. Every judge should stay at 50% here.
+data:
+  class_path: train.experimental.noise_model.data.NoiseData
+  init_args:
+    ifos: [H1, L1]
+    sample_rate: 2048.0
+    kernel_length: 4.0
+    psd_length: 20.0
+    fduration: 1.0
+    fftlength: 2.0
+    highpass: 20.0
+    batch_size: 32        # windows per source per step
+    batches_per_epoch: 500
+    val_batches: 50
+    test_windows: 20000   # per source
+    num_workers: 4
+    first: {kind: gaussian, fit_dir: /home/kyoon/SSM-BNS/DATA/O3a_H1_L1_2048Hz, fit_span: [1238384700, 1238426682], test_dir: /home/kyoon/SSM-BNS/DATA/O3b_H1_L1_2048Hz}
+    second: {kind: gaussian, fit_dir: /home/kyoon/SSM-BNS/DATA/O3a_H1_L1_2048Hz, fit_span: [1238384700, 1238426682], test_dir: /home/kyoon/SSM-BNS/DATA/O3b_H1_L1_2048Hz}

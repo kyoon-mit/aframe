@@ -1,0 +1,16 @@
+# Judge: the template bank's loudest output per template, read by a small network.
+model:
+  class_path: train.experimental.noise_model.tasks.JudgeTask
+  init_args:
+    learning_rate: 0.001
+    weight_decay: 0.01
+    judge:
+      class_path: train.experimental.noise_model.judges.BankJudge
+      init_args:
+        bank_file: /home/kyoon/SSM-BNS/aframe/dev/runs/claude_tests/template_bank/bank_mc0.5pct_spin0_q0.8.npz   # Hugging Face kyoon-mit/SSM-BNS-WIP, claude_tests/2026-10-12/template_bank_files/
+        num_ifos: 2
+        sample_rate: 2048.0   # these four must match the data section
+        kernel_length: 4.0
+        fduration: 1.0
+        highpass: 20.0
+        hidden: 64

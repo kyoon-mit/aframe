@@ -1,0 +1,13 @@
+# Judge: aframe's deep 1-D CNN (ResNet) on the whitened strain.
+model:
+  class_path: train.experimental.noise_model.tasks.JudgeTask
+  init_args:
+    learning_rate: 0.001
+    weight_decay: 0.01
+    judge:
+      class_path: train.experimental.noise_model.judges.TimeDomainJudge
+      init_args:
+        num_ifos: 2
+        layers: [3, 4, 6, 3]
+        kernel_size: 3
+        norm_groups: 16
