@@ -1,7 +1,6 @@
-"""Tables of the 23 October update from test1.npz, test2.npz and the
-test2_spread.py output.
+"""Tables of the 23 October update from test1.npz and test2.npz.
 
-usage: summarize.py <test1.npz> <test2.npz> <spread.npz>
+usage: summarize.py <test1.npz> <test2.npz>
 """
 
 import sys
@@ -82,18 +81,31 @@ def test2(path):
         print(f"{k}: loud noise windows above the clean 1e-3 threshold {(nz[loud] > thr).sum()} of {loud.sum()}")
 
 
-def spread(path):
+def separation(path):
     d = np.load(path)
-    lr, hn = d["lr"], d["hnorm"]
-    print("\n== Test 2 diagnosis: (LR + |h|^2/2) / |h| on noise windows, by detector SNR |h|")
-    for i, ifo in enumerate(IFOS):
-        z = (lr[:, i] + hn[:, i] ** 2 / 2) / hn[:, i]
-        for a, b in ((2, 4), (4, 8), (8, 16), (16, 100)):
-            m = (hn[:, i] >= a) & (hn[:, i] < b)
-            print(f"{ifo} |h| [{a},{b}) n={m.sum()}: mean {z[m].mean():.2f} std {z[m].std():.2f}")
+    snr = d["snr"]
+    clean = ~(d["maxabs_noise"] > LOUD).any(1)
+    stats = {
+        "matched filter": (d["mf_noise"], d["mf_signal"]),
+        "network": (d["net_noise"].sum(1), d["net_signal"].sum(1)),
+        "Gaussian": (d["gauss_noise"].sum(1), d["gauss_signal"].sum(1)),
+    }
+    print("\n== Test 2, clean windows: noise mean and spread, signal mean, "
+          "separation (signal mean - noise mean) / noise spread")
+    for a, b in ((4, 4.5), (4.5, 5), (5, 6), (6, 8), (8, 12), (12, 100)):
+        m = clean & (snr >= a) & (snr < b)
+        row = f"SNR [{a},{b}) n={m.sum()}"
+        for k, (nz, sg) in stats.items():
+            sep = (sg[m].mean() - nz[m].mean()) / nz[m].std()
+            row += f" | {k}: {nz[m].mean():.2f} ± {nz[m].std():.2f}, {sg[m].mean():.2f}, {sep:.2f}"
+        print(row)
+    for k in ("network", "Gaussian"):
+        nz, sg = stats[k]
+        print(f"{k}: median (signal - noise statistic of the same window) / SNR^2 "
+              f"{np.median((sg - nz)[clean] / snr[clean] ** 2):.3f}")
 
 
 if __name__ == "__main__":
     test1(sys.argv[1])
     test2(sys.argv[2])
-    spread(sys.argv[3])
+    separation(sys.argv[2])

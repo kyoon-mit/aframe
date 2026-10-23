@@ -13,9 +13,7 @@ used is epoch 288 of `next_sample_k3_shared_mean_asinh`.
 - `test2_detection.py <config> <ckpt> <out dir> [windows]`: matched filter,
   network likelihood ratio and Gaussian likelihood ratio with the true
   template on 20,000 injected O3b test windows.
-- `test2_spread.py <config> <ckpt> <out.npz>`: the network likelihood ratio
-  on the first 4,000 of those windows, per detector and per 1/16 s block.
-- `test2_curvature.py <config> <ckpt>`: the network log-likelihood along
-  scaled copies of the template, against a unit Gaussian.
-- `summarize.py <test1.npz> <test2.npz> <spread.npz>`: the tables; its
-  output is `summary.txt`.
+- `test1_lines.py`: the three strongest lines of the typical whitened
+  window, per file and detector; its output is `lines.txt`.
+- `summarize.py <test1.npz> <test2.npz>`: the tables; its output is
+  `summary.txt`.

@@ -71,12 +71,12 @@ matched filter: loud noise windows above the clean 1e-3 threshold 57 of 419
 network: loud noise windows above the clean 1e-3 threshold 0 of 419
 Gaussian: loud noise windows above the clean 1e-3 threshold 55 of 419
 
-== Test 2 diagnosis: (LR + |h|^2/2) / |h| on noise windows, by detector SNR |h|
-H1 |h| [2,4) n=2126: mean 0.11 std 2.88
-H1 |h| [4,8) n=1284: mean 0.38 std 2.60
-H1 |h| [8,16) n=293: mean 0.56 std 1.80
-H1 |h| [16,100) n=89: mean 2.01 std 2.97
-L1 |h| [2,4) n=1919: mean 2.13 std 6.62
-L1 |h| [4,8) n=1532: mean 3.17 std 7.03
-L1 |h| [8,16) n=355: mean 6.63 std 10.43
-L1 |h| [16,100) n=104: mean 16.19 std 21.92
+== Test 2, clean windows: noise mean and spread, signal mean, separation (signal mean - noise mean) / noise spread
+SNR [4,4.5) n=4141 | matched filter: -0.03 ± 1.04, 3.99, 3.88 | network: -2.45 ± 20.07, 2.53, 0.25 | Gaussian: -7.82 ± 4.00, 7.57, 3.85
+SNR [4.5,5) n=2894 | matched filter: -0.02 ± 1.03, 4.48, 4.37 | network: -3.66 ± 22.58, 2.76, 0.28 | Gaussian: -9.73 ± 4.46, 9.55, 4.32
+SNR [5,6) n=3807 | matched filter: 0.02 ± 1.07, 5.19, 4.83 | network: -4.75 ± 25.77, 4.21, 0.35 | Gaussian: -12.66 ± 5.44, 12.85, 4.69
+SNR [6,8) n=3925 | matched filter: -0.02 ± 1.06, 6.50, 6.12 | network: -6.78 ± 35.82, 6.69, 0.38 | Gaussian: -20.47 ± 7.43, 20.23, 5.48
+SNR [8,12) n=2711 | matched filter: -0.01 ± 1.03, 9.10, 8.87 | network: -14.34 ± 54.30, 13.25, 0.51 | Gaussian: -40.11 ± 12.95, 39.95, 6.18
+SNR [12,100) n=2103 | matched filter: 0.01 ± 1.07, 20.32, 18.97 | network: -97.86 ± 396.13, 97.91, 0.49 | Gaussian: -264.52 ± 431.90, 265.10, 1.23
+network: median (signal - noise statistic of the same window) / SNR^2 0.572
+Gaussian: median (signal - noise statistic of the same window) / SNR^2 0.860
