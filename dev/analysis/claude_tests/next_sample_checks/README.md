@@ -15,5 +15,7 @@ used is epoch 288 of `next_sample_k3_shared_mean_asinh`.
   template on 20,000 injected O3b test windows.
 - `test1_lines.py`: the three strongest lines of the typical whitened
   window, per file and detector; its output is `lines.txt`.
+- `check_formulas.py`: numerical checks of the 23 October derivations;
+  its output is `check_formulas.txt`.
 - `summarize.py <test1.npz> <test2.npz>`: the tables; its output is
   `summary.txt`.

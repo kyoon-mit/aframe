@@ -1,0 +1,10 @@
+smallest eigenvalue of R: 0.05010105025871946
+1. order n-1 chain rule minus exact log density: 6.181721801112872e-13
+   sum log E_t minus log det R: 0.0
+2. inverse FFT of padded periodogram minus (1/N) sum x_t x_t+k: 7.632783294297951e-17
+3. q 27.5958: noise mean -13.7920 (-q/2 -13.7979), variance 27.3872; signal mean 13.8038; separation 5.2731 (sqrt q 5.2532)
+   matched filter on this noise: spread 0.3918 (sqrt(h R h)/|h| 0.3930)
+4. 0.5 ln 2pi + 0.5 = 1.4189385332046727
+5. (141852 - 2 * 41841) s = 58170 s = 0.6732638888888889 days; 141852 - 41841 = 100011 s = 1.1575347222222223 days
+   2048 samples per second: 128 samples = 62.5 ms; 38493 s = 10.6925 h
+   q from noise mean -7.82: 15.64 sqrt 3.954743986657038
