@@ -1,0 +1,15 @@
+windows 20000, samples per window 16384, noise NLL per sample 1.41896 (exact 1.41894)
+SNR in window / aframe label: min 0.9084 median 0.9509 max 0.9760
+thresholds at 0.001: matched filter 3.111 (exact 3.090), random draw 4.415 (exact 4.370)
+SNR | windows | peak sample | signal share of power | separation | found (exact) | amplitude error (1/SNR) | found, random draw | energy recovered without template (exact)
+3.6 to 4 | 1964 | 0.149 | 9.24e-04 | 3.849 | 0.7805 (0.7879) | 0.2601 (0.2571) | 0.3651 | 9.31e-04 (9.24e-04)
+4 to 4.5 | 3745 | 0.166 | 1.09e-03 | 4.209 | 0.8561 (0.8711) | 0.2382 (0.2365) | 0.4350 | 1.08e-03 (1.09e-03)
+4.5 to 5 | 2706 | 0.185 | 1.37e-03 | 4.824 | 0.9464 (0.9488) | 0.2076 (0.2111) | 0.5909 | 1.37e-03 (1.37e-03)
+5 to 6 | 3561 | 0.213 | 1.80e-03 | 5.460 | 0.9899 (0.9886) | 0.1835 (0.1839) | 0.7591 | 1.79e-03 (1.80e-03)
+6 to 8 | 3528 | 0.266 | 2.81e-03 | 6.846 | 0.9991 (0.9997) | 0.1475 (0.1468) | 0.9433 | 2.83e-03 (2.81e-03)
+8 to 12 | 2539 | 0.370 | 5.43e-03 | 9.718 | 1.0000 (1.0000) | 0.1045 (0.1053) | 0.9992 | 5.47e-03 (5.43e-03)
+12 to 100 | 1957 | 0.673 | 1.70e-02 | 21.280 | 1.0000 (1.0000) | 0.0614 (0.0558) | 1.0000 | 1.75e-02 (1.71e-02)
+all | found 0.9423 (exact 0.9460), random draw 0.7235
+test2 clean windows 19581, found at 0.001:
+  all: ideal 0.9457, Gaussian 0.9465, matched filter 0.9193
+  label 4 to 5: ideal 0.8614, Gaussian 0.8778, matched filter 0.7994
