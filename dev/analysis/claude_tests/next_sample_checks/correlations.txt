@@ -1,0 +1,9 @@
+21 files; clean whitened windows per detector: [24679. 24660.]
+H1 raw strain: lag 1 0.999530, lag 2 0.998533, lag 3 0.997126, lag 10 0.969816, lag 100 -0.765230; predictable from previous sample 0.999060
+H1 whitened: lag 1 -0.0779, lag 2 -0.0512, lag 3 -0.0823, lag 10 -0.0688, lag 100 +0.0704; variance 1.2692; predictable from previous sample 0.0061, from whole past 0.2470
+  all: infinite past 0.2473, share of variance 1.0000
+  20 Hz and above: infinite past 0.1719, share of variance 0.9999
+L1 raw strain: lag 1 0.999672, lag 2 0.998706, lag 3 0.997110, lag 10 0.968125, lag 100 -0.803027; predictable from previous sample 0.999344
+L1 whitened: lag 1 -0.0204, lag 2 -0.0409, lag 3 -0.0245, lag 10 -0.0426, lag 100 +0.0229; variance 1.0932; predictable from previous sample 0.0004, from whole past 0.1224
+  all: infinite past 0.1228, share of variance 1.0000
+  20 Hz and above: infinite past 0.0403, share of variance 0.9997
