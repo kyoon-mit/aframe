@@ -42,6 +42,22 @@ def main():
     print(f"all | found {(z['mf_signal'] > thr).mean():.4f} "
           f"(exact {norm.sf(zc - s).mean():.4f}), random draw "
           f"{(z['draw_signal'] > thr_d).mean():.4f}")
+    print("random draw subtracted: SNR | signal share of power (exact) "
+          "| found (exact) | amplitude error (sqrt 2 / SNR) "
+          "| energy recovered without template (exact)")
+    for lo, hi in BINS:
+        k = (s >= lo) & (s < hi)
+        sk = s[k]
+        print(f"{lo} to {hi} | {np.median(z['draw_frac'][k]):.2e} "
+              f"({np.median(sk ** 2 / (sk ** 2 + 2 * size)):.2e}) "
+              f"| {(z['draw_signal'][k] > thr_d).mean():.4f} "
+              f"({norm.sf(zc - sk / np.sqrt(2)).mean():.4f}) "
+              f"| {(z['draw_amp'][k] - 1).std():.4f} "
+              f"({np.mean(np.sqrt(2) / sk):.4f}) "
+              f"| {np.median(z['draw_shrink'][k]):.2e} "
+              f"({np.median(sk ** 2 / (sk ** 2 + 2 * size)):.2e})")
+    print(f"all | found {(z['draw_signal'] > thr_d).mean():.4f} "
+          f"(exact {norm.sf(zc - s / np.sqrt(2)).mean():.4f})")
 
     clean = t["maxabs_noise"].max(1) <= float(t["loud"])
     h = t["h_norm"]

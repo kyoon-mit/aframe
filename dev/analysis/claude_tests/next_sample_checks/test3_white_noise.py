@@ -16,6 +16,9 @@ the data itself. Per window, with d = h + n:
     mf_signal    d h / |h|
     draw_noise   (n - m) h / |h|, subtracting a random draw m ~ N(0, 1)
     draw_signal  (d - m) h / |h|
+    draw_frac    sig_frac of the leftover d - m
+    draw_amp     (d - m) h / |h|^2
+    draw_shrink  shrink for the leftover d - m, a = |h|^2 / (|h|^2 + 2 samples)
     amp          d h / |h|^2, fitted amplitude of the known template
     shrink       share of the signal's energy recovered by the best guess
                  a d with no template, a = |h|^2 / (|h|^2 + samples), given
@@ -64,7 +67,8 @@ def main():
     config, out = sys.argv[1:3]
     count = int(sys.argv[3]) if len(sys.argv) > 3 else 20000
     keys = ("snr", "snr_label", "peak", "sig_frac", "mf_noise", "mf_signal",
-            "draw_noise", "draw_signal", "amp", "shrink")
+            "draw_noise", "draw_signal", "amp", "shrink", "draw_frac",
+            "draw_amp", "draw_shrink")
     rows = {k: [] for k in keys}
     nll, samples = 0.0, 0
     t0 = time.time()
@@ -83,6 +87,11 @@ def main():
         rows["draw_signal"].append(((d - m) * h).sum((1, 2)) / norm)
         rows["amp"].append((d * h).sum((1, 2)) / e)
         rows["shrink"].append(1 - (a * d - h).square().sum((1, 2)) / e)
+        r = d - m
+        a2 = (e / (e + 2 * size))[:, None, None]
+        rows["draw_frac"].append(e / r.square().sum((1, 2)))
+        rows["draw_amp"].append((r * h).sum((1, 2)) / e)
+        rows["draw_shrink"].append(1 - (a2 * r - h).square().sum((1, 2)) / e)
         nll += float((0.5 * n.square() + 0.5 * np.log(2 * np.pi)).sum())
         samples += n.numel()
         done = sum(len(v) for v in rows["snr"])
