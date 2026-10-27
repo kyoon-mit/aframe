@@ -2229,6 +2229,68 @@
     "epoch": null
    },
    "evidence": "EXTRA (not an inventory row). No checkpoint, no config.yaml in the run folder (train.log and wandb only)."
+  },
+  {
+   "name": "den_reg_mamba2_gaussian_c_rho_5_lambda_amp_3_train_snr8_prob0.96",
+   "folder": "2026-10-26",
+   "updates": [
+    "2026-10-26-subtracting-noise-and-mamba-2"
+   ],
+   "status": "stopped by hand on 26 Oct about 22:06, during epoch 413 (0-based) of 800, to make way for the repeat-10 run; last.ckpt holds epoch 412 (22:05); train log ends 'RuntimeError: DataLoader worker (pid 1493928) is killed by signal: Terminated.'",
+   "description": "Joint Mamba-2 (SSD) denoiser and regressor, 128 wide, 6 layers each, d_state 64, expand 1, headdim 64 (2 heads per layer), dropout 0.2, 811,086 parameters; chirp mass and mass ratio; Gaussian noise with the PSD of the real background; signal probability 0.96; training SNR from 8 (power law -3), 4 repeats per signal, 391 batches per epoch; validation SNR power law -3 from 4.",
+   "checkpoints": [
+    {
+     "file": "CLAUDE-TESTS/y2mc1f8r/checkpoints/den_394.ckpt",
+     "epoch": 394,
+     "loads": true
+    },
+    {
+     "file": "CLAUDE-TESTS/y2mc1f8r/checkpoints/last.ckpt",
+     "epoch": 412,
+     "loads": true
+    }
+   ],
+   "configs": [
+    "/home/kyoon/SSM-BNS/aframe/dev/local/train/claude_tests/gaussian_noise/den_reg_mamba2_gaussian_c_rho_5_lambda_amp_3_train_snr8_prob0.96.yaml",
+    "/home/kyoon/SSM-BNS/aframe/dev/runs/claude_tests/den_reg_mamba2_gaussian_c_rho_5_lambda_amp_3_train_snr8_prob0.96/config.yaml"
+   ],
+   "best": {
+    "metric": "val/within_1pct_chirp_mass",
+    "value": 0.07437,
+    "epoch": 308
+   },
+   "evidence": "CONFIRMED. 26 Oct update, Test 4 (Mamba-2 den-reg in Gaussian noise, checkpoint epoch 412). Best and last values from the wandb history of y2mc1f8r (413 validation epochs; last 0.05609)."
+  },
+  {
+   "name": "den_reg_rep_10_mamba2_gaussian_c_rho_5_lambda_amp_3_train_snr6_prob0.96",
+   "folder": "2026-10-26",
+   "updates": [
+    "2026-10-26-subtracting-noise-and-mamba-2"
+   ],
+   "status": "stopped by hand on 27 Oct about 11:26, during epoch 43 (0-based) of 800, to free its GPU for another user of the machine; last.ckpt holds epoch 42 (10:48, step 42054); train log ends 'RuntimeError: DataLoader worker (pid 1652173) is killed by signal: Terminated.'; resumable from last.ckpt",
+   "description": "Joint Mamba-2 (SSD) denoiser and regressor, 128 wide, 6 layers each, d_state 64, expand 1, headdim 64 (2 heads per layer), dropout 0.2, 811,086 parameters; chirp mass and mass ratio; Gaussian noise with the PSD of the real background; signal probability 0.96; training SNR from 6 (power law -3), 10 repeats per signal, 978 batches per epoch; validation SNR power law -4 from 4.",
+   "checkpoints": [
+    {
+     "file": "CLAUDE-TESTS/eugsf3vi/checkpoints/den_42.ckpt",
+     "epoch": 42,
+     "loads": true
+    },
+    {
+     "file": "CLAUDE-TESTS/eugsf3vi/checkpoints/last.ckpt",
+     "epoch": 42,
+     "loads": true
+    }
+   ],
+   "configs": [
+    "/home/kyoon/SSM-BNS/aframe/dev/local/train/claude_tests/gaussian_noise/den_reg_rep_10_mamba2_gaussian_c_rho_5_lambda_amp_3_train_snr6_prob0.96.yaml",
+    "/home/kyoon/SSM-BNS/aframe/dev/runs/claude_tests/den_reg_rep_10_mamba2_gaussian_c_rho_5_lambda_amp_3_train_snr6_prob0.96/config.yaml"
+   ],
+   "best": {
+    "metric": "val/within_1pct_chirp_mass",
+    "value": 0.02846,
+    "epoch": 41
+   },
+   "evidence": "CONFIRMED. 26 Oct update, 'New runs' (repeat-10 Mamba-2). Best and last values from the wandb history of eugsf3vi (43 validation epochs; last 0.02528)."
   }
  ],
  "extras": [
