@@ -1,0 +1,60 @@
+Chirp-mass accuracy on the same validation windows, eval mode: share within 1% / 2% / 5%
+  SNR 4 to 5, 2835 windows | s4d 0.031 / 0.062 / 0.144 | mamba 0.028 / 0.050 / 0.119
+  SNR 5 to 6, 1551 windows | s4d 0.046 / 0.089 / 0.197 | mamba 0.023 / 0.058 / 0.146
+  SNR 6 to 8, 1576 windows | s4d 0.079 / 0.141 / 0.306 | mamba 0.033 / 0.074 / 0.193
+  SNR 8 to 12, 1033 windows | s4d 0.255 / 0.411 / 0.632 | mamba 0.094 / 0.190 / 0.400
+  SNR 12 to 100, 863 windows | s4d 0.718 / 0.874 / 0.969 | mamba 0.231 / 0.468 / 0.870
+  SNR 8 to 100, 1896 windows | s4d 0.466 / 0.622 / 0.785 | mamba 0.156 / 0.316 / 0.614
+  SNR 4 to 100, 7858 windows | s4d 0.149 / 0.218 / 0.342 | mamba 0.059 / 0.121 / 0.259
+Chirp-mass accuracy on the same validation windows, dropout on, one draw: share within 1% / 2% / 5%
+  SNR 4 to 5, 2835 windows | s4d 0.026 / 0.048 / 0.122 | mamba 0.023 / 0.041 / 0.114
+  SNR 5 to 6, 1551 windows | s4d 0.035 / 0.058 / 0.155 | mamba 0.031 / 0.060 / 0.142
+  SNR 6 to 8, 1576 windows | s4d 0.051 / 0.104 / 0.239 | mamba 0.032 / 0.062 / 0.177
+  SNR 8 to 12, 1033 windows | s4d 0.164 / 0.280 / 0.525 | mamba 0.084 / 0.161 / 0.362
+  SNR 12 to 100, 863 windows | s4d 0.458 / 0.727 / 0.920 | mamba 0.334 / 0.586 / 0.855
+  SNR 8 to 100, 1896 windows | s4d 0.297 / 0.483 / 0.705 | mamba 0.198 / 0.354 / 0.586
+  SNR 4 to 100, 7858 windows | s4d 0.098 / 0.166 / 0.293 | mamba 0.069 / 0.125 / 0.246
+Weights and Biases record, by epoch: validation within 1%, training within 1% (dropout on, SNR 8 to 100), validation overlap rho
+  epoch 9 | s4d 0.023 / 0.015 / 0.102 | mamba2 0.014 / 0.014 / 0.092
+  epoch 49 | s4d 0.038 / 0.065 / 0.158 | mamba2 0.028 / 0.046 / 0.138
+  epoch 99 | s4d 0.057 / 0.137 / 0.172 | mamba2 0.045 / 0.073 / 0.139
+  epoch 199 | s4d 0.099 / 0.204 / 0.193 | mamba2 0.058 / 0.124 / 0.152
+  epoch 299 | s4d 0.112 / 0.240 / 0.192 | mamba2 0.057 / 0.164 / 0.156
+  epoch 399 | s4d 0.117 / 0.275 / 0.196 | mamba2 0.063 / 0.192 / 0.162
+  epoch 411 | s4d 0.125 / 0.274 / 0.196 | mamba2 0.054 / 0.191 / 0.154
+  s4d: last epoch 475, validation within 1% 0.132; best 0.153 at epoch 443
+    epochs 330 to 349: mean within 1%, validation 0.119 (20 epochs), training 0.250 (20 epochs)
+    epochs 456 to 475: mean within 1%, validation 0.132 (20 epochs), training 0.292 (20 epochs)
+  mamba2: last epoch 412, validation within 1% 0.056; best 0.074 at epoch 308
+    epochs 330 to 349: mean within 1%, validation 0.061 (20 epochs), training 0.163 (20 epochs)
+    epochs 393 to 412: mean within 1%, validation 0.060 (20 epochs), training 0.190 (20 epochs)
+s4d: checkpoint epoch 475, denoiser 300,162 numbers, regressor 300,420
+mamba2: checkpoint epoch 412, denoiser 405,414 numbers, regressor 405,672
+S4D denoiser, per layer: modes (channels x tones), share with frequency above 1 Hz, share with 1/e memory above 1 s
+  layer 0: 4096 modes, 0.957, 0.249
+  layer 1: 4096 modes, 0.968, 0.108
+  layer 2: 4096 modes, 0.963, 0.126
+  layer 3: 4096 modes, 0.967, 0.125
+  layer 4: 4096 modes, 0.964, 0.115
+  layer 5: 4096 modes, 0.962, 0.118
+Mamba-2 denoiser, per layer: heads (one real decay rate each), shared B and C width
+  layer 0: 2 heads, inner width 128, one B and one C of size 64
+  layer 1: 2 heads, inner width 128, one B and one C of size 64
+  layer 2: 2 heads, inner width 128, one B and one C of size 64
+  layer 3: 2 heads, inner width 128, one B and one C of size 64
+  layer 4: 2 heads, inner width 128, one B and one C of size 64
+  layer 5: 2 heads, inner width 128, one B and one C of size 64
+Mamba-2 denoiser 1/e memory 1 / (dt A) on the first validation batch, seconds: median and 99th percentile over samples
+  layer 0: head 0 0.6100 / 1.7986, head 1 5.3977 / 12.2445
+  layer 1: head 0 0.0029 / 0.0049, head 1 0.0012 / 0.0020
+  layer 2: head 0 0.2981 / 1.0921, head 1 10.5308 / 35.4918
+  layer 3: head 0 0.1286 / 0.4489, head 1 0.0020 / 0.0031
+  layer 4: head 0 0.2553 / 0.5364, head 1 0.9219 / 1.3909
+  layer 5: head 0 0.0028 / 0.0059, head 1 0.0015 / 0.0028
+Distinct signals: N ~ Binomial(128, 0.96) samples carry a signal, ceil(N / R) distinct ones
+  R = 4: 31.095 per batch, 12,158 per epoch of 391 batches
+    s4d, 476 epochs: 28.9 draws per training waveform, 115.7 noisy copies
+    mamba2, 413 epochs: 25.1 draws per training waveform, 100.4 noisy copies
+  R = 10: 12.858 per batch, 12,575 per epoch of 978 batches
+Validation SNR density x^-3 on [4, 100]: below 6 0.5564, below 8 0.7512
+Validation SNR density x^-4 on [4, 100]: below 6 0.7037, below 8 0.8751

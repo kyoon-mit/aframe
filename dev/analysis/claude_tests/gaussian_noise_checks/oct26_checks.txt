@@ -1,0 +1,5 @@
+1. h^T R^-1 d = 38.3028344102; sum (Lh)(Ld)/E = 38.3028344102; difference 2.8e-14
+2. AR(2) phi = (1.2, -0.5): r_0 = 3.703704, mean S = 3.703704; order-1 error / r_0 = 0.360000, 1 - rho_1^2 = 0.360000; order-2048 error 1.000000, exp(mean log S) = 1.000000, innovation variance 1; predictable share 0.730000
+3. alpha 0.001, 19581 draws: z = 3.0902; threshold mean 3.0821, spread 0.0648 (formula 0.0671); share found at separation 4.2: 0.8665, spread 0.0139 (formula 0.0145)
+4. R = 4: E[ceil(N / R)] = 31.0954, simulated 31.0939
+4. R = 10: E[ceil(N / R)] = 12.8580, simulated 12.8574
