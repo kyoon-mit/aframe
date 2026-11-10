@@ -1,0 +1,24 @@
+1. discrete entropy (nats, bits)
+   fair coin        0.6931 1.0000
+   coin, heads 0.9  0.3251 0.4690
+   fair die         1.7918 2.5850
+2. unit-variance densities: closed form, -mean log p, gap to Gaussian
+   Gaussian 1.4189 1.4189 0.0000
+   Laplace  1.3466 1.3473 0.0724  var 1.0019
+   uniform  1.2425 1.2425 0.1765  var 1.0003
+3. unit Gaussian draws scored by a Gaussian of width 1.5
+   closed form 1.5466, draws 1.5466, entropy 1.4189
+4. x_t = a x_{t-1} + e_t, unit innovation variance
+   a=0.5: variance 1.3333 (mean S 1.3333), Kolmogorov 1.000000, flatness 0.7500 (1-a^2 0.7500), error from 50 past 1.000000
+      simulated: variance 1.3319, fit error 0.9982, I = 0.1442 nats (-0.5 ln(1-a^2) = 0.1438, 0.2075 bits)
+   a=0.9: variance 5.2632 (mean S 5.2632), Kolmogorov 1.000000, flatness 0.1900 (1-a^2 0.1900), error from 50 past 1.000000
+      simulated: variance 5.2742, fit error 1.0000, I = 0.8314 nats (-0.5 ln(1-a^2) = 0.8304, 1.1980 bits)
+   a=0.99: variance 50.2513 (mean S 50.2513), Kolmogorov 1.000000, flatness 0.0199 (1-a^2 0.0199), error from 50 past 1.000000
+      simulated: variance 49.6900, fit error 0.9995, I = 1.9532 nats (-0.5 ln(1-a^2) = 1.9585, 2.8255 bits)
+5. nats per sample from a predictable share s: -0.5 ln(1 - s)
+   H1, infinite past                share 0.2473  0.1420
+   L1, infinite past                share 0.1228  0.0655
+   H1, 20 Hz and above              share 0.1719  0.0943
+   L1, 20 Hz and above              share 0.0403  0.0206
+   raw strain H1, previous sample   share 0.9991  3.4849
+   raw strain L1, previous sample   share 0.9993  3.6617
