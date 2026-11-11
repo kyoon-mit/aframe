@@ -10,12 +10,12 @@ trainer:
   logger:
     class_path: lightning.pytorch.loggers.WandbLogger
     init_args:
-      name: raw_noise_den_reg_whitened
+      name: raw_noise_den_reg_whitened_control
       save_dir: /home/kyoon/SSM-BNS/aframe/dev/runs/claude_tests/raw_noise/den_reg_whitened
       version: null
       offline: false
       dir: null
-      id: raw_noise_den_reg_whitened
+      id: raw_noise_den_reg_whitened_control
       anonymous: null
       project: CLAUDE-TESTS
       log_model: false
