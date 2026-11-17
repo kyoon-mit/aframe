@@ -47,3 +47,29 @@ def prediction_errors(X, psd, sample_rate, length):
     spectrum = torch.fft.rfft(X.double(), n=N) * torch.fft.rfft(taps, n=N)
     errors = torch.fft.irfft(spectrum, n=N)[..., length:]
     return errors.float(), taps[..., 0]
+
+
+
+@torch.no_grad()
+def in_context_errors(x, order, fit_len, last):
+    """Errors of a linear predictor fit on each row's own past.
+
+    For every row of ``x`` (R, N), strain over a constant, x_t is fit on
+    x_{t-1}..x_{t-order} by least squares in float64 over the ``fit_len``
+    samples just before the last ``last``. Returns the errors (R, fit_len +
+    last), float64, divided by the fit's error spread, and that spread (R,).
+    The first ``fit_len`` errors are on the samples the fit saw.
+    """
+    x = x.double()
+    n = fit_len + last
+    lags = x[:, -(n + order) :].unfold(-1, order + 1, 1).flip(-1)
+    fit = lags[:, :fit_len]
+    R = fit.transpose(1, 2) @ fit
+    A, y = R[:, 1:, 1:], R[:, 1:, 0]
+    ridge = 1e-9 * A.diagonal(dim1=1, dim2=2).mean(-1)
+    A = A + ridge[:, None, None] * torch.eye(order, dtype=A.dtype, device=A.device)
+    taps = torch.linalg.solve(A, y)
+    var = (R[:, 0, 0] - (taps * y).sum(-1)) / fit_len
+    errors = lags[..., 0] - (lags[..., 1:] @ taps[..., None])[..., 0]
+    std = var.sqrt()
+    return errors / std[:, None], std
