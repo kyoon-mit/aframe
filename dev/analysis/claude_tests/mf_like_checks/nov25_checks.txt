@@ -1,0 +1,28 @@
+1. ln 2 = 0.693147; on a grid the smallest loss is 0.693147 at p = 0.500000
+2. phase shift (deg), <h_phi, h>/<h, h>, cos(phi):
+      0  +1.000000  +1.000000
+     30  +0.866025  +0.866025
+     60  +0.500000  +0.500000
+     90  +0.000000  +0.000000
+    120  -0.500000  -0.500000
+    180  -1.000000  -1.000000
+3. 200000 waveforms; source-frame chirp mass 0.8500 to 2.7500; counts in ten equal bins: [20075, 20097, 19873, 20124, 19561, 20093, 20104, 20080, 20003, 19990]
+   a_1: 2.556e-07 to 0.4
+   a_2: 1.515e-06 to 0.4
+   tilt_1: 0.003609 to 3.135
+   tilt_2: 0.003767 to 3.135
+   phase: 1.48e-05 to 6.283
+   psi: 7.285e-06 to 3.142
+   theta_jn: 0.001385 to 3.139
+   dec: -1.569 to 1.567
+   ra: 1.668e-05 to 6.283
+4. 1/sqrt(8192) = 0.011049; default nn.Linear weights span -0.011049 to 0.011049
+   one-cycle over 156400 steps: first 4.000e-07, largest 1.000e-05 at step 17985 (0.1150 of the steps), last 4.000e-11; samples 10009600
+5. templates, best AUROC (epoch), loss epoch 0, lowest loss, loss epoch 199, lowest AUROC
+       1  0.5000 (39)  0.7667  0.6960  0.6975  0.4997  [200 validations, 200 epochs]
+       4  0.4999 (0)  0.7937  0.6989  0.7024  0.4999  [200 validations, 200 epochs]
+      16  0.4999 (0)  0.8978  0.7033  0.7072  0.4999  [200 validations, 200 epochs]
+      64  0.4999 (0)  0.9942  0.7152  0.7202  0.4999  [200 validations, 200 epochs]
+     256  0.4999 (0)  1.1525  0.7547  0.7674  0.4999  [200 validations, 200 epochs]
+    1024  0.4999 (0)  1.2619  0.8604  0.8863  0.4999  [200 validations, 200 epochs]
+    4096  0.4999 (0)  1.3468  1.0509  1.0780  0.4999  [200 validations, 200 epochs]
