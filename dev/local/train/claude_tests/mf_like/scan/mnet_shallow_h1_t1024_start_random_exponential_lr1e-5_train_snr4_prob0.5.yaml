@@ -1,0 +1,121 @@
+seed_everything: 20261124
+trainer:
+  max_epochs: 200
+  accelerator: gpu
+  devices: 1
+  check_val_every_n_epoch: 5
+  log_every_n_steps: 50
+  default_root_dir: /home/kyoon/SSM-BNS/aframe/dev/runs/claude_tests/mf_like/scan/mnet_shallow_h1_t1024_start_random_exponential_lr1e-5_train_snr4_prob0.5
+  logger:
+    class_path: lightning.pytorch.loggers.WandbLogger
+    init_args:
+      project: CLAUDE-TESTS
+      name: mnet_shallow_h1_t1024_start_random_exponential_lr1e-5_train_snr4_prob0.5
+      id: mnet_shallow_h1_t1024_start_random_exponential_lr1e-5_train_snr4_prob0.5
+      save_dir: /home/kyoon/SSM-BNS/aframe/dev/runs/claude_tests/mf_like/scan/mnet_shallow_h1_t1024_start_random_exponential_lr1e-5_train_snr4_prob0.5
+  callbacks:
+  - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+    init_args:
+      monitor: validation/TimeSlideAUROC
+      mode: max
+      save_top_k: 1
+      save_last: true
+      filename: ck_{epoch:02d}
+      auto_insert_metric_name: false
+  - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+    init_args:
+      logging_interval: epoch
+model:
+  class_path: train.experimental.mf_like.task.MFLikeDetector
+  init_args:
+    arch:
+      class_path: train.experimental.mf_like.arch.MNetShallow
+      init_args:
+        d_input: 8192
+        num_templates: 1024
+        bias: true
+    metric:
+      class_path: train.metrics.TimeSlideAUROC
+      init_args:
+        max_fpr: 1e-3
+        pool_length: 50
+    learning_rate: 1.0e-05
+    pct_lr_ramp: 0.115
+    weight_decay: 0.0
+    template_file: null
+    lr_scheduler_interval: epoch
+    lr_scheduler:
+      class_path: torch.optim.lr_scheduler.ExponentialLR
+      init_args:
+        gamma: 0.95
+data:
+  class_path: train.data.supervised.TimeDomainSupervisedAframeDataset
+  init_args:
+    background_dir: /home/kyoon/SSM-BNS/DATA/O3a_H1_L1_2048Hz
+    waveforms_dir: /home/kyoon/SSM-BNS/DATA/aframe/train
+    ifos:
+    - H1
+    sample_rate: 2048.0
+    kernel_length: 4.0
+    left_pad: 3.5
+    right_pad: 0.0
+    batch_size: 64
+    batches_per_epoch: 782
+    chunk_size: 2000
+    chunks_per_epoch: 25
+    num_files_per_batch: 1
+    fduration: 1.0
+    fftlength: 2.0
+    psd_length: 20.0
+    highpass: 20.0
+    waveform_prob: 0.5
+    swap_prob: 0.0
+    mute_prob: 0.0
+    max_num_workers: 4
+    num_valid_views: 4
+    valid_stride: 25.0
+    valid_livetime: 210000.0
+    snr_sampler:
+      class_path: train.augmentations.SnrSampler
+      init_args:
+        constant_params:
+          index: -3
+          maximum: 100.0
+        start_params:
+          minimum: 4.0
+        end_params:
+          minimum: 4.0
+        decay_steps: 1
+        distribution: ml4gw.distributions.PowerLaw
+    val_snr_sampler:
+      class_path: train.augmentations.SnrSampler
+      init_args:
+        constant_params:
+          index: -3
+          maximum: 100.0
+        start_params:
+          minimum: 4.0
+        end_params:
+          minimum: 4.0
+        decay_steps: 1
+        distribution: ml4gw.distributions.PowerLaw
+    waveform_sampler:
+      class_path: train.data.waveforms.WaveformLoader
+      init_args:
+        training_waveform_path: /home/kyoon/SSM-BNS/DATA/aframe/train/end_o3_ratesandpops_bns_uniform_chirp.hdf5
+        val_waveform_file: /home/kyoon/SSM-BNS/DATA/aframe/val/end_o3_ratesandpops_bns_snr4.hdf5
+        num_val_waveforms: 8192
+    dec:
+      class_path: ml4gw.distributions.Cosine
+    psi:
+      class_path: torch.distributions.Uniform
+      init_args:
+        low: 0.0
+        high: 3.14159
+        validate_args: false
+    phi:
+      class_path: torch.distributions.Uniform
+      init_args:
+        low: -3.14159
+        high: 3.14159
+        validate_args: false
